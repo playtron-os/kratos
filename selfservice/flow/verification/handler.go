@@ -442,42 +442,43 @@ func (h *Handler) updateVerificationFlow(w http.ResponseWriter, r *http.Request,
 	}
 
 	if x.IsBrowserRequest(r) {
+		// Commented out because we do not want to redirect to new oauth flow after verifying email
 		// Special case: If we ended up here through a OAuth2 login challenge, we need to accept the login request
 		// and redirect back to the OAuth2 provider.
-		if flow.HasReachedState(flow.StatePassedChallenge, f.State) && f.OAuth2LoginChallenge.String() != "" {
-			if !f.IdentityID.Valid || !f.SessionID.Valid {
-				h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup,
-					herodot.ErrBadRequest.WithReasonf("No session was found for this flow. Please retry the authentication."))
-				return
-			}
+		// if flow.HasReachedState(flow.StatePassedChallenge, f.State) && f.OAuth2LoginChallenge.String() != "" {
+		// 	if !f.IdentityID.Valid || !f.SessionID.Valid {
+		// 		h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup,
+		// 			herodot.ErrBadRequest.WithReasonf("No session was found for this flow. Please retry the authentication."))
+		// 		return
+		// 	}
 
-			callbackURL, err := h.d.Hydra().AcceptLoginRequest(ctx,
-				hydra.AcceptLoginRequestParams{
-					LoginChallenge:        string(f.OAuth2LoginChallenge),
-					IdentityID:            f.IdentityID.UUID.String(),
-					SessionID:             f.SessionID.UUID.String(),
-					AuthenticationMethods: f.AMR,
-				})
-			if err != nil {
-				h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, err)
-				return
-			}
+		// 	callbackURL, err := h.d.Hydra().AcceptLoginRequest(ctx,
+		// 		hydra.AcceptLoginRequestParams{
+		// 			LoginChallenge:        string(f.OAuth2LoginChallenge),
+		// 			IdentityID:            f.IdentityID.UUID.String(),
+		// 			SessionID:             f.SessionID.UUID.String(),
+		// 			AuthenticationMethods: f.AMR,
+		// 		})
+		// 	if err != nil {
+		// 		h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, err)
+		// 		return
+		// 	}
 
-			sess, err := h.d.SessionPersister().GetSession(ctx, f.SessionID.UUID, session.ExpandDefault)
-			if err != nil {
-				h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, err)
-				return
-			}
+		// 	sess, err := h.d.SessionPersister().GetSession(ctx, f.SessionID.UUID, session.ExpandDefault)
+		// 	if err != nil {
+		// 		h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, err)
+		// 		return
+		// 	}
 
-			err = h.d.SessionManager().IssueCookie(ctx, w, r, sess)
-			if err != nil {
-				h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, err)
-				return
-			}
+		// 	err = h.d.SessionManager().IssueCookie(ctx, w, r, sess)
+		// 	if err != nil {
+		// 		h.d.VerificationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, err)
+		// 		return
+		// 	}
 
-			http.Redirect(w, r, callbackURL, http.StatusSeeOther)
-			return
-		}
+		// 	http.Redirect(w, r, callbackURL, http.StatusSeeOther)
+		// 	return
+		// }
 
 		http.Redirect(w, r, f.AppendTo(h.d.Config().SelfServiceFlowVerificationUI(ctx)).String(), http.StatusSeeOther)
 		return
