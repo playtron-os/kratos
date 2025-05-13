@@ -140,6 +140,8 @@ type RegistryDefault struct {
 
 	selfserviceLogoutHandler *logout.Handler
 
+	hydraHandler *hydra.Handler
+
 	selfserviceStrategies            []any
 	replacementSelfserviceStrategies []NewStrategy
 
@@ -186,6 +188,8 @@ func (m *RegistryDefault) RegisterPublicRoutes(ctx context.Context, router *x.Ro
 
 	m.VerificationHandler().RegisterPublicRoutes(router)
 	m.AllVerificationStrategies().RegisterPublicRoutes(router)
+
+	m.HydraHandler().RegisterPublicRoutes(router)
 
 	m.HealthHandler(ctx).SetHealthRoutes(router.Router, false)
 }

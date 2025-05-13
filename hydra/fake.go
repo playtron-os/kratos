@@ -59,3 +59,7 @@ func (h *FakeHydra) GetLoginRequest(_ context.Context, loginChallenge string) (*
 		panic("unknown fake login_challenge " + loginChallenge)
 	}
 }
+
+func (h *FakeHydra) ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64) (string, error) {
+	return "", nil
+}

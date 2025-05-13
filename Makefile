@@ -10,7 +10,7 @@ export PWD                := $(shell pwd)
 export BUILD_DATE         := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 export VCS_REF            := $(shell git rev-parse HEAD)
 export QUICKSTART_OPTIONS ?= ""
-export IMAGE_TAG 					:= $(if $(IMAGE_TAG),$(IMAGE_TAG),latest)
+export IMAGE_TAG 					:= $(if $(IMAGE_TAG),$(IMAGE_TAG),v1.1.0-2)
 
 GO_DEPENDENCIES = github.com/ory/go-acc \
 				  github.com/golang/mock/mockgen \
@@ -155,8 +155,8 @@ quickstart:
 
 .PHONY: quickstart-dev
 quickstart-dev:
-	docker build -f .docker/Dockerfile-build -t oryd/kratos:latest .
-	docker-compose -f quickstart.yml -f quickstart-standalone.yml -f quickstart-latest.yml $(QUICKSTART_OPTIONS) up --build --force-recreate
+	docker build -f .docker/Dockerfile-build -t playtron/kratos:${IMAGE_TAG} .
+	docker-compose -f quickstart.yml -f quickstart-standalone.yml -f quickstart-latest.yml up --build --force-recreate
 
 authors:  # updates the AUTHORS file
 	curl https://raw.githubusercontent.com/ory/ci/master/authors/authors.sh | env PRODUCT="Ory Kratos" bash
@@ -172,7 +172,13 @@ format: .bin/goimports .bin/ory node_modules
 # Build local docker image
 .PHONY: docker
 docker:
-	DOCKER_BUILDKIT=1 DOCKER_CONTENT_TRUST=1 docker build -f .docker/Dockerfile-build --build-arg=COMMIT=$(VCS_REF) --build-arg=BUILD_DATE=$(BUILD_DATE) -t oryd/kratos:${IMAGE_TAG} .
+	DOCKER_BUILDKIT=1 DOCKER_CONTENT_TRUST=1 docker buildx build \
+	--platform=linux/amd64 \
+	-f .docker/Dockerfile-build \
+	--build-arg=COMMIT=$(VCS_REF) \
+	--build-arg=BUILD_DATE=$(BUILD_DATE) \
+	-t playtron/kratos:${IMAGE_TAG} \
+	.
 
 .PHONY: test-e2e
 test-e2e: node_modules test-resetdb kratos-config-e2e

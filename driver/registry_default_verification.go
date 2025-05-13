@@ -10,6 +10,7 @@ import (
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/hydra"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/selfservice/flow/verification"
 	"github.com/ory/kratos/selfservice/strategy/link"
@@ -41,6 +42,14 @@ func (m *RegistryDefault) VerificationHandler() *verification.Handler {
 	}
 
 	return m.selfserviceVerifyHandler
+}
+
+func (m *RegistryDefault) HydraHandler() *hydra.Handler {
+	if m.hydraHandler == nil {
+		m.hydraHandler = hydra.NewHandler(m)
+	}
+
+	return m.hydraHandler
 }
 
 func (m *RegistryDefault) LinkSender() *link.Sender {

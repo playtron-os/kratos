@@ -4,7 +4,10 @@
 package hydra
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -37,6 +40,7 @@ type (
 	Hydra interface {
 		AcceptLoginRequest(ctx context.Context, params AcceptLoginRequestParams) (string, error)
 		GetLoginRequest(ctx context.Context, loginChallenge string) (*hydraclientgo.OAuth2LoginRequest, error)
+		ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64) (string, error)
 	}
 	DefaultHydra struct {
 		d hydraDependencies
@@ -170,4 +174,56 @@ func (h *DefaultHydra) GetLoginRequest(ctx context.Context, loginChallenge strin
 	}
 
 	return hlr, nil
+}
+
+func (h *DefaultHydra) ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64) (string, error) {
+	type requestBody struct {
+		Subject  string                 `json:"subject"`
+		ClientID string                 `json:"client_id"`
+		Extra    map[string]interface{} `json:"extra,omitempty"`
+		Exp      int64                  `json:"exp,omitempty"` // optional expiration override
+	}
+
+	reqData := requestBody{
+		Subject:  subject,
+		ClientID: clientID,
+		Exp:      expiresInSeconds,
+	}
+
+	bodyBytes, err := json.Marshal(reqData)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode request: %w", err)
+	}
+
+	hydraAdminURL, err := h.getAdminURL(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to hydra admin url: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), "POST", fmt.Sprintf("%s/admin/sessions/token", hydraAdminURL), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Optional: configure HTTP client with timeout
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request to hydra failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("hydra responded with status: %s", resp.Status)
+	}
+
+	var parsed struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return parsed.Token, nil
 }
