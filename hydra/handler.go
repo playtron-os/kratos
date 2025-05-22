@@ -53,17 +53,15 @@ func (h *Handler) RegisterPublicRoutes(router *x.RouterPublic) {
 	router.GET(RouteExchangeToken, h.exchangeToken)
 }
 
-type ExchangeTokenRequest struct {
-	ClientID string `json:"client_id"`
-}
-
 func (h *Handler) exchangeToken(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	ctx, span := h.r.Tracer(r.Context()).Tracer().Start(r.Context(), "hydra.Handler.exchangeToken")
 	defer span.End()
 
-	clientId := r.URL.Query().Get("client_id")
-	if clientId == "" {
-		h.r.Writer().WriteError(w, r, errorsx.WithStack(herodot.ErrBadRequest.WithReason("client_id are required")))
+	clientID := r.URL.Query().Get("client_id")
+	nonce := r.URL.Query().Get("nonce")
+
+	if clientID == "" {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(herodot.ErrBadRequest.WithReason("client_id is required")))
 		return
 	}
 
@@ -92,7 +90,7 @@ func (h *Handler) exchangeToken(w http.ResponseWriter, r *http.Request, _ httpro
 	// s.Devices = nil
 	s.Identity = s.Identity.CopyWithoutCredentials()
 
-	jwt, err := h.r.Hydra().ExchangeTokenForHydraJWT(ctx, s.Identity.ID.String(), clientId, s.ExpiresAt.Unix())
+	jwt, err := h.r.Hydra().ExchangeTokenForHydraJWT(ctx, s.Identity.ID.String(), clientID, s.ExpiresAt.Unix(), nonce)
 	if err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return

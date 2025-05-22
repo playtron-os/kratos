@@ -60,6 +60,6 @@ func (h *FakeHydra) GetLoginRequest(_ context.Context, loginChallenge string) (*
 	}
 }
 
-func (h *FakeHydra) ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64) (string, error) {
+func (h *FakeHydra) ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64, nonce string) (string, error) {
 	return "", nil
 }

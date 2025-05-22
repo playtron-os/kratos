@@ -10,7 +10,7 @@ export PWD                := $(shell pwd)
 export BUILD_DATE         := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 export VCS_REF            := $(shell git rev-parse HEAD)
 export QUICKSTART_OPTIONS ?= ""
-export IMAGE_TAG 					:= $(if $(IMAGE_TAG),$(IMAGE_TAG),v1.1.0-2)
+export IMAGE_TAG 					:= $(if $(IMAGE_TAG),$(IMAGE_TAG),v1.1.0-3)
 
 GO_DEPENDENCIES = github.com/ory/go-acc \
 				  github.com/golang/mock/mockgen \

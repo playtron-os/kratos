@@ -40,7 +40,7 @@ type (
 	Hydra interface {
 		AcceptLoginRequest(ctx context.Context, params AcceptLoginRequestParams) (string, error)
 		GetLoginRequest(ctx context.Context, loginChallenge string) (*hydraclientgo.OAuth2LoginRequest, error)
-		ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64) (string, error)
+		ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64, nonce string) (string, error)
 	}
 	DefaultHydra struct {
 		d hydraDependencies
@@ -176,18 +176,32 @@ func (h *DefaultHydra) GetLoginRequest(ctx context.Context, loginChallenge strin
 	return hlr, nil
 }
 
-func (h *DefaultHydra) ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64) (string, error) {
+func (h *DefaultHydra) ExchangeTokenForHydraJWT(
+	ctx context.Context,
+	subject, clientID string,
+	expiresInSeconds int64,
+	nonce string,
+) (string, error) {
 	type requestBody struct {
 		Subject  string                 `json:"subject"`
 		ClientID string                 `json:"client_id"`
 		Extra    map[string]interface{} `json:"extra,omitempty"`
-		Exp      int64                  `json:"exp,omitempty"` // optional expiration override
+		Exp      int64                  `json:"exp,omitempty"`
+	}
+
+	extra := map[string]interface{}{}
+	if nonce != "" {
+		extra["nonce"] = nonce
 	}
 
 	reqData := requestBody{
 		Subject:  subject,
 		ClientID: clientID,
 		Exp:      expiresInSeconds,
+	}
+
+	if len(extra) > 0 {
+		reqData.Extra = extra
 	}
 
 	bodyBytes, err := json.Marshal(reqData)
@@ -197,16 +211,15 @@ func (h *DefaultHydra) ExchangeTokenForHydraJWT(ctx context.Context, subject, cl
 
 	hydraAdminURL, err := h.getAdminURL(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to hydra admin url: %w", err)
+		return "", fmt.Errorf("failed to get hydra admin url: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", fmt.Sprintf("%s/admin/sessions/token", hydraAdminURL), bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/admin/sessions/token", hydraAdminURL), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Optional: configure HTTP client with timeout
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
