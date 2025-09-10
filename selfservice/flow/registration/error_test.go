@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/ory/kratos/driver/config"
 
 	"github.com/gofrs/uuid"
@@ -18,7 +20,7 @@ import (
 	"github.com/ory/kratos/ui/node"
 
 	"github.com/gobuffalo/httptest"
-	"github.com/julienschmidt/httprouter"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -46,7 +48,7 @@ func TestHandleError(t *testing.T) {
 
 	public, _ := testhelpers.NewKratosServer(t, reg)
 
-	router := httprouter.New()
+	router := http.NewServeMux()
 	ts := httptest.NewServer(router)
 	t.Cleanup(ts.Close)
 
@@ -59,7 +61,7 @@ func TestHandleError(t *testing.T) {
 	var registrationFlow *registration.Flow
 	var flowError error
 	var group node.UiNodeGroup
-	router.GET("/error", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	router.HandleFunc("GET /error", func(w http.ResponseWriter, r *http.Request) {
 		h.WriteFlowError(w, r, registrationFlow, group, flowError)
 	})
 
@@ -74,7 +76,21 @@ func TestHandleError(t *testing.T) {
 		f, err := registration.NewFlow(conf, ttl, "csrf_token", req, ft)
 		require.NoError(t, err)
 		for _, s := range reg.RegistrationStrategies(context.Background()) {
-			require.NoError(t, s.PopulateRegistrationMethod(req, f))
+			var populateErr error
+			switch strategy := s.(type) {
+			case registration.FormHydrator:
+				switch {
+				case conf.SelfServiceFlowRegistrationTwoSteps(ctx):
+					populateErr = strategy.PopulateRegistrationMethodProfile(req, f)
+				default:
+					populateErr = strategy.PopulateRegistrationMethod(req, f)
+				}
+			case registration.UnifiedFormHydrator:
+				populateErr = strategy.PopulateRegistrationMethod(req, f)
+			default:
+				populateErr = errors.WithStack(x.PseudoPanic.WithReasonf("A registration strategy was expected to implement one of the interfaces UnifiedFormHydrator or FormHydrator but did not."))
+			}
+			require.NoError(t, populateErr)
 		}
 
 		require.NoError(t, reg.RegistrationFlowPersister().CreateRegistrationFlow(context.Background(), f))
@@ -87,7 +103,7 @@ func TestHandleError(t *testing.T) {
 		defer res.Body.Close()
 		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
-		sse, _, err := sdk.FrontendApi.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
+		sse, _, err := sdk.FrontendAPI.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
 		require.NoError(t, err)
 
 		return sse.Error, nil

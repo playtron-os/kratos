@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
+	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/kratos/x/redir"
+
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 
@@ -43,9 +45,9 @@ type (
 	PostHookPrePersistExecutorFunc func(w http.ResponseWriter, r *http.Request, a *Flow, i *identity.Identity) error
 
 	HooksProvider interface {
-		PreRegistrationHooks(ctx context.Context) []PreHookExecutor
-		PostRegistrationPrePersistHooks(ctx context.Context, credentialsType identity.CredentialsType) []PostHookPrePersistExecutor
-		PostRegistrationPostPersistHooks(ctx context.Context, credentialsType identity.CredentialsType) []PostHookPostPersistExecutor
+		PreRegistrationHooks(ctx context.Context) ([]PreHookExecutor, error)
+		PostRegistrationPrePersistHooks(ctx context.Context, credentialsType identity.CredentialsType) ([]PostHookPrePersistExecutor, error)
+		PostRegistrationPostPersistHooks(ctx context.Context, credentialsType identity.CredentialsType) ([]PostHookPostPersistExecutor, error)
 	}
 )
 
@@ -82,7 +84,7 @@ type (
 		HooksProvider
 		FlowPersistenceProvider
 		hydra.Provider
-		x.CSRFTokenGeneratorProvider
+		nosurfx.CSRFTokenGeneratorProvider
 		x.HTTPClientProvider
 		x.LoggingProvider
 		x.WriterProvider
@@ -101,7 +103,7 @@ func NewHookExecutor(d executorDependencies) *HookExecutor {
 	return &HookExecutor{d: d}
 }
 
-func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Request, ct identity.CredentialsType, provider string, registrationFlow *Flow, i *identity.Identity) (err error) {
+func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Request, ct identity.CredentialsType, provider, organizationID string, registrationFlow *Flow, i *identity.Identity) (err error) {
 	ctx := r.Context()
 	ctx, span := e.d.Tracer(ctx).Tracer().Start(ctx, "HookExecutor.PostRegistrationHook")
 	r = r.WithContext(ctx)
@@ -112,14 +114,18 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 		WithField("identity_id", i.ID).
 		WithField("flow_method", ct).
 		Debug("Running PostRegistrationPrePersistHooks.")
-	for k, executor := range e.d.PostRegistrationPrePersistHooks(r.Context(), ct) {
+	preHooks, err := e.d.PostRegistrationPrePersistHooks(ctx, ct)
+	if err != nil {
+		return err
+	}
+	for k, executor := range preHooks {
 		if err := executor.ExecutePostRegistrationPrePersistHook(w, r, registrationFlow, i); err != nil {
 			if errors.Is(err, ErrHookAbortFlow) {
 				e.d.Logger().
 					WithRequest(r).
 					WithField("executor", fmt.Sprintf("%T", executor)).
 					WithField("executor_position", k).
-					WithField("executors", ExecutorNames(e.d.PostRegistrationPrePersistHooks(r.Context(), ct))).
+					WithField("executors", ExecutorNames(preHooks)).
 					WithField("identity_id", i.ID).
 					WithField("flow_method", ct).
 					Debug("A ExecutePostRegistrationPrePersistHook hook aborted early.")
@@ -130,7 +136,7 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 				WithRequest(r).
 				WithField("executor", fmt.Sprintf("%T", executor)).
 				WithField("executor_position", k).
-				WithField("executors", ExecutorNames(e.d.PostRegistrationPrePersistHooks(r.Context(), ct))).
+				WithField("executors", ExecutorNames(preHooks)).
 				WithField("identity_id", i.ID).
 				WithField("flow_method", ct).
 				WithError(err).
@@ -143,36 +149,37 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 		e.d.Logger().WithRequest(r).
 			WithField("executor", fmt.Sprintf("%T", executor)).
 			WithField("executor_position", k).
-			WithField("executors", ExecutorNames(e.d.PostRegistrationPrePersistHooks(r.Context(), ct))).
+			WithField("executors", ExecutorNames(preHooks)).
 			WithField("identity_id", i.ID).
 			WithField("flow_method", ct).
 			Debug("ExecutePostRegistrationPrePersistHook completed successfully.")
 	}
 
 	// We need to make sure that the identity has a valid schema before passing it down to the identity pool.
-	if err := e.d.IdentityValidator().Validate(r.Context(), i); err != nil {
+	if err := e.d.IdentityValidator().Validate(ctx, i); err != nil {
 		return err
-		// We're now creating the identity because any of the hooks could trigger a "redirect" or a "session" which
-		// would imply that the identity has to exist already.
-	} else if err := e.d.IdentityManager().Create(r.Context(), i); err != nil {
+	}
+	// We're now creating the identity because any of the hooks could trigger a "redirect" or a "session" which
+	// would imply that the identity has to exist already.
+	if err := e.d.IdentityManager().Create(ctx, i); err != nil {
 		if errors.Is(err, sqlcon.ErrUniqueViolation) {
 			strategy, err := e.d.AllLoginStrategies().Strategy(ct)
 			if err != nil {
 				return err
 			}
 
-			if _, ok := strategy.(login.LinkableStrategy); ok {
-				duplicateIdentifier, err := e.getDuplicateIdentifier(r.Context(), i)
+			if strategy, ok := strategy.(login.LinkableStrategy); ok {
+				duplicateIdentifier, err := e.getDuplicateIdentifier(ctx, i)
 				if err != nil {
 					return err
 				}
-				registrationDuplicateCredentials := flow.DuplicateCredentialsData{
-					CredentialsType:     ct,
-					CredentialsConfig:   i.Credentials[ct].Config,
-					DuplicateIdentifier: duplicateIdentifier,
-				}
 
-				if err := flow.SetDuplicateCredentials(registrationFlow, registrationDuplicateCredentials); err != nil {
+				if err := strategy.SetDuplicateCredentials(
+					registrationFlow,
+					duplicateIdentifier,
+					i.Credentials[ct],
+					provider,
+				); err != nil {
 					return err
 				}
 			}
@@ -180,42 +187,50 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 		return err
 	}
 
+	// At this point the identity is already created and will not be rolled back, so
+	// we want all PostPersist hooks to be able to continue even when the client cancels the request.
+	ctx = context.WithoutCancel(ctx)
+	r = r.WithContext(ctx)
+
 	// Verify the redirect URL before we do any other processing.
 	c := e.d.Config()
-	returnTo, err := x.SecureRedirectTo(r, c.SelfServiceBrowserDefaultReturnTo(r.Context()),
-		x.SecureRedirectReturnTo(registrationFlow.ReturnTo),
-		x.SecureRedirectUseSourceURL(registrationFlow.RequestURL),
-		x.SecureRedirectAllowURLs(c.SelfServiceBrowserAllowedReturnToDomains(r.Context())),
-		x.SecureRedirectAllowSelfServiceURLs(c.SelfPublicURL(r.Context())),
-		x.SecureRedirectOverrideDefaultReturnTo(c.SelfServiceFlowRegistrationReturnTo(r.Context(), ct.String())),
+	returnTo, err := redir.SecureRedirectTo(r, c.SelfServiceBrowserDefaultReturnTo(ctx),
+		redir.SecureRedirectReturnTo(registrationFlow.ReturnTo),
+		redir.SecureRedirectUseSourceURL(registrationFlow.RequestURL),
+		redir.SecureRedirectAllowURLs(c.SelfServiceBrowserAllowedReturnToDomains(ctx)),
+		redir.SecureRedirectAllowSelfServiceURLs(c.SelfPublicURL(ctx)),
+		redir.SecureRedirectOverrideDefaultReturnTo(c.SelfServiceFlowRegistrationReturnTo(ctx, ct.String())),
 	)
 	if err != nil {
 		return err
 	}
+
 	span.SetAttributes(otelx.StringAttrs(map[string]string{
 		"return_to":       returnTo.String(),
-		"flow_type":       string(flow.TypeBrowser),
+		"flow_type":       string(registrationFlow.Type),
 		"redirect_reason": "registration successful",
 	})...)
+
+	if registrationFlow.Type == flow.TypeBrowser && x.IsJSONRequest(r) {
+		registrationFlow.AddContinueWith(flow.NewContinueWithRedirectBrowserTo(returnTo.String()))
+	}
 
 	e.d.Audit().
 		WithRequest(r).
 		WithField("identity_id", i.ID).
 		Info("A new identity has registered using self-service registration.")
 
-	span.AddEvent(events.NewRegistrationSucceeded(r.Context(), i.ID, string(registrationFlow.Type), registrationFlow.Active.String(), provider))
+	span.AddEvent(events.NewRegistrationSucceeded(ctx, registrationFlow.ID, i.ID, string(registrationFlow.Type), registrationFlow.Active.String(), provider))
 
 	s := session.NewInactiveSession()
 
-	s.CompletedLoginForWithProvider(ct, identity.AuthenticatorAssuranceLevel1, provider,
-		httprouter.ParamsFromContext(r.Context()).ByName("organization"))
-	if err := s.Activate(r, i, c, time.Now().UTC()); err != nil {
+	s.CompletedLoginForWithProvider(ct, identity.AuthenticatorAssuranceLevel1, provider, organizationID)
+	if err := e.d.SessionManager().ActivateSession(r, s, i, time.Now().UTC()); err != nil {
 		return err
 	}
 
 	// We persist the session here so that subsequent hooks (like verification) can use it.
-	s.AuthenticatedAt = time.Now().UTC()
-	if err := e.d.SessionPersister().UpsertSession(r.Context(), s); err != nil {
+	if err := e.d.SessionPersister().UpsertSession(ctx, s); err != nil {
 		return err
 	}
 
@@ -224,14 +239,18 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 		WithField("identity_id", i.ID).
 		WithField("flow_method", ct).
 		Debug("Running PostRegistrationPostPersistHooks.")
-	for k, executor := range e.d.PostRegistrationPostPersistHooks(r.Context(), ct) {
+	postHooks, err := e.d.PostRegistrationPostPersistHooks(ctx, ct)
+	if err != nil {
+		return err
+	}
+	for k, executor := range postHooks {
 		if err := executor.ExecutePostRegistrationPostPersistHook(w, r, registrationFlow, s); err != nil {
 			if errors.Is(err, ErrHookAbortFlow) {
 				e.d.Logger().
 					WithRequest(r).
 					WithField("executor", fmt.Sprintf("%T", executor)).
 					WithField("executor_position", k).
-					WithField("executors", ExecutorNames(e.d.PostRegistrationPostPersistHooks(r.Context(), ct))).
+					WithField("executors", ExecutorNames(postHooks)).
 					WithField("identity_id", i.ID).
 					WithField("flow_method", ct).
 					Debug("A ExecutePostRegistrationPostPersistHook hook aborted early.")
@@ -245,7 +264,7 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 				WithRequest(r).
 				WithField("executor", fmt.Sprintf("%T", executor)).
 				WithField("executor_position", k).
-				WithField("executors", ExecutorNames(e.d.PostRegistrationPostPersistHooks(r.Context(), ct))).
+				WithField("executors", ExecutorNames(postHooks)).
 				WithField("identity_id", i.ID).
 				WithField("flow_method", ct).
 				WithError(err).
@@ -260,7 +279,7 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 		e.d.Logger().WithRequest(r).
 			WithField("executor", fmt.Sprintf("%T", executor)).
 			WithField("executor_position", k).
-			WithField("executors", ExecutorNames(e.d.PostRegistrationPostPersistHooks(r.Context(), ct))).
+			WithField("executors", ExecutorNames(postHooks)).
 			WithField("identity_id", i.ID).
 			WithField("flow_method", ct).
 			Debug("ExecutePostRegistrationPostPersistHook completed successfully.")
@@ -298,7 +317,7 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 			// redirect to the verification URL first and then return to Hydra.
 			finalReturnTo = registrationFlow.ReturnToVerification
 		} else {
-			callbackURL, err := e.d.Hydra().AcceptLoginRequest(r.Context(),
+			callbackURL, err := e.d.Hydra().AcceptLoginRequest(ctx,
 				hydra.AcceptLoginRequestParams{
 					LoginChallenge:        string(registrationFlow.OAuth2LoginChallenge),
 					IdentityID:            i.ID.String(),
@@ -317,12 +336,12 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 	}
 	span.SetAttributes(attribute.String("return_to", finalReturnTo))
 
-	x.ContentNegotiationRedirection(w, r, s.Declassified(), e.d.Writer(), finalReturnTo)
+	redir.ContentNegotiationRedirection(w, r, s.Declassified(), e.d.Writer(), finalReturnTo)
 	return nil
 }
 
 func (e *HookExecutor) getDuplicateIdentifier(ctx context.Context, i *identity.Identity) (string, error) {
-	_, id, err := e.d.IdentityManager().ConflictingIdentity(ctx, i)
+	_, id, _, err := e.d.IdentityManager().ConflictingIdentity(ctx, i)
 	if err != nil {
 		return "", err
 	}
@@ -330,7 +349,11 @@ func (e *HookExecutor) getDuplicateIdentifier(ctx context.Context, i *identity.I
 }
 
 func (e *HookExecutor) PreRegistrationHook(w http.ResponseWriter, r *http.Request, a *Flow) error {
-	for _, executor := range e.d.PreRegistrationHooks(r.Context()) {
+	hooks, err := e.d.PreRegistrationHooks(r.Context())
+	if err != nil {
+		return err
+	}
+	for _, executor := range hooks {
 		if err := executor.ExecuteRegistrationPreHook(w, r, a); err != nil {
 			return err
 		}

@@ -37,7 +37,7 @@ export const assertRecoveryAddress =
     expect(address.value).to.equal(email)
   }
 
-export const parseHtml = (html) =>
+export const parseHtml = (html: string) =>
   new DOMParser().parseFromString(html, "text/html")
 
 export const APP_URL = (
@@ -95,7 +95,7 @@ export const appPrefix = (app) => `[data-testid="app-${app}"] `
 
 export const codeRegex = /(\d{6})/
 
-export function extractRecoveryCode(body: string): string | null {
+export function extractOTPCode(body: string): string | null {
   const result = codeRegex.exec(body)
   if (result != null && result.length > 0) {
     return result[0]

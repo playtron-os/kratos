@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ory/kratos/x/nosurfx"
+
 	"github.com/gofrs/uuid"
 
 	"github.com/ory/kratos/corpx"
@@ -41,20 +43,20 @@ func TestHandlerRedirectOnAuthenticated(t *testing.T) {
 	conf, reg := internal.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryEnabled, true)
 
-	router := x.NewRouterPublic()
-	ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin())
+	router := x.NewRouterPublic(reg)
+	ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
 
 	redirTS := testhelpers.NewRedirTS(t, "already authenticated", conf)
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
 
 	t.Run("does redirect to default on authenticated request", func(t *testing.T) {
-		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router.Router, testhelpers.NewTestHTTPRequest(t, "GET", ts.URL+recovery.RouteInitBrowserFlow, nil))
+		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router, testhelpers.NewTestHTTPRequest(t, "GET", ts.URL+recovery.RouteInitBrowserFlow, nil))
 		assert.Contains(t, res.Request.URL.String(), redirTS.URL, "%+v", res)
 		assert.EqualValues(t, "already authenticated", string(body))
 	})
 
 	t.Run("does redirect to default on authenticated request", func(t *testing.T) {
-		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router.Router, testhelpers.NewTestHTTPRequest(t, "GET", ts.URL+recovery.RouteInitAPIFlow, nil))
+		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router, testhelpers.NewTestHTTPRequest(t, "GET", ts.URL+recovery.RouteInitAPIFlow, nil))
 		assert.Contains(t, res.Request.URL.String(), recovery.RouteInitAPIFlow)
 		assert.EqualValues(t, text.ErrIDAlreadyLoggedIn, gjson.GetBytes(body, "error.id").Str)
 		assertx.EqualAsJSON(t, recovery.ErrAlreadyLoggedIn, json.RawMessage(gjson.GetBytes(body, "error").Raw))
@@ -70,8 +72,8 @@ func TestInitFlow(t *testing.T) {
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+"."+string(recovery.RecoveryStrategyCode),
 		map[string]interface{}{"enabled": true})
 
-	router := x.NewRouterPublic()
-	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin())
+	router := x.NewRouterPublic(reg)
+	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
 	recoveryTS := testhelpers.NewRecoveryUIFlowEchoServer(t, reg)
 
 	conf.MustSet(ctx, config.ViperKeySelfServiceBrowserDefaultReturnTo, "https://www.ory.sh")
@@ -94,7 +96,7 @@ func TestInitFlow(t *testing.T) {
 		if isSPA {
 			req.Header.Set("Accept", "application/json")
 		}
-		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router.Router, req)
+		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router, req)
 		if isAPI {
 			assert.Len(t, res.Header.Get("Set-Cookie"), 0)
 		}
@@ -228,7 +230,7 @@ func TestGetFlow(t *testing.T) {
 		setupRecoveryTS(t, client)
 		body := testhelpers.EasyGetBody(t, client, public.URL+recovery.RouteInitBrowserFlow)
 
-		assert.EqualValues(t, x.ErrInvalidCSRFToken.ReasonField, gjson.GetBytes(body, "error.reason").String(), "%s", body)
+		assert.EqualValues(t, nosurfx.ErrInvalidCSRFToken.ReasonField, gjson.GetBytes(body, "error.reason").String(), "%s", body)
 	})
 
 	t.Run("case=valid", func(t *testing.T) {

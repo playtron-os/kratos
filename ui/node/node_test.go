@@ -11,6 +11,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ory/x/snapshotx"
+
+	"github.com/ory/kratos/text"
+
 	"github.com/ory/x/assertx"
 
 	"github.com/ory/kratos/corpx"
@@ -192,4 +196,213 @@ func TestNodeJSON(t *testing.T) {
 		var n node.Node
 		require.EqualError(t, json.NewDecoder(bytes.NewReader(json.RawMessage(`{"type": "foo"}`))).Decode(&n), "unexpected node type: foo")
 	})
+}
+
+func TestMatchesNode(t *testing.T) {
+	// Test when ID is different
+	node1 := &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "foo"}}
+	node2 := &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "bar"}}
+	assert.False(t, node1.Matches(node2))
+
+	// Test when Type is different
+	node1 = &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "foo"}}
+	node2 = &node.Node{Type: node.Text, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "foo"}}
+	assert.False(t, node1.Matches(node2))
+
+	// Test when Group is different
+	node1 = &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "foo"}}
+	node2 = &node.Node{Type: node.Input, Group: node.OpenIDConnectGroup, Attributes: &node.InputAttributes{Name: "foo"}}
+	assert.False(t, node1.Matches(node2))
+
+	// Test when all fields are the same
+	node1 = &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "foo"}}
+	node2 = &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "foo"}}
+	assert.True(t, node1.Matches(node2))
+}
+
+func TestRemoveMatchingNodes(t *testing.T) {
+	nodes := node.Nodes{
+		&node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "foo"}},
+		&node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "bar"}},
+		&node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "baz"}},
+	}
+
+	// Test when node to remove is present
+	nodeToRemove := &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "bar"}}
+	nodes.RemoveMatching(nodeToRemove)
+	assert.Len(t, nodes, 2)
+	for _, n := range nodes {
+		assert.NotEqual(t, nodeToRemove.ID(), n.ID())
+	}
+
+	// Test when node to remove is not present
+	nodeToRemove = &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "qux"}}
+	nodes.RemoveMatching(nodeToRemove)
+	assert.Len(t, nodes, 2) // length should remain the same
+
+	// Test when node to remove is present
+	nodeToRemove = &node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "baz"}}
+	ui := &container.Container{
+		Nodes: nodes,
+	}
+
+	ui.GetNodes().RemoveMatching(nodeToRemove)
+	assert.Len(t, *ui.GetNodes(), 1)
+	for _, n := range *ui.GetNodes() {
+		assert.NotEqual(t, "bar", n.ID())
+		assert.NotEqual(t, "baz", n.ID())
+	}
+
+	ui.Nodes.Append(node.NewInputField("method", "foo", "bar", node.InputAttributeTypeSubmit).WithMetaLabel(text.NewInfoNodeLabelContinue()))
+	assert.NotNil(t, ui.Nodes.Find("method"))
+	ui.GetNodes().RemoveMatching(node.NewInputField("method", "foo", "bar", node.InputAttributeTypeSubmit))
+	assert.Nil(t, ui.Nodes.Find("method"))
+}
+
+func TestNodeMarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		node    *node.Node
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "text node",
+			node: &node.Node{
+				Type:  node.Text,
+				Group: node.DefaultGroup,
+				Attributes: &node.TextAttributes{
+					NodeType: node.Text,
+				},
+				Messages: text.Messages{},
+				Meta:     &node.Meta{},
+			},
+		},
+		{
+			name: "input node",
+			node: &node.Node{
+				Type:  node.Input,
+				Group: node.DefaultGroup,
+				Attributes: &node.InputAttributes{
+					NodeType:   node.Input,
+					Name:       "password",
+					Type:       "password",
+					FieldValue: "secret",
+				},
+				Messages: text.Messages{},
+				Meta:     &node.Meta{},
+			},
+		},
+		{
+			name: "anchor node",
+			node: &node.Node{
+				Type:  node.Anchor,
+				Group: node.DefaultGroup,
+				Attributes: &node.AnchorAttributes{
+					NodeType: node.Anchor,
+					HREF:     "https://example.com",
+				},
+				Messages: text.Messages{},
+				Meta:     &node.Meta{},
+			},
+		},
+		{
+			name: "image node",
+			node: &node.Node{
+				Type:  node.Image,
+				Group: node.DefaultGroup,
+				Attributes: &node.ImageAttributes{
+					NodeType: node.Image,
+					Source:   "image.jpg",
+				},
+				Messages: text.Messages{},
+				Meta:     &node.Meta{},
+			},
+		},
+		{
+			name: "script node",
+			node: &node.Node{
+				Type:  node.Script,
+				Group: node.DefaultGroup,
+				Attributes: &node.ScriptAttributes{
+					NodeType: node.Script,
+					Source:   "script.js",
+				},
+				Messages: text.Messages{},
+				Meta:     &node.Meta{},
+			},
+		},
+		{
+			name: "division node",
+			node: &node.Node{
+				Type:  node.Division,
+				Group: node.DefaultGroup,
+				Attributes: &node.DivisionAttributes{
+					NodeType: node.Division,
+				},
+				Messages: text.Messages{},
+				Meta:     &node.Meta{},
+			},
+		},
+		{
+			name: "type mismatch",
+			node: &node.Node{
+				Type:       node.Image,
+				Group:      node.DefaultGroup,
+				Attributes: &node.InputAttributes{NodeType: node.Input},
+			},
+			wantErr: true,
+			errMsg:  "node type and node attributes mismatch",
+		},
+		{
+			name: "empty type inferred from attributes",
+			node: &node.Node{
+				Group: node.DefaultGroup,
+				Attributes: &node.InputAttributes{
+					NodeType: node.Input,
+					Name:     "email",
+				},
+				Messages: text.Messages{},
+				Meta:     &node.Meta{},
+			},
+		},
+		{
+			name: "nil attributes",
+			node: &node.Node{
+				Type:       node.Image,
+				Group:      node.DefaultGroup,
+				Attributes: nil,
+				Messages:   text.Messages{},
+			},
+			wantErr: true,
+			errMsg:  "node type and node attributes mismatch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.node)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+				return
+			}
+
+			require.NoError(t, err)
+
+			// Use snapshotx for testing serialization
+			snapshotx.SnapshotT(t, json.RawMessage(data))
+
+			// Verify roundtrip
+			var unmarshalled node.Node
+			err = json.Unmarshal(data, &unmarshalled)
+			require.NoError(t, err)
+
+			// Re-marshal for comparison
+			remarshalled, err := json.Marshal(&unmarshalled)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(data), string(remarshalled))
+		})
+	}
 }

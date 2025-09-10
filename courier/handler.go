@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/kratos/x/redir"
+
 	"github.com/gofrs/uuid"
 
 	"github.com/ory/herodot"
 	"github.com/ory/x/pagination/keysetpagination"
 	"github.com/ory/x/pagination/migrationpagination"
-
-	"github.com/julienschmidt/httprouter"
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/x"
@@ -22,14 +23,14 @@ import (
 const (
 	AdminRouteCourier      = "/courier"
 	AdminRouteListMessages = AdminRouteCourier + "/messages"
-	AdminRouteGetMessage   = AdminRouteCourier + "/messages/:msgID"
+	AdminRouteGetMessage   = AdminRouteCourier + "/messages/{msgID}"
 )
 
 type (
 	handlerDependencies interface {
 		x.WriterProvider
 		x.LoggingProvider
-		x.CSRFProvider
+		nosurfx.CSRFProvider
 		PersistenceProvider
 		config.Provider
 	}
@@ -47,8 +48,8 @@ func NewHandler(r handlerDependencies) *Handler {
 
 func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
 	h.r.CSRFHandler().IgnoreGlobs(x.AdminPrefix+AdminRouteListMessages, AdminRouteListMessages)
-	public.GET(x.AdminPrefix+AdminRouteListMessages, x.RedirectToAdminRoute(h.r))
-	public.GET(x.AdminPrefix+AdminRouteGetMessage, x.RedirectToAdminRoute(h.r))
+	public.GET(x.AdminPrefix+AdminRouteListMessages, redir.RedirectToAdminRoute(h.r))
+	public.GET(x.AdminPrefix+AdminRouteGetMessage, redir.RedirectToAdminRoute(h.r))
 }
 
 func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
@@ -110,7 +111,7 @@ type ListCourierMessagesParameters struct {
 //	  200: listCourierMessages
 //	  400: errorGeneric
 //	  default: errorGeneric
-func (h *Handler) listCourierMessages(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (h *Handler) listCourierMessages(w http.ResponseWriter, r *http.Request) {
 	filter, paginator, err := parseMessagesFilter(r)
 	if err != nil {
 		h.r.Writer().WriteErrorCode(w, r, http.StatusBadRequest, err)
@@ -190,10 +191,10 @@ type getCourierMessage struct {
 //		200: message
 //		400: errorGeneric
 //		default: errorGeneric
-func (h *Handler) getCourierMessage(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	msgID, err := uuid.FromString(ps.ByName("msgID"))
+func (h *Handler) getCourierMessage(w http.ResponseWriter, r *http.Request) {
+	msgID, err := uuid.FromString(r.PathValue("msgID"))
 	if err != nil {
-		h.r.Writer().WriteError(w, r, herodot.ErrBadRequest.WithError(err.Error()).WithDebugf("could not parse parameter {id} as UUID, got %s", ps.ByName("id")))
+		h.r.Writer().WriteError(w, r, herodot.ErrBadRequest.WithError(err.Error()).WithDebugf("could not parse parameter {id} as UUID, got %s", r.PathValue("id")))
 		return
 	}
 

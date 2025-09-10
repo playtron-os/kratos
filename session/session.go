@@ -12,18 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ory/kratos/x"
-
-	"github.com/ory/x/httpx"
-	"github.com/ory/x/pagination/keysetpagination"
-	"github.com/ory/x/stringsx"
-
-	"github.com/pkg/errors"
-
 	"github.com/gofrs/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/identity"
+	"github.com/ory/kratos/x"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/pagination/keysetpagination"
+	"github.com/ory/x/pointerx"
 	"github.com/ory/x/randx"
 )
 
@@ -67,9 +64,7 @@ type Device struct {
 	NID uuid.UUID `json:"-"  faker:"-" db:"nid"`
 }
 
-func (m Device) TableName(ctx context.Context) string {
-	return "session_devices"
-}
+func (Device) TableName() string { return "session_devices" }
 
 // A Session
 //
@@ -103,7 +98,7 @@ type Session struct {
 	// password + TOTP) have been used.
 	//
 	// To learn more about these levels please head over to: https://www.ory.sh/kratos/docs/concepts/credentials
-	AuthenticatorAssuranceLevel identity.AuthenticatorAssuranceLevel `faker:"len=4" db:"aal" json:"authenticator_assurance_level"`
+	AuthenticatorAssuranceLevel identity.AuthenticatorAssuranceLevel `faker:"aal_type" db:"aal" json:"authenticator_assurance_level"`
 
 	// Authentication Method References (AMR)
 	//
@@ -142,7 +137,7 @@ type Session struct {
 
 	// Tokenized is the tokenized (e.g. JWT) version of the session.
 	//
-	// It is only set when the `tokenize` query parameter was set to a valid tokenize template during calls to `/session/whoami`.
+	// It is only set when the `tokenize_as` query parameter was set to a valid tokenize template during calls to `/session/whoami`.
 	Tokenized string `json:"tokenized,omitempty" faker:"-" db:"-"`
 
 	// The Session Token
@@ -166,9 +161,7 @@ func (m Session) DefaultPageToken() keysetpagination.PageToken {
 	}
 }
 
-func (s Session) TableName(ctx context.Context) string {
-	return "sessions"
-}
+func (s Session) TableName() string { return "sessions" }
 
 func (s *Session) CompletedLoginForMethod(method AuthenticationMethod) {
 	method.CompletedAt = time.Now().UTC()
@@ -210,6 +203,9 @@ func (s *Session) SetAuthenticatorAssuranceLevel() {
 			isAAL1 = true
 		case identity.AuthenticatorAssuranceLevel2:
 			isAAL2 = true
+		// The following section is a graceful migration from Ory Kratos v0.9.
+		//
+		// TODO remove this section, it is already over 2 years old.
 		case "":
 			// Sessions before Ory Kratos 0.9 did not have the AAL
 			// be part of the AMR.
@@ -238,18 +234,9 @@ func (s *Session) SetAuthenticatorAssuranceLevel() {
 	} else if isAAL1 {
 		s.AuthenticatorAssuranceLevel = identity.AuthenticatorAssuranceLevel1
 	} else if len(s.AMR) > 0 {
-		// A fallback. If an AMR is set but we did not satisfy the above, gracefully fall back to level 1.
+		// A fallback. If an AMR is set, but we did not satisfy the above, gracefully fall back to level 1.
 		s.AuthenticatorAssuranceLevel = identity.AuthenticatorAssuranceLevel1
 	}
-}
-
-func NewActiveSession(r *http.Request, i *identity.Identity, c lifespanProvider, authenticatedAt time.Time, completedLoginFor identity.CredentialsType, completedLoginAAL identity.AuthenticatorAssuranceLevel) (*Session, error) {
-	s := NewInactiveSession()
-	s.CompletedLoginFor(completedLoginFor, completedLoginAAL)
-	if err := s.Activate(r, i, c, authenticatedAt); err != nil {
-		return nil, err
-	}
-	return s, nil
 }
 
 func NewInactiveSession() *Session {
@@ -262,32 +249,15 @@ func NewInactiveSession() *Session {
 	}
 }
 
-func (s *Session) Activate(r *http.Request, i *identity.Identity, c lifespanProvider, authenticatedAt time.Time) error {
-	if i != nil && !i.IsActive() {
-		return ErrIdentityDisabled.WithDetail("identity_id", i.ID)
-	}
-
-	s.Active = true
-	s.ExpiresAt = authenticatedAt.Add(c.SessionLifespan(r.Context()))
-	s.AuthenticatedAt = authenticatedAt
-	s.IssuedAt = authenticatedAt
-	s.Identity = i
-	s.IdentityID = i.ID
-
-	s.SetSessionDeviceInformation(r)
-	s.SetAuthenticatorAssuranceLevel()
-	return nil
-}
-
 func (s *Session) SetSessionDeviceInformation(r *http.Request) {
 	device := Device{
 		SessionID: s.ID,
-		IPAddress: stringsx.GetPointer(httpx.ClientIP(r)),
+		IPAddress: pointerx.Ptr(httpx.ClientIP(r)),
 	}
 
 	agent := r.Header["User-Agent"]
 	if len(agent) > 0 {
-		device.UserAgent = stringsx.GetPointer(strings.Join(agent, " "))
+		device.UserAgent = pointerx.Ptr(strings.Join(agent, " "))
 	}
 
 	var clientGeoLocation []string
@@ -297,7 +267,7 @@ func (s *Session) SetSessionDeviceInformation(r *http.Request) {
 	if r.Header.Get("Cf-Ipcountry") != "" {
 		clientGeoLocation = append(clientGeoLocation, r.Header.Get("Cf-Ipcountry"))
 	}
-	device.Location = stringsx.GetPointer(strings.Join(clientGeoLocation, ", "))
+	device.Location = pointerx.Ptr(strings.Join(clientGeoLocation, ", "))
 
 	s.Devices = append(s.Devices, device)
 }
@@ -344,7 +314,7 @@ type AuthenticationMethod struct {
 	Method identity.CredentialsType `json:"method"`
 
 	// The AAL this method introduced.
-	AAL identity.AuthenticatorAssuranceLevel `json:"aal"`
+	AAL identity.AuthenticatorAssuranceLevel `json:"aal" faker:"aal_type"`
 
 	// When the authentication challenge was completed.
 	CompletedAt time.Time `json:"completed_at"`

@@ -3,7 +3,12 @@
 
 package node
 
-import "github.com/ory/kratos/text"
+import (
+	"fmt"
+
+	"github.com/ory/kratos/text"
+	"github.com/ory/kratos/x/webauthnx/js"
+)
 
 const (
 	InputAttributeTypeText          UiNodeInputAttributeType = "text"
@@ -21,12 +26,13 @@ const (
 )
 
 const (
-	InputAttributeAutocompleteEmail           UiNodeInputAttributeAutocomplete = "email"
-	InputAttributeAutocompleteTel             UiNodeInputAttributeAutocomplete = "tel"
-	InputAttributeAutocompleteUrl             UiNodeInputAttributeAutocomplete = "url"
-	InputAttributeAutocompleteCurrentPassword UiNodeInputAttributeAutocomplete = "current-password"
-	InputAttributeAutocompleteNewPassword     UiNodeInputAttributeAutocomplete = "new-password"
-	InputAttributeAutocompleteOneTimeCode     UiNodeInputAttributeAutocomplete = "one-time-code"
+	InputAttributeAutocompleteEmail            UiNodeInputAttributeAutocomplete = "email"
+	InputAttributeAutocompleteTel              UiNodeInputAttributeAutocomplete = "tel"
+	InputAttributeAutocompleteUrl              UiNodeInputAttributeAutocomplete = "url"
+	InputAttributeAutocompleteCurrentPassword  UiNodeInputAttributeAutocomplete = "current-password"
+	InputAttributeAutocompleteNewPassword      UiNodeInputAttributeAutocomplete = "new-password"
+	InputAttributeAutocompleteOneTimeCode      UiNodeInputAttributeAutocomplete = "one-time-code"
+	InputAttributeAutocompleteUsernameWebauthn UiNodeInputAttributeAutocomplete = "username webauthn"
 )
 
 // swagger:enum UiNodeInputAttributeType
@@ -53,6 +59,9 @@ type Attributes interface {
 
 	// swagger:ignore
 	GetNodeType() UiNodeType
+
+	// swagger:ignore
+	Matches(other Attributes) bool
 }
 
 // InputAttributes represents the attributes of an input node
@@ -91,13 +100,34 @@ type InputAttributes struct {
 
 	// OnClick may contain javascript which should be executed on click. This is primarily
 	// used for WebAuthn.
+	//
+	// Deprecated: Using OnClick requires the use of eval() which is a security risk. Use OnClickTrigger instead.
 	OnClick string `json:"onclick,omitempty"`
+
+	// OnClickTrigger may contain a WebAuthn trigger which should be executed on click.
+	//
+	// The trigger maps to a JavaScript function provided by Ory, which triggers actions such as PassKey registration or login.
+	OnClickTrigger js.WebAuthnTriggers `json:"onclickTrigger,omitempty"`
+
+	// OnLoad may contain javascript which should be executed on load. This is primarily
+	// used for WebAuthn.
+	//
+	// Deprecated: Using OnLoad requires the use of eval() which is a security risk. Use OnLoadTrigger instead.
+	OnLoad string `json:"onload,omitempty"`
+
+	// OnLoadTrigger may contain a WebAuthn trigger which should be executed on load.
+	//
+	// The trigger maps to a JavaScript function provided by Ory, which triggers actions such as PassKey registration or login.
+	OnLoadTrigger js.WebAuthnTriggers `json:"onloadTrigger,omitempty"`
+
+	// MaxLength may contain the input's maximum length.
+	MaxLength int `json:"maxlength,omitempty"`
 
 	// NodeType represents this node's types. It is a mirror of `node.type` and
 	// is primarily used to allow compatibility with OpenAPI 3.0.  In this struct it technically always is "input".
 	//
 	// required: true
-	NodeType string `json:"node_type"`
+	NodeType UiNodeType `json:"node_type"`
 }
 
 // ImageAttributes represents the attributes of an image node.
@@ -129,7 +159,7 @@ type ImageAttributes struct {
 	// is primarily used to allow compatibility with OpenAPI 3.0.  In this struct it technically always is "img".
 	//
 	// required: true
-	NodeType string `json:"node_type"`
+	NodeType UiNodeType `json:"node_type"`
 }
 
 // AnchorAttributes represents the attributes of an anchor node.
@@ -156,7 +186,7 @@ type AnchorAttributes struct {
 	// is primarily used to allow compatibility with OpenAPI 3.0.  In this struct it technically always is "a".
 	//
 	// required: true
-	NodeType string `json:"node_type"`
+	NodeType UiNodeType `json:"node_type"`
 }
 
 // TextAttributes represents the attributes of a text node.
@@ -177,7 +207,7 @@ type TextAttributes struct {
 	// is primarily used to allow compatibility with OpenAPI 3.0.  In this struct it technically always is "text".
 	//
 	// required: true
-	NodeType string `json:"node_type"`
+	NodeType UiNodeType `json:"node_type"`
 }
 
 // ScriptAttributes represent script nodes which load javascript.
@@ -232,7 +262,62 @@ type ScriptAttributes struct {
 	// is primarily used to allow compatibility with OpenAPI 3.0. In this struct it technically always is "script".
 	//
 	// required: true
-	NodeType string `json:"node_type"`
+	NodeType UiNodeType `json:"node_type"`
+}
+
+// DivisionAttributes represent a division section.
+//
+// Division sections are used for interactive widgets that require a hook in the DOM / view.
+//
+// swagger:model uiNodeDivisionAttributes
+type DivisionAttributes struct {
+	// A classname that should be rendered into the DOM.
+	Classname string `json:"class,omitzero"`
+
+	// A unique identifier
+	//
+	// required: true
+	Identifier string `json:"id"`
+
+	// Data is a map of key-value pairs that are passed to the division.
+	//
+	// They may be used for `data-...` attributes.
+	Data map[string]string `json:"data,omitzero"`
+
+	// NodeType represents this node's type. It is a mirror of `node.type` and
+	// is primarily used to allow compatibility with OpenAPI 3.0. In this struct it technically always is "script".
+	//
+	// required: true
+	NodeType UiNodeType `json:"node_type"`
+}
+
+func (d DivisionAttributes) ID() string {
+	return d.Identifier
+}
+
+func (d DivisionAttributes) Reset() {}
+
+func (d DivisionAttributes) SetValue(_ interface{}) {}
+
+func (d DivisionAttributes) GetValue() interface{} {
+	return nil
+}
+
+func (d DivisionAttributes) GetNodeType() UiNodeType {
+	return d.NodeType
+}
+
+func (d DivisionAttributes) Matches(other Attributes) bool {
+	ot, ok := other.(*DivisionAttributes)
+	if !ok {
+		return false
+	}
+
+	if len(ot.ID()) > 0 && d.ID() != ot.ID() {
+		return false
+	}
+
+	return true
 }
 
 var (
@@ -241,6 +326,7 @@ var (
 	_ Attributes = new(AnchorAttributes)
 	_ Attributes = new(TextAttributes)
 	_ Attributes = new(ScriptAttributes)
+	_ Attributes = new(DivisionAttributes)
 )
 
 func (a *InputAttributes) ID() string {
@@ -261,6 +347,99 @@ func (a *TextAttributes) ID() string {
 
 func (a *ScriptAttributes) ID() string {
 	return a.Identifier
+}
+
+func (a *InputAttributes) Matches(other Attributes) bool {
+	ot, ok := other.(*InputAttributes)
+	if !ok {
+		return false
+	}
+
+	if len(ot.ID()) > 0 && a.ID() != ot.ID() {
+		return false
+	}
+
+	if len(ot.Type) > 0 && a.Type != ot.Type {
+		return false
+	}
+
+	if ot.FieldValue != nil && fmt.Sprintf("%v", a.FieldValue) != fmt.Sprintf("%v", ot.FieldValue) {
+		return false
+	}
+
+	if len(ot.Name) > 0 && a.Name != ot.Name {
+		return false
+	}
+
+	return true
+}
+
+func (a *ImageAttributes) Matches(other Attributes) bool {
+	ot, ok := other.(*ImageAttributes)
+	if !ok {
+		return false
+	}
+
+	if len(ot.ID()) > 0 && a.ID() != ot.ID() {
+		return false
+	}
+
+	if len(ot.Source) > 0 && a.Source != ot.Source {
+		return false
+	}
+
+	return true
+}
+
+func (a *AnchorAttributes) Matches(other Attributes) bool {
+	ot, ok := other.(*AnchorAttributes)
+	if !ok {
+		return false
+	}
+
+	if len(ot.ID()) > 0 && a.ID() != ot.ID() {
+		return false
+	}
+
+	if len(ot.HREF) > 0 && a.HREF != ot.HREF {
+		return false
+	}
+
+	return true
+}
+
+func (a *TextAttributes) Matches(other Attributes) bool {
+	ot, ok := other.(*TextAttributes)
+	if !ok {
+		return false
+	}
+
+	if len(ot.ID()) > 0 && a.ID() != ot.ID() {
+		return false
+	}
+
+	return true
+}
+
+func (a *ScriptAttributes) Matches(other Attributes) bool {
+	ot, ok := other.(*ScriptAttributes)
+	if !ok {
+		return false
+	}
+
+	if len(ot.ID()) > 0 && a.ID() != ot.ID() {
+		return false
+	}
+
+	if ot.Type != "" && a.Type != ot.Type {
+		return false
+	}
+
+	if ot.Source != "" && a.Source != ot.Source {
+		return false
+	}
+
+	return true
 }
 
 func (a *InputAttributes) SetValue(value interface{}) {

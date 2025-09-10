@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ory/kratos/x/nosurfx"
+
 	"github.com/gofrs/uuid"
 
 	"github.com/ory/x/jsonx"
@@ -17,7 +19,7 @@ import (
 	"github.com/ory/kratos/ui/node"
 
 	"github.com/gobuffalo/httptest"
-	"github.com/julienschmidt/httprouter"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -44,7 +46,7 @@ func TestHandleError(t *testing.T) {
 
 	public, _ := testhelpers.NewKratosServer(t, reg)
 
-	router := httprouter.New()
+	router := http.NewServeMux()
 	ts := httptest.NewServer(router)
 	t.Cleanup(ts.Close)
 
@@ -57,7 +59,7 @@ func TestHandleError(t *testing.T) {
 	var verificationFlow *verification.Flow
 	var flowError error
 	var methodName node.UiNodeGroup
-	router.GET("/error", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	router.HandleFunc("GET /error", func(w http.ResponseWriter, r *http.Request) {
 		h.WriteFlowError(w, r, verificationFlow, methodName, flowError)
 	})
 
@@ -72,7 +74,7 @@ func TestHandleError(t *testing.T) {
 		req := &http.Request{URL: urlx.ParseOrPanic("/")}
 		strategy, err := reg.GetActiveVerificationStrategy(context.Background())
 		require.NoError(t, err)
-		f, err := verification.NewFlow(conf, ttl, x.FakeCSRFToken, req, strategy, ft)
+		f, err := verification.NewFlow(conf, ttl, nosurfx.FakeCSRFToken, req, strategy, ft)
 		require.NoError(t, err)
 		require.NoError(t, reg.VerificationFlowPersister().CreateVerificationFlow(context.Background(), f))
 		f, err = reg.VerificationFlowPersister().GetVerificationFlow(context.Background(), f.ID)
@@ -87,7 +89,7 @@ func TestHandleError(t *testing.T) {
 		defer res.Body.Close()
 		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
-		sse, _, err := sdk.FrontendApi.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
+		sse, _, err := sdk.FrontendAPI.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
 		require.NoError(t, err)
 
 		return sse.Error, nil

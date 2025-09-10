@@ -40,11 +40,16 @@ func constructSchema(t *testing.T, ecModifier, ucModifier func(*schema.Extension
 	require.NoError(t, err)
 	ec, err = sjson.DeleteBytes(ec, "credentials.code.via")
 	require.NoError(t, err)
+	ec, err = sjson.DeleteBytes(ec, "organizations.matcher")
+	require.NoError(t, err)
+
 	uc, err = sjson.DeleteBytes(uc, "verification")
 	require.NoError(t, err)
 	uc, err = sjson.DeleteBytes(uc, "recovery")
 	require.NoError(t, err)
 	uc, err = sjson.DeleteBytes(uc, "credentials.code.via")
+	require.NoError(t, err)
+	uc, err = sjson.DeleteBytes(uc, "organizations.matcher")
 	require.NoError(t, err)
 
 	return "base64://" + base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`
@@ -99,6 +104,13 @@ func TestGetIdentifierLabelFromSchema(t *testing.T) {
 			name: "email for code",
 			emailConfig: func(c *schema.ExtensionConfig) {
 				c.Credentials.Code.Identifier = true
+			},
+			expected: text.NewInfoNodeLabelGenerated("Email"),
+		},
+		{
+			name: "email for passkey",
+			emailConfig: func(c *schema.ExtensionConfig) {
+				c.Credentials.Passkey.DisplayName = true
 			},
 			expected: text.NewInfoNodeLabelGenerated("Email"),
 		},

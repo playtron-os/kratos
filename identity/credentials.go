@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid"
+	"github.com/wI2L/jsondiff"
 
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/x/sqlxx"
@@ -86,6 +87,9 @@ const (
 	CredentialsTypeLookup   CredentialsType = "lookup_secret"
 	CredentialsTypeWebAuthn CredentialsType = "webauthn"
 	CredentialsTypeCodeAuth CredentialsType = "code"
+	CredentialsTypePasskey  CredentialsType = "passkey"
+	CredentialsTypeProfile  CredentialsType = "profile"
+	CredentialsTypeSAML     CredentialsType = "saml"
 )
 
 func (c CredentialsType) String() string {
@@ -96,7 +100,7 @@ func (c CredentialsType) ToUiNodeGroup() node.UiNodeGroup {
 	switch c {
 	case CredentialsTypePassword:
 		return node.PasswordGroup
-	case CredentialsTypeOIDC:
+	case CredentialsTypeOIDC, CredentialsTypeSAML:
 		return node.OpenIDConnectGroup
 	case CredentialsTypeTOTP:
 		return node.TOTPGroup
@@ -106,6 +110,8 @@ func (c CredentialsType) ToUiNodeGroup() node.UiNodeGroup {
 		return node.LookupGroup
 	case CredentialsTypeCodeAuth:
 		return node.CodeGroup
+	case CredentialsTypePasskey:
+		return node.PasskeyGroup
 	default:
 		return node.DefaultGroup
 	}
@@ -114,10 +120,12 @@ func (c CredentialsType) ToUiNodeGroup() node.UiNodeGroup {
 var AllCredentialTypes = []CredentialsType{
 	CredentialsTypePassword,
 	CredentialsTypeOIDC,
+	// CredentialsTypeSAML, placeholder for the OEL version
 	CredentialsTypeTOTP,
 	CredentialsTypeLookup,
 	CredentialsTypeWebAuthn,
 	CredentialsTypeCodeAuth,
+	CredentialsTypePasskey,
 }
 
 const (
@@ -129,19 +137,18 @@ const (
 
 // ParseCredentialsType parses a string into a CredentialsType or returns false as the second argument.
 func ParseCredentialsType(in string) (CredentialsType, bool) {
-	for _, t := range []CredentialsType{
-		CredentialsTypePassword,
+	switch t := CredentialsType(in); t {
+	case CredentialsTypePassword,
 		CredentialsTypeOIDC,
+		CredentialsTypeSAML,
 		CredentialsTypeTOTP,
 		CredentialsTypeLookup,
 		CredentialsTypeWebAuthn,
 		CredentialsTypeCodeAuth,
 		CredentialsTypeRecoveryLink,
 		CredentialsTypeRecoveryCode,
-	} {
-		if t.String() == in {
-			return t, true
-		}
+		CredentialsTypePasskey:
+		return t, true
 	}
 	return "", false
 }
@@ -209,8 +216,8 @@ type (
 	// swagger:ignore
 	ActiveCredentialsCounter interface {
 		ID() CredentialsType
-		CountActiveFirstFactorCredentials(cc map[CredentialsType]Credentials) (int, error)
-		CountActiveMultiFactorCredentials(cc map[CredentialsType]Credentials) (int, error)
+		CountActiveFirstFactorCredentials(context.Context, map[CredentialsType]Credentials) (int, error)
+		CountActiveMultiFactorCredentials(context.Context, map[CredentialsType]Credentials) (int, error)
 	}
 
 	// swagger:ignore
@@ -242,7 +249,13 @@ func CredentialsEqual(a, b map[CredentialsType]Credentials) bool {
 			return false
 		}
 
-		if string(expect.Config) != string(actual.Config) {
+		// Try to normalize configs (remove spaces etc).
+		patch, err := jsondiff.CompareJSON(actual.Config, expect.Config)
+		if err != nil {
+			return false
+		}
+
+		if len(patch) > 0 {
 			return false
 		}
 

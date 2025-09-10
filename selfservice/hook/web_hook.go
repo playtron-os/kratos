@@ -9,9 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
 	"time"
 
-	"github.com/dgraph-io/ristretto"
+	"github.com/dgraph-io/ristretto/v2"
 	"github.com/gofrs/uuid"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pkg/errors"
@@ -23,6 +24,7 @@ import (
 	grpccodes "google.golang.org/grpc/codes"
 
 	"github.com/ory/herodot"
+	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/request"
 	"github.com/ory/kratos/schema"
@@ -60,7 +62,7 @@ var _ interface {
 	settings.PostHookPostPersistExecutor
 } = (*WebHook)(nil)
 
-var jsonnetCache, _ = ristretto.NewCache(&ristretto.Config{
+var jsonnetCache, _ = ristretto.NewCache(&ristretto.Config[[]byte, []byte]{
 	MaxCost:     100 << 20, // 100MB,
 	NumCounters: 1_000_000, // 1kB per snippet -> 100k snippets -> 1M counters
 	BufferItems: 64,
@@ -72,6 +74,7 @@ type (
 		x.HTTPClientProvider
 		x.TracingProvider
 		jsonnetsecure.VMProvider
+		config.Provider
 	}
 
 	templateContext struct {
@@ -81,11 +84,12 @@ type (
 		RequestURL     string             `json:"request_url"`
 		RequestCookies map[string]string  `json:"request_cookies"`
 		Identity       *identity.Identity `json:"identity,omitempty"`
+		Session        *session.Session   `json:"session,omitempty"`
 	}
 
 	WebHook struct {
 		deps webHookDependencies
-		conf json.RawMessage
+		conf *request.Config
 	}
 
 	detailedMessage struct {
@@ -115,7 +119,7 @@ func cookies(req *http.Request) map[string]string {
 	return cookies
 }
 
-func NewWebHook(r webHookDependencies, c json.RawMessage) *WebHook {
+func NewWebHook(r webHookDependencies, c *request.Config) *WebHook {
 	return &WebHook{deps: r, conf: c}
 }
 
@@ -140,6 +144,7 @@ func (e *WebHook) ExecuteLoginPostHook(_ http.ResponseWriter, req *http.Request,
 			RequestURL:     x.RequestURL(req).String(),
 			RequestCookies: cookies(req),
 			Identity:       session.Identity,
+			Session:        session,
 		})
 	})
 }
@@ -207,7 +212,7 @@ func (e *WebHook) ExecuteRegistrationPreHook(_ http.ResponseWriter, req *http.Re
 }
 
 func (e *WebHook) ExecutePostRegistrationPrePersistHook(_ http.ResponseWriter, req *http.Request, flow *registration.Flow, id *identity.Identity) error {
-	if !(gjson.GetBytes(e.conf, "can_interrupt").Bool() || gjson.GetBytes(e.conf, "response.parse").Bool()) {
+	if !(e.conf.CanInterrupt || e.conf.Response.Parse) {
 		return nil
 	}
 
@@ -224,7 +229,7 @@ func (e *WebHook) ExecutePostRegistrationPrePersistHook(_ http.ResponseWriter, r
 }
 
 func (e *WebHook) ExecutePostRegistrationPostPersistHook(_ http.ResponseWriter, req *http.Request, flow *registration.Flow, session *session.Session) error {
-	if gjson.GetBytes(e.conf, "can_interrupt").Bool() || gjson.GetBytes(e.conf, "response.parse").Bool() {
+	if e.conf.CanInterrupt || e.conf.Response.Parse {
 		return nil
 	}
 
@@ -257,7 +262,7 @@ func (e *WebHook) ExecuteSettingsPreHook(_ http.ResponseWriter, req *http.Reques
 }
 
 func (e *WebHook) ExecuteSettingsPostPersistHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow, id *identity.Identity, _ *session.Session) error {
-	if gjson.GetBytes(e.conf, "can_interrupt").Bool() || gjson.GetBytes(e.conf, "response.parse").Bool() {
+	if e.conf.CanInterrupt || e.conf.Response.Parse {
 		return nil
 	}
 	return otelx.WithSpan(req.Context(), "selfservice.hook.WebHook.ExecuteSettingsPostPersistHook", func(ctx context.Context) error {
@@ -273,7 +278,7 @@ func (e *WebHook) ExecuteSettingsPostPersistHook(_ http.ResponseWriter, req *htt
 }
 
 func (e *WebHook) ExecuteSettingsPrePersistHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow, id *identity.Identity) error {
-	if !(gjson.GetBytes(e.conf, "can_interrupt").Bool() || gjson.GetBytes(e.conf, "response.parse").Bool()) {
+	if !(e.conf.CanInterrupt || e.conf.Response.Parse) {
 		return nil
 	}
 	return otelx.WithSpan(req.Context(), "selfservice.hook.WebHook.ExecuteSettingsPrePersistHook", func(ctx context.Context) error {
@@ -291,11 +296,14 @@ func (e *WebHook) ExecuteSettingsPrePersistHook(_ http.ResponseWriter, req *http
 func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 	var (
 		httpClient     = e.deps.HTTPClient(ctx)
-		ignoreResponse = gjson.GetBytes(e.conf, "response.ignore").Bool()
-		canInterrupt   = gjson.GetBytes(e.conf, "can_interrupt").Bool()
-		parseResponse  = gjson.GetBytes(e.conf, "response.parse").Bool()
-		emitEvent      = gjson.GetBytes(e.conf, "emit_analytics_event").Bool() || !gjson.GetBytes(e.conf, "emit_analytics_event").Exists() // default true
-		tracer         = trace.SpanFromContext(ctx).TracerProvider().Tracer("kratos-webhooks")
+		ignoreResponse = e.conf.Response.Ignore
+		canInterrupt   = e.conf.CanInterrupt
+		parseResponse  = e.conf.Response.Parse
+		emitEvent      = e.conf.EmitAnalyticsEvent == nil || *e.conf.EmitAnalyticsEvent // default true
+		webhookID      = e.conf.ID
+		// The trigger ID is a random ID. It can be used to correlate webhook requests across retries.
+		triggerID = x.NewUUID()
+		tracer    = trace.SpanFromContext(ctx).TracerProvider().Tracer("kratos-webhooks")
 	)
 	if ignoreResponse && (parseResponse || canInterrupt) {
 		return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("A webhook is configured to ignore the response but also to parse the response. This is not possible."))
@@ -314,7 +322,7 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 		defer otelx.End(span, &finalErr)
 
 		if emitEvent {
-			instrumentHTTPClientForEvents(ctx, httpClient)
+			InstrumentHTTPClientForEvents(ctx, httpClient, triggerID, webhookID)
 		}
 
 		defer func(startTime time.Time) {
@@ -325,7 +333,7 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 			}).WithField("duration", time.Since(startTime))
 			if finalErr != nil {
 				if emitEvent && !errors.Is(finalErr, context.Canceled) {
-					span.AddEvent(events.NewWebhookFailed(ctx, finalErr))
+					span.AddEvent(events.NewWebhookFailed(ctx, finalErr, triggerID, webhookID))
 				}
 				if ignoreResponse {
 					logger.WithError(finalErr).Warning("Webhook request failed but the error was ignored because the configuration indicated that the upstream response should be ignored")
@@ -335,12 +343,12 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 			} else {
 				logger.Info("Webhook request succeeded")
 				if emitEvent {
-					span.AddEvent(events.NewWebhookSucceeded(ctx))
+					span.AddEvent(events.NewWebhookSucceeded(ctx, triggerID, webhookID))
 				}
 			}
 		}(time.Now())
 
-		builder, err := request.NewBuilder(ctx, e.conf, e.deps, jsonnetCache)
+		builder, err := request.NewBuilder(ctx, e.conf, e.deps, request.WithCache(jsonnetCache))
 		if err != nil {
 			return err
 		}
@@ -351,6 +359,8 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 			attribute.Bool("webhook.response.ignore", ignoreResponse),
 			attribute.Bool("webhook.response.parse", parseResponse),
 		)
+
+		data.RequestHeaders = RemoveDisallowedHeaders(data.RequestHeaders, e.deps.Config().WebhookHeaderAllowlist(ctx))
 
 		req, err := builder.BuildRequest(ctx, data)
 		if errors.Is(err, request.ErrCancel) {
@@ -373,7 +383,7 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			if isTimeoutError(err) {
+			if IsTimeoutError(err) {
 				return herodot.DefaultError{
 					CodeField:     http.StatusGatewayTimeout,
 					StatusField:   http.StatusText(http.StatusGatewayTimeout),
@@ -420,6 +430,17 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 	return nil
 }
 
+func RemoveDisallowedHeaders(httpHeaders http.Header, headerAllowlist []string) http.Header {
+	res := make(http.Header, len(headerAllowlist))
+	for _, allowed := range headerAllowlist {
+		h, present := httpHeaders[textproto.CanonicalMIMEHeaderKey(allowed)]
+		if present {
+			res[allowed] = h
+		}
+	}
+	return res
+}
+
 func parseWebhookResponse(resp *http.Response, id *identity.Identity) (err error) {
 	if resp == nil {
 		return errors.Errorf("empty response provided from the webhook")
@@ -430,7 +451,12 @@ func parseWebhookResponse(resp *http.Response, id *identity.Identity) (err error
 		var hookResponse struct {
 			Identity *localIdentity `json:"identity"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&hookResponse); err != nil {
+		// io.ReadAll is safe, because resp.Body is already a limited reader.
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return errors.Wrap(err, "webhook response body could not be read")
+		}
+		if err = json.Unmarshal(body, &hookResponse); err != nil {
 			return errors.Wrap(err, "webhook response could not be unmarshalled properly from JSON")
 		}
 
@@ -468,6 +494,10 @@ func parseWebhookResponse(resp *http.Response, id *identity.Identity) (err error
 
 		if len(hookResponse.Identity.MetadataAdmin) > 0 {
 			id.MetadataAdmin = hookResponse.Identity.MetadataAdmin
+		}
+
+		if gjson.GetBytes(body, "identity.external_id").Exists() {
+			id.ExternalID = hookResponse.Identity.ExternalID
 		}
 
 		return nil
@@ -509,12 +539,12 @@ func parseWebhookResponse(resp *http.Response, id *identity.Identity) (err error
 	return nil
 }
 
-func isTimeoutError(err error) bool {
+func IsTimeoutError(err error) bool {
 	var te interface{ Timeout() bool }
 	return errors.As(err, &te) && te.Timeout() || errors.Is(err, context.DeadlineExceeded)
 }
 
-func instrumentHTTPClientForEvents(ctx context.Context, httpClient *retryablehttp.Client) {
+func InstrumentHTTPClientForEvents(ctx context.Context, httpClient *retryablehttp.Client, triggerID uuid.UUID, webhookID string) {
 	// TODO(@alnr): improve this implementation to redact sensitive data
 	var (
 		attempt   = 0
@@ -523,8 +553,9 @@ func instrumentHTTPClientForEvents(ctx context.Context, httpClient *retryablehtt
 	)
 	httpClient.RequestLogHook = func(_ retryablehttp.Logger, req *http.Request, retryNumber int) {
 		attempt = retryNumber + 1
-		requestID = uuid.Must(uuid.NewV4())
+		requestID = x.NewUUID()
 		req.Header.Set("Ory-Webhook-Request-ID", requestID.String())
+		req.Header.Set("Ory-Webhook-Trigger-ID", triggerID.String())
 		// TODO(@alnr): redact sensitive data
 		// reqBody, _ = httputil.DumpRequestOut(req, true)
 		reqBody = []byte("<redacted>")
@@ -535,6 +566,6 @@ func instrumentHTTPClientForEvents(ctx context.Context, httpClient *retryablehtt
 		// resBody = resBody[:min(len(resBody), 2<<10)] // truncate response body to 2 kB for event
 		// TODO(@alnr): redact sensitive data
 		resBody := []byte("<redacted>")
-		trace.SpanFromContext(ctx).AddEvent(events.NewWebhookDelivered(ctx, res.Request.URL, reqBody, res.StatusCode, resBody, attempt, requestID))
+		trace.SpanFromContext(ctx).AddEvent(events.NewWebhookDelivered(ctx, res.Request.URL, reqBody, res.StatusCode, resBody, attempt, requestID, triggerID, webhookID))
 	}
 }

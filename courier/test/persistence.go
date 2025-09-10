@@ -10,16 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gobuffalo/pop/v6"
-	"github.com/gofrs/uuid"
-	"github.com/tidwall/gjson"
-
 	"github.com/go-faker/faker/v4"
+	"github.com/gofrs/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
 	"github.com/ory/kratos/courier"
 	"github.com/ory/kratos/x"
+	"github.com/ory/pop/v6"
 	"github.com/ory/x/pagination/keysetpagination"
 	"github.com/ory/x/sqlcon"
 )
@@ -47,10 +46,14 @@ func TestPersister(ctx context.Context, newNetworkUnlessExisting NetworkWrapper,
 
 		messages := make([]courier.Message, 5)
 		t.Run("case=add messages to the queue", func(t *testing.T) {
+			t.Cleanup(func() { pop.SetNowFunc(time.Now) })
+			now := time.Now()
 			for k := range messages {
+				// We need to fake the time func to control the created_at column, which is the
+				// sort key for the messages.
+				pop.SetNowFunc(func() time.Time { return now.Add(time.Duration(k) * time.Hour) })
 				require.NoError(t, faker.FakeData(&messages[k]))
 				require.NoError(t, p.AddMessage(ctx, &messages[k]))
-				time.Sleep(time.Second) // wait a bit so that the timestamp ordering works in MySQL.
 			}
 		})
 
@@ -184,7 +187,6 @@ func TestPersister(ctx context.Context, newNetworkUnlessExisting NetworkWrapper,
 		})
 
 		t.Run("case=network", func(t *testing.T) {
-
 			t.Run("generates id on creation", func(t *testing.T) {
 				expected := courier.Message{ID: uuid.Nil}
 				require.NoError(t, p.AddMessage(ctx, &expected))
@@ -244,7 +246,6 @@ func TestPersister(ctx context.Context, newNetworkUnlessExisting NetworkWrapper,
 				err := p.SetMessageStatus(ctx, id, courier.MessageStatusProcessing)
 				require.ErrorIs(t, err, sqlcon.ErrNoRows)
 			})
-
 		})
 
 		t.Run("case=FetchMessage", func(t *testing.T) {
@@ -260,7 +261,6 @@ func TestPersister(ctx context.Context, newNetworkUnlessExisting NetworkWrapper,
 				_, err := p.FetchMessage(ctx, msgID)
 				require.ErrorIs(t, err, sqlcon.ErrNoRows)
 			})
-
 		})
 
 		t.Run("case=RecordDispatch", func(t *testing.T) {

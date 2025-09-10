@@ -75,6 +75,16 @@
       "additionalProperties": false,
       "required": ["hook"]
     },
+    "selfServiceVerificationHook": {
+      "type": "object",
+      "properties": {
+        "hook": {
+          "const": "verification"
+        }
+      },
+      "additionalProperties": false,
+      "required": ["hook"]
+    },
     "selfServiceShowVerificationUIHook": {
       "type": "object",
       "properties": {
@@ -89,7 +99,7 @@
       "type": "object",
       "properties": {
         "hook": {
-          "const": "b2b_sso"
+          "enum": ["b2b_sso", "organization"]
         },
         "config": {
           "type": "object",
@@ -215,6 +225,10 @@
           "title": "Web-Hook Configuration",
           "description": "Define what the hook should do",
           "properties": {
+            "id": {
+              "type": "string",
+              "description": "The ID of the hook. Used to identify the hook in logs and errors. For debugging purposes only."
+            },
             "response": {
               "title": "Response Handling",
               "description": "How the web hook should handle the response",
@@ -252,6 +266,13 @@
             "method": {
               "type": "string",
               "description": "The HTTP method to use (GET, POST, etc)."
+            },
+            "headers": {
+              "type": "object",
+              "description": "The HTTP headers that must be applied to the Web-Hook",
+              "additionalProperties": {
+                "type": "string"
+              }
             },
             "body": {
               "type": "string",
@@ -307,7 +328,7 @@
                   "response": {
                     "properties": {
                       "ignore": {
-                        "enum": [true]
+                        "const": true
                       }
                     },
                     "required": ["ignore"]
@@ -319,7 +340,7 @@
             {
               "properties": {
                 "can_interrupt": {
-                  "enum": [false]
+                  "const": false
                 }
               },
               "require": ["can_interrupt"]
@@ -415,7 +436,7 @@
         },
         "provider": {
           "title": "Provider",
-          "description": "Can be one of github, github-app, gitlab, generic, google, microsoft, discord, slack, facebook, auth0, vk, yandex, apple, spotify, netid, dingtalk, patreon.",
+          "description": "Can be one of github, github-app, gitlab, generic, google, microsoft, discord, salesforce, slack, facebook, auth0, vk, yandex, apple, spotify, netid, dingtalk, patreon.",
           "type": "string",
           "enum": [
             "github",
@@ -425,6 +446,7 @@
             "google",
             "microsoft",
             "discord",
+            "salesforce",
             "slack",
             "facebook",
             "auth0",
@@ -435,8 +457,12 @@
             "netid",
             "dingtalk",
             "patreon",
+            "line",
             "linkedin",
-            "lark"
+            "linkedin_v2",
+            "lark",
+            "x",
+            "fedcm-test"
           ],
           "examples": ["google"]
         },
@@ -497,9 +523,9 @@
         },
         "subject_source": {
           "title": "Microsoft subject source",
-          "description": "Controls which source the subject identifier is taken from by microsoft provider. If set to `userinfo` (the default) then the identifier is taken from the `sub` field of OIDC ID token or data received from `/userinfo` standard OIDC endpoint. If set to `me` then the `id` field of data structure received from `https://graph.microsoft.com/v1.0/me` is taken as an identifier.",
+          "description": "Controls which source the subject identifier is taken from by microsoft provider. If set to `userinfo` (the default) then the identifier is taken from the `sub` field of OIDC ID token or data received from `/userinfo` standard OIDC endpoint. If set to `me` then the `id` field of data structure received from `https://graph.microsoft.com/v1.0/me` is taken as an identifier. If the value is `oid` then the the oid (Object ID) is taken to identify users across different services.",
           "type": "string",
-          "enum": ["userinfo", "me"],
+          "enum": ["userinfo", "me", "oid"],
           "default": "userinfo",
           "examples": ["userinfo"]
         },
@@ -547,6 +573,26 @@
           "enum": ["id_token", "userinfo"],
           "default": "id_token",
           "examples": ["id_token", "userinfo"]
+        },
+        "pkce": {
+          "title": "Proof Key for Code Exchange",
+          "description": "PKCE controls if the OpenID Connect OAuth2 flow should use PKCE (Proof Key for Code Exchange). IMPORTANT: If you set this to `force`, you must whitelist a different return URL for your OAuth2 client in the provider's configuration. Instead of <base-url>/self-service/methods/oidc/callback/<provider>, you must use <base-url>/self-service/methods/oidc/callback",
+          "type": "string",
+          "enum": ["auto", "never", "force"],
+          "default": "auto"
+        },
+        "fedcm_config_url": {
+          "title": "Federation Configuration URL",
+          "description": "The URL where the FedCM IdP configuration is located for the provider. This is only effective in the Ory Network.",
+          "type": "string",
+          "format": "uri",
+          "examples": ["https://example.com/config.json"]
+        },
+        "net_id_token_origin_header": {
+          "title": "NetID Token Origin Header",
+          "description": "Contains the orgin header to be used when exchanging a NetID FedCM token for an ID token",
+          "type": "string",
+          "examples": ["https://example.com"]
         }
       },
       "additionalProperties": false,
@@ -669,7 +715,7 @@
       "uniqueItems": true,
       "additionalItems": false
     },
-    "selfServiceAfterSettingsMethod": {
+    "selfServiceAfterSettingsProfileMethod": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -682,6 +728,12 @@
             "anyOf": [
               {
                 "$ref": "#/definitions/selfServiceWebHook"
+              },
+              {
+                "$ref": "#/definitions/selfServiceShowVerificationUIHook"
+              },
+              {
+                "$ref": "#/definitions/b2bSSOHook"
               }
             ]
           },
@@ -714,6 +766,33 @@
         }
       }
     },
+    "selfServiceAfterDefaultLoginMethodHooks": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/selfServiceSessionRevokerHook"
+          },
+          {
+            "$ref": "#/definitions/selfServiceRequireVerifiedAddressHook"
+          },
+          {
+            "$ref": "#/definitions/selfServiceWebHook"
+          },
+          {
+            "$ref": "#/definitions/selfServiceVerificationHook"
+          },
+          {
+            "$ref": "#/definitions/selfServiceShowVerificationUIHook"
+          },
+          {
+            "$ref": "#/definitions/b2bSSOHook"
+          }
+        ]
+      },
+      "uniqueItems": true,
+      "additionalItems": false
+    },
     "selfServiceAfterDefaultLoginMethod": {
       "type": "object",
       "additionalProperties": false,
@@ -722,22 +801,7 @@
           "$ref": "#/definitions/defaultReturnTo"
         },
         "hooks": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/selfServiceSessionRevokerHook"
-              },
-              {
-                "$ref": "#/definitions/selfServiceRequireVerifiedAddressHook"
-              },
-              {
-                "$ref": "#/definitions/selfServiceWebHook"
-              }
-            ]
-          },
-          "uniqueItems": true,
-          "additionalItems": false
+          "$ref": "#/definitions/selfServiceAfterDefaultLoginMethodHooks"
         }
       }
     },
@@ -827,11 +891,14 @@
         "webauthn": {
           "$ref": "#/definitions/selfServiceAfterSettingsAuthMethod"
         },
+        "passkey": {
+          "$ref": "#/definitions/selfServiceAfterSettingsAuthMethod"
+        },
         "lookup_secret": {
           "$ref": "#/definitions/selfServiceAfterSettingsAuthMethod"
         },
         "profile": {
-          "$ref": "#/definitions/selfServiceAfterSettingsMethod"
+          "$ref": "#/definitions/selfServiceAfterSettingsProfileMethod"
         },
         "hooks": {
           "$ref": "#/definitions/selfServiceHooks"
@@ -860,6 +927,9 @@
         "webauthn": {
           "$ref": "#/definitions/selfServiceAfterDefaultLoginMethod"
         },
+        "passkey": {
+          "$ref": "#/definitions/selfServiceAfterDefaultLoginMethod"
+        },
         "oidc": {
           "$ref": "#/definitions/selfServiceAfterOIDCLoginMethod"
         },
@@ -873,25 +943,7 @@
           "$ref": "#/definitions/selfServiceAfterDefaultLoginMethod"
         },
         "hooks": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/selfServiceWebHook"
-              },
-              {
-                "$ref": "#/definitions/selfServiceSessionRevokerHook"
-              },
-              {
-                "$ref": "#/definitions/selfServiceRequireVerifiedAddressHook"
-              },
-              {
-                "$ref": "#/definitions/b2bSSOHook"
-              }
-            ]
-          },
-          "uniqueItems": true,
-          "additionalItems": false
+          "$ref": "#/definitions/selfServiceAfterDefaultLoginMethodHooks"
         }
       }
     },
@@ -942,6 +994,9 @@
           "$ref": "#/definitions/selfServiceAfterRegistrationMethod"
         },
         "webauthn": {
+          "$ref": "#/definitions/selfServiceAfterRegistrationMethod"
+        },
+        "passkey": {
           "$ref": "#/definitions/selfServiceAfterRegistrationMethod"
         },
         "oidc": {
@@ -1229,6 +1284,20 @@
                 },
                 "after": {
                   "$ref": "#/definitions/selfServiceAfterRegistration"
+                },
+                "enable_legacy_one_step": {
+                  "type": "boolean",
+                  "title": "Disable two-step registration",
+                  "description": "Deprecated, please use `style` instead.",
+                  "deprecationMessage": "Deprecated, please use `style` instead.",
+                  "default": false
+                },
+                "style": {
+                  "title": "Registration Flow Style",
+                  "description": "The style of the registration flow. If set to `unified` the login flow will be a one-step process. If set to `profile_first` the registration flow will first ask for the profile information first, and then the credentials.",
+                  "type": "string",
+                  "enum": ["unified", "profile_first"],
+                  "default": "profile_first"
                 }
               }
             },
@@ -1249,6 +1318,13 @@
                   "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$",
                   "default": "1h",
                   "examples": ["1h", "1m", "1s"]
+                },
+                "style": {
+                  "title": "Login Flow Style",
+                  "description": "The style of the login flow. If set to `unified` the login flow will be a one-step process. If set to `identifier_first` (experimental!) the login flow will first ask for the identifier and then the credentials.",
+                  "type": "string",
+                  "enum": ["unified", "identifier_first"],
+                  "default": "unified"
                 },
                 "before": {
                   "$ref": "#/definitions/selfServiceBeforeLogin"
@@ -1374,6 +1450,48 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "b2b": {
+              "title": "Single Sign-On for B2B",
+              "description": "Single Sign-On for B2B allows your customers to bring their own (workforce) identity server (e.g. OneLogin). This feature is not available in the open source licensed code.",
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "organizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "The ID of the organization.",
+                            "format": "uuid",
+                            "examples": ["00000000-0000-0000-0000-000000000000"]
+                          },
+                          "label": {
+                            "type": "string",
+                            "description": "The label of the organization.",
+                            "examples": ["ACME SSO"]
+                          },
+                          "domains": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "hostname",
+                              "examples": ["my-app.com"],
+                              "description": "If this domain matches the email's domain, this provider is shown."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
             "profile": {
               "type": "object",
               "additionalProperties": false,
@@ -1417,24 +1535,36 @@
             },
             "code": {
               "type": "object",
-              "additionalProperties": false,
+              "additionalProperties": true,
               "anyOf": [
                 {
                   "properties": {
-                    "passwordless_enabled": { "const": true },
-                    "mfa_enabled": { "const": false }
+                    "passwordless_enabled": {
+                      "const": true
+                    },
+                    "mfa_enabled": {
+                      "const": false
+                    }
                   }
                 },
                 {
                   "properties": {
-                    "mfa_enabled": { "const": true },
-                    "passwordless_enabled": { "const": false }
+                    "mfa_enabled": {
+                      "const": true
+                    },
+                    "passwordless_enabled": {
+                      "const": false
+                    }
                   }
                 },
                 {
                   "properties": {
-                    "mfa_enabled": { "const": false },
-                    "passwordless_enabled": { "const": false }
+                    "mfa_enabled": {
+                      "const": false
+                    },
+                    "passwordless_enabled": {
+                      "const": false
+                    }
                   }
                 }
               ],
@@ -1448,12 +1578,6 @@
                 "mfa_enabled": {
                   "type": "boolean",
                   "title": "Enables login flows code method to fulfil MFA requests",
-                  "default": false
-                },
-                "passwordless_login_fallback_enabled": {
-                  "type": "boolean",
-                  "title": "Passwordless Login Fallback Enabled",
-                  "description": "This setting allows the code method to always login a user with code if they have registered with another authentication method such as password or social sign in.",
                   "default": false
                 },
                 "enabled": {
@@ -1472,6 +1596,19 @@
                       "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$",
                       "default": "1h",
                       "examples": ["1h", "1m", "1s"]
+                    },
+                    "max_submissions": {
+                      "type": "integer",
+                      "title": "Maximum number of times the code can be submitted before a flow is invalidated",
+                      "minimum": 1,
+                      "maximum": 255,
+                      "default": 5
+                    },
+                    "missing_credential_fallback_enabled": {
+                      "type": "boolean",
+                      "title": "Enable Code OTP as a Fallback",
+                      "description": "Enabling this allows users to sign in with the code method, even if their identity schema or their credentials are not set up to use the code method. If enabled, a verified address (such as an email) will be used to send the code to the user. Use with caution and only if actually needed.",
+                      "default": false
                     }
                   }
                 }
@@ -1529,6 +1666,73 @@
                       "description": "If set to false the password validation does not check for similarity between the password and the user identifier.",
                       "type": "boolean",
                       "default": true
+                    },
+                    "migrate_hook": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "title": "Enable Password Migration",
+                          "description": "If set to true will enable password migration.",
+                          "default": false
+                        },
+                        "config": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "description": "The URL the password migration hook should call",
+                              "format": "uri"
+                            },
+                            "method": {
+                              "type": "string",
+                              "description": "The HTTP method to use (GET, POST, etc).",
+                              "const": "POST",
+                              "default": "POST"
+                            },
+                            "headers": {
+                              "type": "object",
+                              "description": "The HTTP headers that must be applied to the password migration hook.",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "emit_analytics_event": {
+                              "type": "boolean",
+                              "default": true,
+                              "description": "Emit tracing events for this hook on delivery or error"
+                            },
+                            "auth": {
+                              "type": "object",
+                              "title": "Auth mechanisms",
+                              "description": "Define which auth mechanism the Web-Hook should use",
+                              "oneOf": [
+                                {
+                                  "$ref": "#/definitions/webHookAuthApiKeyProperties"
+                                },
+                                {
+                                  "$ref": "#/definitions/webHookAuthBasicAuthProperties"
+                                }
+                              ]
+                            },
+                            "body": {
+                              "type": "string",
+                              "format": "uri",
+                              "pattern": "^(http|https|file|base64)://",
+                              "description": "URI pointing to the jsonnet template used for payload generation. Only used for those HTTP methods, which support HTTP body payloads",
+                              "examples": [
+                                "file:///path/to/body.jsonnet",
+                                "file://./body.jsonnet",
+                                "base64://ZnVuY3Rpb24oY3R4KSB7CiAgaWRlbnRpdHlfaWQ6IGlmIGN0eFsiaWRlbnRpdHkiXSAhPSBudWxsIHRoZW4gY3R4LmlkZW50aXR5LmlkLAp9=",
+                                "https://oryapis.com/default_body.jsonnet"
+                              ]
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -1688,6 +1892,66 @@
                 "required": ["config"]
               }
             },
+            "passkey": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "title": "Enables the Passkey method",
+                  "default": false
+                },
+                "config": {
+                  "type": "object",
+                  "title": "Passkey Configuration",
+                  "properties": {
+                    "rp": {
+                      "title": "Relying Party (RP) Config",
+                      "properties": {
+                        "display_name": {
+                          "type": "string",
+                          "title": "Relying Party Display Name",
+                          "description": "A name to help the user identify this RP.",
+                          "examples": ["Ory Foundation"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "title": "Relying Party Identifier",
+                          "description": "The id must be a subset of the domain currently in the browser.",
+                          "examples": ["ory.sh"]
+                        },
+                        "origins": {
+                          "type": "array",
+                          "title": "Relying Party Origins",
+                          "description": "A list of explicit RP origins. If left empty, this defaults to either `origin` or `id`, prepended with the current protocol schema (HTTP or HTTPS).",
+                          "items": {
+                            "type": "string",
+                            "examples": [
+                              "https://www.ory.sh",
+                              "https://auth.ory.sh"
+                            ]
+                          }
+                        }
+                      },
+                      "type": "object",
+                      "required": ["display_name", "id"]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": ["enabled"]
+              },
+              "then": {
+                "required": ["config"]
+              }
+            },
             "oidc": {
               "type": "object",
               "title": "Specify OpenID Connect and OAuth2 Configuration",
@@ -1811,6 +2075,9 @@
                   "properties": {
                     "email": {
                       "$ref": "#/definitions/emailCourierTemplate"
+                    },
+                    "sms": {
+                      "$ref": "#/definitions/smsCourierTemplate"
                     }
                   },
                   "required": ["email"]
@@ -1903,7 +2170,7 @@
                 "smtps://subdomain.my-mailserver:1234/?server_name=my-mailserver (allows TLS to work if the server is hosted on a sudomain that uses a non-wildcard domain certificate)"
               ],
               "type": "string",
-              "pattern": "^smtps?:\\/\\/.*"
+              "pattern": "^smtps?://.*"
             },
             "client_cert_path": {
               "title": "SMTP Client certificate path",
@@ -1952,77 +2219,6 @@
               "default": "localhost"
             }
           },
-          "required": ["connection_uri"],
-          "additionalProperties": false
-        },
-        "sms": {
-          "title": "SMS sender configuration",
-          "description": "Configures outgoing sms messages using HTTP protocol with generic SMS provider",
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "description": "Determines if SMS functionality is enabled",
-              "type": "boolean",
-              "default": false
-            },
-            "from": {
-              "title": "SMS Sender Address",
-              "description": "The recipient of a sms will see this as the sender address.",
-              "type": "string",
-              "default": "Ory Kratos"
-            },
-            "request_config": {
-              "type": "object",
-              "properties": {
-                "url": {
-                  "title": "HTTP address of API endpoint",
-                  "description": "This URL will be used to connect to the SMS provider.",
-                  "examples": ["https://api.twillio.com/sms/send"],
-                  "type": "string",
-                  "pattern": "^https?:\\/\\/.*"
-                },
-                "method": {
-                  "type": "string",
-                  "description": "The HTTP method to use (GET, POST, etc)."
-                },
-                "headers": {
-                  "type": "object",
-                  "description": "The HTTP headers that must be applied to request",
-                  "additionalProperties": {
-                    "type": "string"
-                  }
-                },
-                "body": {
-                  "type": "string",
-                  "format": "uri",
-                  "pattern": "^(http|https|file|base64)://",
-                  "description": "URI pointing to the jsonnet template used for payload generation. Only used for those HTTP methods, which support HTTP body payloads",
-                  "examples": [
-                    "file:///path/to/body.jsonnet",
-                    "file://./body.jsonnet",
-                    "base64://ZnVuY3Rpb24oY3R4KSB7CiAgaWRlbnRpdHlfaWQ6IGlmIGN0eFsiaWRlbnRpdHkiXSAhPSBudWxsIHRoZW4gY3R4LmlkZW50aXR5LmlkLAp9=",
-                    "https://oryapis.com/default_body.jsonnet"
-                  ]
-                },
-                "auth": {
-                  "type": "object",
-                  "title": "Auth mechanisms",
-                  "description": "Define which auth mechanism to use for auth with the SMS provider",
-                  "oneOf": [
-                    {
-                      "$ref": "#/definitions/webHookAuthApiKeyProperties"
-                    },
-                    {
-                      "$ref": "#/definitions/webHookAuthBasicAuthProperties"
-                    }
-                  ]
-                },
-                "additionalProperties": false
-              },
-              "required": ["url", "method"],
-              "additionalProperties": false
-            }
-          },
           "additionalProperties": false
         },
         "channels": {
@@ -2034,7 +2230,7 @@
               "id": {
                 "type": "string",
                 "title": "Channel id",
-                "description": "The channel id. Corresponds to the .via property of the identity schema for recovery, verification, etc. Currently only phone is supported.",
+                "description": "The channel id. Corresponds to the .via property of the identity schema for recovery, verification, etc. Currently only sms is supported.",
                 "maxLength": 32,
                 "enum": ["sms"]
               },
@@ -2392,6 +2588,12 @@
                   "https://foo.bar.com/path/to/identity.traits.schema.json",
                   "base64://ewogICIkc2NoZW1hIjogImh0dHA6Ly9qc29uLXNjaGVtYS5vcmcvZHJhZnQtMDcvc2NoZW1hIyIsCiAgInR5cGUiOiAib2JqZWN0IiwKICAicHJvcGVydGllcyI6IHsKICAgICJiYXIiOiB7CiAgICAgICJ0eXBlIjogInN0cmluZyIKICAgIH0KICB9LAogICJyZXF1aXJlZCI6IFsKICAgICJiYXIiCiAgXQp9"
                 ]
+              },
+              "selfservice_selectable": {
+                "type": "boolean",
+                "title": "Is the schema enabled in self-service flows",
+                "description": "If set to true, this schema can be used explicity in self-service flows by setting `identity_schema` query parameter to the schema's ID.",
+                "default": false
               }
             },
             "required": ["id", "url"]
@@ -2545,6 +2747,11 @@
           "type": "string",
           "default": "/"
         },
+        "secure": {
+          "title": "Session Cookie Secure Flag",
+          "description": "Sets the session secure flag. If unset, defaults to !dev mode.",
+          "type": "string"
+        },
         "same_site": {
           "title": "HTTP Cookie Same Site Configuration",
           "description": "Sets the session and CSRF cookie SameSite.",
@@ -2590,12 +2797,19 @@
                         "claims_mapper_url": {
                           "type": "string",
                           "format": "uri",
-                          "title": "JsonNet mapper URL"
+                          "title": "Jsonnet mapper URL"
                         },
                         "jwks_url": {
                           "type": "string",
                           "format": "uri",
                           "title": "JSON Web Key Set URL"
+                        },
+                        "subject_source": {
+                          "type": "string",
+                          "title": "Subject source",
+                          "description": "The source of the subject claim in the token. Can be one of: `id`, or `external_id`.",
+                          "enum": ["id", "external_id"],
+                          "default": "id"
                         }
                       }
                     }
@@ -2639,6 +2853,11 @@
               "description": "Sets the session cookie path. Use with care! Overrides `cookies.path`.",
               "type": "string"
             },
+            "secure": {
+              "title": "Session Cookie Secure Flag",
+              "description": "Sets the session secure flag. If unset, defaults to !dev mode.",
+              "type": "string"
+            },
             "same_site": {
               "title": "Session Cookie SameSite Configuration",
               "description": "Sets the session cookie SameSite. Overrides `cookies.same_site`.",
@@ -2654,6 +2873,21 @@
           "type": "string",
           "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$",
           "examples": ["1h", "1m", "1s"]
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "properties": {
+        "account_enumeration": {
+          "type": "object",
+          "properties": {
+            "mitigate": {
+              "type": "boolean",
+              "default": false,
+              "description": "Mitigate account enumeration by making it harder to figure out if an identifier (email, phone number) exists or not. Enabling this setting degrades user experience. This setting does not mitigate all possible attack vectors yet."
+            }
+          }
         }
       }
     },
@@ -2723,6 +2957,40 @@
               "default": []
             }
           }
+        },
+        "web_hook": {
+          "title": "Global web_hook HTTP client configuration",
+          "description": "Configure the global HTTP client of the web_hook action.",
+          "type": "object",
+          "properties": {
+            "header_allowlist": {
+              "title": "Allowed request headers",
+              "description": "List of request headers that are forwarded to the web hook target in canonical form.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "Accept",
+                "Accept-Encoding",
+                "Accept-Language",
+                "Content-Length",
+                "Content-Type",
+                "Origin",
+                "Priority",
+                "Referer",
+                "Sec-Ch-Ua",
+                "Sec-Ch-Ua-Mobile",
+                "Sec-Ch-Ua-Platform",
+                "Sec-Fetch-Dest",
+                "Sec-Fetch-Mode",
+                "Sec-Fetch-Site",
+                "Sec-Fetch-User",
+                "True-Client-Ip",
+                "User-Agent"
+              ]
+            }
+          }
         }
       }
     },
@@ -2735,20 +3003,82 @@
           "description": "If enabled allows Ory Sessions to be cached. Only effective in the Ory Network.",
           "default": false
         },
+        "cacheable_sessions_max_age": {
+          "title": "Set Ory Session Edge Caching maximum age",
+          "description": "Set how long Ory Sessions are cached on the edge. If unset, the session expiry will be used. Only effective in the Ory Network.",
+          "type": "string",
+          "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$"
+        },
         "use_continue_with_transitions": {
           "type": "boolean",
           "title": "Enable new flow transitions using `continue_with` items",
           "description": "If enabled allows new flow transitions using `continue_with` items.",
           "default": false
+        },
+        "choose_recovery_address": {
+          "type": "boolean",
+          "title": "Enable new recovery screens to pick which address to send a recovery code/link to",
+          "description": "If enabled, enable new recovery screens to pick which address to send a recovery code to, and can send a code via SMS. It is safe to toggle it back and forth, existing recovery flows will be handled with their respective logic. That is because it is decided at creation time whether a recovery flow is V1 or V2 and this cannot be changed afterwards. Thus, if a recovery flow is created with this flag enabled, it will be created as a recovery v2 flow. If this flag is disabled while this flow is still active, this flow will still be handled with the correct logic (v2).",
+          "default": false
+        },
+        "legacy_continue_with_verification_ui": {
+          "type": "boolean",
+          "title": "Always include show_verification_ui in continue_with",
+          "description": "If true, restores the legacy behavior of always including `show_verification_ui` in the registration flow's `continue_with` when verification is enabled. If set to false, `show_verification_ui` is only set in `continue_with` if the `show_verification_ui` hook is used. This flag will be removed in the future.",
+          "deprecationMessage": "This behavior is deprecated and will be removed in the future. Use the `show_verification_hook` in the post-registration hook instead.",
+          "default": false
+        },
+        "legacy_require_verified_login_error": {
+          "type": "boolean",
+          "title": "Return a form error if the login identifier is not verified",
+          "description": "If true, the login flow will return a form error if the login identifier is not verified, which restores legacy behavior. If this value is false, the `continue_with` array will contain a `show_verification_ui` hook instead.",
+          "deprecationMessage": "This behavior is deprecated and will be removed in the future. Please upgrade your SDKs.",
+          "default": false
+        },
+        "faster_session_extend": {
+          "type": "boolean",
+          "title": "Enable faster session extension",
+          "description": "If enabled allows faster session extension by skipping the session lookup. Disabling this feature will be deprecated in the future.",
+          "default": false
+        },
+        "password_profile_registration_node_group": {
+          "title": "Registration node group",
+          "description": "The node group to use for registration flows. Previously, the node group for the password method's profile fields was `password`. Going forward, it will be `default`. This switch can toggle between those two for backwards compatibility.",
+          "enum": ["password", "default"],
+          "default": "default"
+        },
+        "legacy_oidc_registration_node_group": {
+          "title": "Registration node group for OIDC",
+          "description": "The node group to use for registration flows. Previously, the node group for the oidc method's profile fields was `oidc`. Going forward, it will be `default`. This switch can toggle between those two for backwards compatibility and will be removed in the future.",
+          "default": false,
+          "type": "boolean"
         }
       },
       "additionalProperties": false
     },
     "organizations": {
       "title": "Organizations",
-      "description": "Secifies which organizations are available. Only effective in the Ory Network.",
+      "description": "Please use selfservice.methods.b2b instead. This key will be removed. Only effective in the Ory Network.",
       "type": "array",
       "default": []
+    },
+    "enterprise": {
+      "title": "Enterprise features",
+      "description": "Specifies enterprise features. Only effective in the Ory Network or with a valid license.",
+      "type": "object",
+      "properties": {
+        "identity_schema_fallback_url_template": {
+          "type": "string",
+          "title": "Fallback URL template for identity schemas",
+          "description": "A fallback URL template used when looking up identity schemas."
+        }
+      },
+      "additionalProperties": false
+    },
+    "revision": {
+      "title": "Config revision",
+      "description": "Set a recognizable revision. This could be the commit time or a random value. This value is exposed at the `/health/config` endpoint and allows you to ensure that the correct config is loaded.",
+      "type": "string"
     }
   },
   "allOf": [

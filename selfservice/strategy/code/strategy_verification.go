@@ -5,6 +5,7 @@ package code
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -65,11 +66,15 @@ func (s *Strategy) decodeVerification(r *http.Request) (*updateVerificationFlowW
 }
 
 // handleVerificationError is a convenience function for handling all types of errors that may occur (e.g. validation error).
-func (s *Strategy) handleVerificationError(w http.ResponseWriter, r *http.Request, f *verification.Flow, body *updateVerificationFlowWithCodeMethod, err error) error {
+func (s *Strategy) handleVerificationError(r *http.Request, f *verification.Flow, body *updateVerificationFlowWithCodeMethod, err error) error {
 	if f != nil {
 		f.UI.SetCSRF(s.deps.GenerateCSRFToken(r))
+		email := ""
+		if body != nil {
+			email = body.Email
+		}
 		f.UI.GetNodes().Upsert(
-			node.NewInputField("email", body.Email, node.CodeGroup, node.InputAttributeTypeEmail, node.WithRequiredInputAttribute).WithMetaLabel(text.NewInfoNodeInputEmail()),
+			node.NewInputField("email", email, node.CodeGroup, node.InputAttributeTypeEmail, node.WithRequiredInputAttribute).WithMetaLabel(text.NewInfoNodeInputEmail()),
 		)
 	}
 
@@ -110,6 +115,11 @@ type updateVerificationFlowWithCodeMethod struct {
 
 	// The id of the flow
 	Flow string `json:"-" form:"-"`
+
+	// Transient data to pass along to any webhooks
+	//
+	// required: false
+	TransientPayload json.RawMessage `json:"transient_payload,omitempty" form:"transient_payload"`
 }
 
 // getMethod returns the method of this submission or "" if no method could be found
@@ -125,36 +135,38 @@ func (body *updateVerificationFlowWithCodeMethod) getMethod() verification.Verif
 }
 
 func (s *Strategy) Verify(w http.ResponseWriter, r *http.Request, f *verification.Flow) (err error) {
-	ctx, span := s.deps.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.strategy.code.strategy.Verify")
+	ctx, span := s.deps.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.strategy.code.Strategy.Verify")
 	span.SetAttributes(attribute.String("selfservice_flows_verification_use", s.deps.Config().SelfServiceFlowVerificationUse(ctx)))
 	defer otelx.End(span, &err)
 
 	body, err := s.decodeVerification(r)
 	if err != nil {
-		return s.handleVerificationError(w, r, nil, body, err)
+		return s.handleVerificationError(r, nil, body, err)
 	}
 
-	if err := flow.MethodEnabledAndAllowed(r.Context(), f.GetFlowName(), s.VerificationStrategyID(), string(body.getMethod()), s.deps); err != nil {
-		return s.handleVerificationError(w, r, f, body, err)
+	f.TransientPayload = body.TransientPayload
+
+	if err := flow.MethodEnabledAndAllowed(ctx, f.GetFlowName(), s.VerificationStrategyID(), string(body.getMethod()), s.deps); err != nil {
+		return s.handleVerificationError(r, f, body, err)
 	}
 
 	if err := f.Valid(); err != nil {
-		return s.handleVerificationError(w, r, f, body, err)
+		return s.handleVerificationError(r, f, body, err)
 	}
 
 	switch f.State {
 	case flow.StateChooseMethod:
 		fallthrough
 	case flow.StateEmailSent:
-		return s.verificationHandleFormSubmission(w, r, f, body)
+		return s.verificationHandleFormSubmission(ctx, w, r, f, body)
 	case flow.StatePassedChallenge:
-		return s.retryVerificationFlowWithMessage(w, r, f.Type, text.NewErrorValidationVerificationRetrySuccess())
+		return s.retryVerificationFlowWithMessage(ctx, w, r, f.Type, text.NewErrorValidationVerificationRetrySuccess())
 	default:
-		return s.retryVerificationFlowWithMessage(w, r, f.Type, text.NewErrorValidationVerificationStateFailure())
+		return s.retryVerificationFlowWithMessage(ctx, w, r, f.Type, text.NewErrorValidationVerificationStateFailure())
 	}
 }
 
-func (s *Strategy) handleLinkClick(w http.ResponseWriter, r *http.Request, f *verification.Flow, code string) error {
+func (s *Strategy) handleLinkClick(ctx context.Context, w http.ResponseWriter, r *http.Request, f *verification.Flow, code string) error {
 	// Pre-fill the code
 	if codeField := f.UI.Nodes.Find("code"); codeField != nil {
 		codeField.Attributes.SetValue(code)
@@ -166,43 +178,43 @@ func (s *Strategy) handleLinkClick(w http.ResponseWriter, r *http.Request, f *ve
 	f.UI.SetCSRF(csrfToken)
 	f.CSRFToken = csrfToken
 
-	if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(r.Context(), f); err != nil {
+	if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(ctx, f); err != nil {
 		return err
 	}
 
 	// we always redirect to the browser UI here to allow API flows to complete aswell
 	// TODO: In the future, we might want to redirect to a custom URI scheme here, to allow to open an app on the device of
 	// the user to handle the flow directly.
-	http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(r.Context())).String(), http.StatusSeeOther)
+	http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(ctx)).String(), http.StatusSeeOther)
 
 	return errors.WithStack(flow.ErrCompletedByStrategy)
 }
 
-func (s *Strategy) verificationHandleFormSubmission(w http.ResponseWriter, r *http.Request, f *verification.Flow, body *updateVerificationFlowWithCodeMethod) error {
+func (s *Strategy) verificationHandleFormSubmission(ctx context.Context, w http.ResponseWriter, r *http.Request, f *verification.Flow, body *updateVerificationFlowWithCodeMethod) error {
 	if len(body.Code) > 0 {
 		if r.Method == http.MethodGet {
 			// Special case: in the code strategy we send out links as well, that contain the code
-			return s.handleLinkClick(w, r, f, body.Code)
+			return s.handleLinkClick(ctx, w, r, f, body.Code)
 		}
 
 		// If not GET: try to use the submitted code
-		return s.verificationUseCode(w, r, body.Code, f)
+		return s.verificationUseCode(ctx, w, r, body.Code, f)
 	} else if len(body.Email) == 0 {
 		// If no code and no email was provided, fail with a validation error
-		return s.handleVerificationError(w, r, f, body, schema.NewRequiredError("#/email", "email"))
+		return s.handleVerificationError(r, f, body, schema.NewRequiredError("#/email", "email"))
 	}
 
-	if err := flow.EnsureCSRF(s.deps, r, f.Type, s.deps.Config().DisableAPIFlowEnforcement(r.Context()), s.deps.GenerateCSRFToken, body.CSRFToken); err != nil {
-		return s.handleVerificationError(w, r, f, body, err)
+	if err := flow.EnsureCSRF(s.deps, r, f.Type, s.deps.Config().DisableAPIFlowEnforcement(ctx), s.deps.GenerateCSRFToken, body.CSRFToken); err != nil {
+		return s.handleVerificationError(r, f, body, err)
 	}
 
-	if err := s.deps.VerificationCodePersister().DeleteVerificationCodesOfFlow(r.Context(), f.ID); err != nil {
-		return s.handleVerificationError(w, r, f, body, err)
+	if err := s.deps.VerificationCodePersister().DeleteVerificationCodesOfFlow(ctx, f.ID); err != nil {
+		return s.handleVerificationError(r, f, body, err)
 	}
 
-	if err := s.deps.CodeSender().SendVerificationCode(r.Context(), f, identity.VerifiableAddressTypeEmail, body.Email); err != nil {
+	if err := s.deps.CodeSender().SendVerificationCode(ctx, f, identity.VerifiableAddressTypeEmail, body.Email); err != nil {
 		if !errors.Is(err, ErrUnknownAddress) {
-			return s.handleVerificationError(w, r, f, body, err)
+			return s.handleVerificationError(r, f, body, err)
 		}
 		// Continue execution
 	}
@@ -210,7 +222,7 @@ func (s *Strategy) verificationHandleFormSubmission(w http.ResponseWriter, r *ht
 	f.State = flow.StateEmailSent
 
 	if err := s.PopulateVerificationMethod(r, f); err != nil {
-		return s.handleVerificationError(w, r, f, body, err)
+		return s.handleVerificationError(r, f, body, err)
 	}
 
 	if body.Email != "" {
@@ -220,39 +232,30 @@ func (s *Strategy) verificationHandleFormSubmission(w http.ResponseWriter, r *ht
 		)
 	}
 
-	if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(r.Context(), f); err != nil {
-		return s.handleVerificationError(w, r, f, body, err)
+	if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(ctx, f); err != nil {
+		return s.handleVerificationError(r, f, body, err)
 	}
 
 	return nil
 }
 
-func (s *Strategy) verificationUseCode(w http.ResponseWriter, r *http.Request, codeString string, f *verification.Flow) error {
-	code, err := s.deps.VerificationCodePersister().UseVerificationCode(r.Context(), f.ID, codeString)
+func (s *Strategy) verificationUseCode(ctx context.Context, w http.ResponseWriter, r *http.Request, codeString string, f *verification.Flow) error {
+	code, err := s.deps.VerificationCodePersister().UseVerificationCode(ctx, f.ID, codeString)
 	if errors.Is(err, ErrCodeNotFound) {
 		f.UI.Messages.Clear()
 		f.UI.Messages.Add(text.NewErrorValidationVerificationCodeInvalidOrAlreadyUsed())
-		if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(r.Context(), f); err != nil {
-			return s.retryVerificationFlowWithError(w, r, f.Type, err)
+		if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(ctx, f); err != nil {
+			return s.retryVerificationFlowWithError(ctx, w, r, f.Type, err)
 		}
 
 		if x.IsBrowserRequest(r) {
-			http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(r.Context())).String(), http.StatusSeeOther)
+			http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(ctx)).String(), http.StatusSeeOther)
 		} else {
 			s.deps.Writer().Write(w, r, f)
 		}
 		return errors.WithStack(flow.ErrCompletedByStrategy)
 	} else if err != nil {
-		return s.retryVerificationFlowWithError(w, r, f.Type, err)
-	}
-
-	i, err := s.deps.IdentityPool().GetIdentity(r.Context(), code.VerifiableAddress.IdentityID, identity.ExpandDefault)
-	if err != nil {
-		return s.retryVerificationFlowWithError(w, r, f.Type, err)
-	}
-
-	if err := s.deps.VerificationExecutor().PostVerificationHook(w, r, f, i); err != nil {
-		return s.retryVerificationFlowWithError(w, r, f.Type, err)
+		return s.retryVerificationFlowWithError(ctx, w, r, f.Type, err)
 	}
 
 	address := code.VerifiableAddress
@@ -260,11 +263,16 @@ func (s *Strategy) verificationUseCode(w http.ResponseWriter, r *http.Request, c
 	verifiedAt := sqlxx.NullTime(time.Now().UTC())
 	address.VerifiedAt = &verifiedAt
 	address.Status = identity.VerifiableAddressStatusCompleted
-	if err := s.deps.PrivilegedIdentityPool().UpdateVerifiableAddress(r.Context(), address); err != nil {
-		return s.retryVerificationFlowWithError(w, r, f.Type, err)
+	if err := s.deps.PrivilegedIdentityPool().UpdateVerifiableAddress(ctx, address, "verified", "verified_at", "status"); err != nil {
+		return s.retryVerificationFlowWithError(ctx, w, r, f.Type, err)
 	}
 
-	returnTo := f.ContinueURL(r.Context(), s.deps.Config())
+	i, err := s.deps.IdentityPool().GetIdentity(ctx, code.VerifiableAddress.IdentityID, identity.ExpandDefault)
+	if err != nil {
+		return s.retryVerificationFlowWithError(ctx, w, r, f.Type, err)
+	}
+
+	returnTo := f.ContinueURL(ctx, s.deps.Config())
 
 	f.UI = &container.Container{
 		Method: "GET",
@@ -280,14 +288,18 @@ func (s *Strategy) verificationUseCode(w http.ResponseWriter, r *http.Request, c
 		Append(node.NewAnchorField("continue", returnTo.String(), node.CodeGroup, text.NewInfoNodeLabelContinue()).
 			WithMetaLabel(text.NewInfoNodeLabelContinue()))
 
-	if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(r.Context(), f); err != nil {
-		return s.retryVerificationFlowWithError(w, r, flow.TypeBrowser, err)
+	if err := s.deps.VerificationFlowPersister().UpdateVerificationFlow(ctx, f); err != nil {
+		return s.retryVerificationFlowWithError(ctx, w, r, flow.TypeBrowser, err)
+	}
+
+	if err := s.deps.VerificationExecutor().PostVerificationHook(w, r, f, i); err != nil {
+		return s.retryVerificationFlowWithError(ctx, w, r, f.Type, err)
 	}
 
 	return nil
 }
 
-func (s *Strategy) retryVerificationFlowWithMessage(w http.ResponseWriter, r *http.Request, ft flow.Type, message *text.Message) error {
+func (s *Strategy) retryVerificationFlowWithMessage(ctx context.Context, w http.ResponseWriter, r *http.Request, ft flow.Type, message *text.Message) error {
 	s.deps.
 		Logger().
 		WithRequest(r).
@@ -295,27 +307,27 @@ func (s *Strategy) retryVerificationFlowWithMessage(w http.ResponseWriter, r *ht
 		Debug("A verification flow is being retried because a validation error occurred.")
 
 	f, err := verification.NewFlow(s.deps.Config(),
-		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(r.Context()), s.deps.CSRFHandler().RegenerateToken(w, r), r, s, ft)
+		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, s, ft)
 	if err != nil {
-		return s.handleVerificationError(w, r, f, nil, err)
+		return s.handleVerificationError(r, f, nil, err)
 	}
 
 	f.UI.Messages.Add(message)
 
-	if err := s.deps.VerificationFlowPersister().CreateVerificationFlow(r.Context(), f); err != nil {
-		return s.handleVerificationError(w, r, f, nil, err)
+	if err := s.deps.VerificationFlowPersister().CreateVerificationFlow(ctx, f); err != nil {
+		return s.handleVerificationError(r, f, nil, err)
 	}
 
 	if x.IsJSONRequest(r) {
 		s.deps.Writer().WriteError(w, r, flow.NewFlowReplacedError(text.NewErrorSystemGeneric("An error occured, please use the new flow.")).WithFlow(f))
 	} else {
-		http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(r.Context())).String(), http.StatusSeeOther)
+		http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(ctx)).String(), http.StatusSeeOther)
 	}
 
 	return errors.WithStack(flow.ErrCompletedByStrategy)
 }
 
-func (s *Strategy) retryVerificationFlowWithError(w http.ResponseWriter, r *http.Request, ft flow.Type, verErr error) error {
+func (s *Strategy) retryVerificationFlowWithError(ctx context.Context, w http.ResponseWriter, r *http.Request, ft flow.Type, verErr error) error {
 	s.deps.
 		Logger().
 		WithRequest(r).
@@ -323,9 +335,9 @@ func (s *Strategy) retryVerificationFlowWithError(w http.ResponseWriter, r *http
 		Debug("A verification flow is being retried because an error occurred.")
 
 	f, err := verification.NewFlow(s.deps.Config(),
-		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(r.Context()), s.deps.CSRFHandler().RegenerateToken(w, r), r, s, ft)
+		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, s, ft)
 	if err != nil {
-		return s.handleVerificationError(w, r, f, nil, err)
+		return s.handleVerificationError(r, f, nil, err)
 	}
 
 	var toReturn error
@@ -337,8 +349,8 @@ func (s *Strategy) retryVerificationFlowWithError(w http.ResponseWriter, r *http
 		return err
 	}
 
-	if err := s.deps.VerificationFlowPersister().CreateVerificationFlow(r.Context(), f); err != nil {
-		return s.handleVerificationError(w, r, f, nil, err)
+	if err := s.deps.VerificationFlowPersister().CreateVerificationFlow(ctx, f); err != nil {
+		return s.handleVerificationError(r, f, nil, err)
 	}
 
 	if x.IsJSONRequest(r) {
@@ -348,13 +360,13 @@ func (s *Strategy) retryVerificationFlowWithError(w http.ResponseWriter, r *http
 		}
 		s.deps.Writer().WriteError(w, r, toReturn)
 	} else {
-		http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(r.Context())).String(), http.StatusSeeOther)
+		http.Redirect(w, r, f.AppendTo(s.deps.Config().SelfServiceFlowVerificationUI(ctx)).String(), http.StatusSeeOther)
 	}
 
 	return errors.WithStack(flow.ErrCompletedByStrategy)
 }
 
-func (s *Strategy) SendVerificationEmail(ctx context.Context, f *verification.Flow, i *identity.Identity, a *identity.VerifiableAddress) (err error) {
+func (s *Strategy) SendVerificationCode(ctx context.Context, f *verification.Flow, i *identity.Identity, a *identity.VerifiableAddress) (err error) {
 	rawCode := GenerateCode()
 
 	code, err := s.deps.VerificationCodePersister().CreateVerificationCode(ctx, &CreateVerificationCodeParams{

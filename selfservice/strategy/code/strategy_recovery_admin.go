@@ -4,13 +4,14 @@
 package code
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/gofrs/uuid"
-	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/identity"
@@ -20,6 +21,9 @@ import (
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/events"
+	"github.com/ory/kratos/x/redir"
+	"github.com/ory/pop/v6"
 	"github.com/ory/x/decoderx"
 	"github.com/ory/x/sqlcon"
 	"github.com/ory/x/urlx"
@@ -31,7 +35,7 @@ const (
 
 func (s *Strategy) RegisterPublicRecoveryRoutes(public *x.RouterPublic) {
 	s.deps.CSRFHandler().IgnorePath(RouteAdminCreateRecoveryCode)
-	public.POST(RouteAdminCreateRecoveryCode, x.RedirectToAdminRoute(s.deps))
+	public.POST(RouteAdminCreateRecoveryCode, redir.RedirectToAdminRoute(s.deps))
 }
 
 func (s *Strategy) RegisterAdminRecoveryRoutes(admin *x.RouterAdmin) {
@@ -73,6 +77,13 @@ type createRecoveryCodeForIdentityBody struct {
 	//	- 1m
 	//	- 1s
 	ExpiresIn string `json:"expires_in"`
+
+	// Flow Type
+	//
+	// The flow type for the recovery flow. Defaults to browser.
+	//
+	// required: false
+	FlowType *flow.Type `json:"flow_type"`
 }
 
 // Recovery Code for Identity
@@ -126,7 +137,7 @@ type recoveryCodeForIdentity struct {
 //	  400: errorGeneric
 //	  404: errorGeneric
 //	  default: errorGeneric
-func (s *Strategy) createRecoveryCodeForIdentity(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (s *Strategy) createRecoveryCodeForIdentity(w http.ResponseWriter, r *http.Request) {
 	var p createRecoveryCodeForIdentityBody
 	if err := s.dx.Decode(r, &p, decoderx.HTTPJSONDecoder()); err != nil {
 		s.deps.Writer().WriteError(w, r, err)
@@ -149,12 +160,21 @@ func (s *Strategy) createRecoveryCodeForIdentity(w http.ResponseWriter, r *http.
 		}
 	}
 
-	if time.Now().Add(expiresIn).Before(time.Now()) {
-		s.deps.Writer().WriteError(w, r, errors.WithStack(herodot.ErrBadRequest.WithReasonf(`Value from "expires_in" must result to a future time: %s`, p.ExpiresIn)))
+	if expiresIn <= 0 {
+		s.deps.Writer().WriteError(w, r, errors.WithStack(herodot.ErrBadRequest.WithReasonf(`Value from "expires_in" must result to a future time: %s`, expiresIn)))
 		return
 	}
 
-	recoveryFlow, err := recovery.NewFlow(config, expiresIn, s.deps.GenerateCSRFToken(r), r, s, flow.TypeBrowser)
+	flowType := flow.TypeBrowser
+	if p.FlowType != nil {
+		flowType = *p.FlowType
+	}
+	if !flowType.Valid() {
+		s.deps.Writer().WriteError(w, r, errors.WithStack(herodot.ErrBadRequest.WithReasonf(`Value from "flow_type" is not valid: %q`, flowType)))
+		return
+	}
+
+	recoveryFlow, err := recovery.NewFlow(config, expiresIn, s.deps.GenerateCSRFToken(r), r, s, flowType)
 	if err != nil {
 		s.deps.Writer().WriteError(w, r, err)
 		return
@@ -162,18 +182,17 @@ func (s *Strategy) createRecoveryCodeForIdentity(w http.ResponseWriter, r *http.
 	recoveryFlow.DangerousSkipCSRFCheck = true
 	recoveryFlow.State = flow.StateEmailSent
 	recoveryFlow.UI.Nodes = node.Nodes{}
-	recoveryFlow.UI.Nodes.Append(node.NewInputField("code", nil, node.CodeGroup, node.InputAttributeTypeText, node.WithRequiredInputAttribute).
+	recoveryFlow.UI.Nodes.Append(node.NewInputField("code", nil, node.CodeGroup, node.InputAttributeTypeText, node.WithRequiredInputAttribute, node.WithInputAttributes(func(a *node.InputAttributes) {
+		a.Pattern = "[0-9]+"
+		a.MaxLength = CodeLength
+	})).
 		WithMetaLabel(text.NewInfoNodeLabelRecoveryCode()),
 	)
+	rawCode := GenerateCode()
 
 	recoveryFlow.UI.Nodes.
 		Append(node.NewInputField("method", s.RecoveryStrategyID(), node.CodeGroup, node.InputAttributeTypeSubmit).
-			WithMetaLabel(text.NewInfoNodeLabelSubmit()))
-
-	if err := s.deps.RecoveryFlowPersister().CreateRecoveryFlow(ctx, recoveryFlow); err != nil {
-		s.deps.Writer().WriteError(w, r, err)
-		return
-	}
+			WithMetaLabel(text.NewInfoNodeLabelContinue()))
 
 	id, err := s.deps.IdentityPool().GetIdentity(ctx, p.IdentityID, identity.ExpandDefault)
 	if notFoundErr := sqlcon.ErrNoRows; errors.As(err, &notFoundErr) {
@@ -184,18 +203,30 @@ func (s *Strategy) createRecoveryCodeForIdentity(w http.ResponseWriter, r *http.
 		return
 	}
 
-	rawCode := GenerateCode()
+	if err := s.deps.TransactionalPersisterProvider().Transaction(ctx, func(ctx context.Context, c *pop.Connection) error {
+		if err := s.deps.RecoveryFlowPersister().CreateRecoveryFlow(ctx, recoveryFlow); err != nil {
+			return err
+		}
 
-	if _, err := s.deps.RecoveryCodePersister().CreateRecoveryCode(ctx, &CreateRecoveryCodeParams{
-		RawCode:    rawCode,
-		CodeType:   RecoveryCodeTypeAdmin,
-		ExpiresIn:  expiresIn,
-		FlowID:     recoveryFlow.ID,
-		IdentityID: id.ID,
+		if _, err := s.deps.RecoveryCodePersister().CreateRecoveryCode(ctx, &CreateRecoveryCodeParams{
+			RawCode:    rawCode,
+			CodeType:   RecoveryCodeTypeAdmin,
+			ExpiresIn:  expiresIn,
+			FlowID:     recoveryFlow.ID,
+			IdentityID: id.ID,
+		}); err != nil {
+			return err
+		}
+
+		return nil
 	}); err != nil {
 		s.deps.Writer().WriteError(w, r, err)
 		return
 	}
+
+	trace.SpanFromContext(r.Context()).AddEvent(
+		events.NewRecoveryInitiatedByAdmin(ctx, recoveryFlow.ID, id.ID, flowType.String(), "code"),
+	)
 
 	s.deps.Audit().
 		WithField("identity_id", id.ID).

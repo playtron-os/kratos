@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/ory/kratos/x/nosurfx"
+
 	"github.com/pkg/errors"
 	"github.com/pquerna/otp"
 
@@ -33,8 +35,9 @@ var (
 type totpStrategyDependencies interface {
 	x.LoggingProvider
 	x.WriterProvider
-	x.CSRFTokenGeneratorProvider
-	x.CSRFProvider
+	nosurfx.CSRFTokenGeneratorProvider
+	nosurfx.CSRFProvider
+	x.TracingProvider
 
 	config.Provider
 
@@ -73,18 +76,18 @@ type Strategy struct {
 	hd *decoderx.HTTP
 }
 
-func NewStrategy(d any) *Strategy {
+func NewStrategy(d totpStrategyDependencies) *Strategy {
 	return &Strategy{
-		d:  d.(totpStrategyDependencies),
+		d:  d,
 		hd: decoderx.NewHTTP(),
 	}
 }
 
-func (s *Strategy) CountActiveFirstFactorCredentials(cc map[identity.CredentialsType]identity.Credentials) (count int, err error) {
+func (s *Strategy) CountActiveFirstFactorCredentials(_ context.Context, _ map[identity.CredentialsType]identity.Credentials) (count int, err error) {
 	return 0, nil
 }
 
-func (s *Strategy) CountActiveMultiFactorCredentials(cc map[identity.CredentialsType]identity.Credentials) (count int, err error) {
+func (s *Strategy) CountActiveMultiFactorCredentials(_ context.Context, cc map[identity.CredentialsType]identity.Credentials) (count int, err error) {
 	for _, c := range cc {
 		if c.Type == s.ID() && len(c.Config) > 0 {
 			var conf identity.CredentialsTOTPConfig
@@ -93,7 +96,7 @@ func (s *Strategy) CountActiveMultiFactorCredentials(cc map[identity.Credentials
 			}
 
 			_, err := otp.NewKeyFromURL(conf.TOTPURL)
-			if len(c.Identifiers) > 0 && len(c.Identifiers[0]) > 0 && len(conf.TOTPURL) > 0 && err == nil {
+			if len(conf.TOTPURL) > 0 && err == nil {
 				count++
 			}
 		}
@@ -109,7 +112,7 @@ func (s *Strategy) NodeGroup() node.UiNodeGroup {
 	return node.TOTPGroup
 }
 
-func (s *Strategy) CompletedAuthenticationMethod(ctx context.Context, _ session.AuthenticationMethods) session.AuthenticationMethod {
+func (s *Strategy) CompletedAuthenticationMethod(ctx context.Context) session.AuthenticationMethod {
 	return session.AuthenticationMethod{
 		Method: s.ID(),
 		AAL:    identity.AuthenticatorAssuranceLevel2,

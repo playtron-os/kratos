@@ -5,354 +5,1980 @@
 
 **Table of Contents**
 
-- [ (2024-02-16)](#2024-02-16)
-  - [Bug Fixes](#bug-fixes)
-  - [Features](#features)
-  - [Tests](#tests)
-- [1.1.0-pre.0 (2024-02-01)](#110-pre0-2024-02-01)
+- [ (2025-05-19)](#2025-05-19)
   - [Breaking Changes](#breaking-changes)
-    - [Bug Fixes](#bug-fixes-1)
+  - [Related issue(s)](#related-issues)
+  - [Related issue(s)](#related-issues-1)
+  - [Related issue(s)](#related-issues-2)
+  - [Related issue(s)](#related-issues-3)
+  - [Related issue(s)](#related-issues-4)
+    - [Tests](#tests)
+- [1.3.0 (2024-09-26)](#130-2024-09-26)
+  - [Breaking Changes](#breaking-changes-1)
+    - [Bug Fixes](#bug-fixes)
     - [Code Generation](#code-generation)
     - [Documentation](#documentation)
-    - [Features](#features-1)
-    - [Reverts](#reverts)
+    - [Features](#features)
     - [Tests](#tests-1)
     - [Unclassified](#unclassified)
-- [1.0.0 (2023-07-12)](#100-2023-07-12)
-  - [Bug Fixes](#bug-fixes-2)
-  - [Code Generation](#code-generation-1)
-  - [Documentation](#documentation-1)
-  - [Features](#features-2)
-  - [Tests](#tests-2)
-  - [Unclassified](#unclassified-1)
-- [0.13.0 (2023-04-18)](#0130-2023-04-18)
-  - [Breaking Changes](#breaking-changes-1)
-    - [Bug Fixes](#bug-fixes-3)
+- [1.2.0 (2024-06-05)](#120-2024-06-05)
+  - [Breaking Changes](#breaking-changes-2)
+    - [Bug Fixes](#bug-fixes-1)
+    - [Code Generation](#code-generation-1)
+    - [Documentation](#documentation-1)
+    - [Features](#features-1)
+    - [Tests](#tests-2)
+    - [Unclassified](#unclassified-1)
+- [1.1.0 (2024-02-20)](#110-2024-02-20)
+  - [Breaking Changes](#breaking-changes-3)
+    - [Bug Fixes](#bug-fixes-2)
     - [Code Generation](#code-generation-2)
-    - [Code Refactoring](#code-refactoring)
     - [Documentation](#documentation-2)
-    - [Features](#features-3)
+    - [Features](#features-2)
+    - [Reverts](#reverts)
     - [Tests](#tests-3)
     - [Unclassified](#unclassified-2)
-- [0.11.1 (2023-01-14)](#0111-2023-01-14)
-  - [Breaking Changes](#breaking-changes-2)
+- [1.0.0 (2023-07-12)](#100-2023-07-12)
+  - [Bug Fixes](#bug-fixes-3)
+  - [Code Generation](#code-generation-3)
+  - [Documentation](#documentation-3)
+  - [Features](#features-3)
+  - [Tests](#tests-4)
+  - [Unclassified](#unclassified-3)
+- [0.13.0 (2023-04-18)](#0130-2023-04-18)
+  - [Breaking Changes](#breaking-changes-4)
     - [Bug Fixes](#bug-fixes-4)
-    - [Code Generation](#code-generation-3)
-    - [Documentation](#documentation-3)
+    - [Code Generation](#code-generation-4)
+    - [Code Refactoring](#code-refactoring)
+    - [Documentation](#documentation-4)
     - [Features](#features-4)
-    - [Tests](#tests-4)
-- [0.11.0 (2022-12-02)](#0110-2022-12-02)
-  - [Code Generation](#code-generation-4)
-  - [Features](#features-5)
-- [0.11.0-alpha.0.pre.2 (2022-11-28)](#0110-alpha0pre2-2022-11-28)
-  - [Breaking Changes](#breaking-changes-3)
+    - [Tests](#tests-5)
+    - [Unclassified](#unclassified-4)
+- [0.11.1 (2023-01-14)](#0111-2023-01-14)
+  - [Breaking Changes](#breaking-changes-5)
     - [Bug Fixes](#bug-fixes-5)
     - [Code Generation](#code-generation-5)
-    - [Code Refactoring](#code-refactoring-1)
-    - [Documentation](#documentation-4)
-    - [Features](#features-6)
-    - [Reverts](#reverts-1)
-    - [Tests](#tests-5)
-    - [Unclassified](#unclassified-3)
-- [0.10.1 (2022-06-01)](#0101-2022-06-01)
-  - [Bug Fixes](#bug-fixes-6)
-  - [Code Generation](#code-generation-6)
-- [0.10.0 (2022-05-30)](#0100-2022-05-30)
-  - [Breaking Changes](#breaking-changes-4)
-    - [Bug Fixes](#bug-fixes-7)
-    - [Code Generation](#code-generation-7)
-    - [Code Refactoring](#code-refactoring-2)
     - [Documentation](#documentation-5)
-    - [Features](#features-7)
+    - [Features](#features-5)
     - [Tests](#tests-6)
-    - [Unclassified](#unclassified-4)
-- [0.9.0-alpha.3 (2022-03-25)](#090-alpha3-2022-03-25)
-  - [Breaking Changes](#breaking-changes-5)
-    - [Bug Fixes](#bug-fixes-8)
-    - [Code Generation](#code-generation-8)
-    - [Documentation](#documentation-6)
-- [0.9.0-alpha.2 (2022-03-22)](#090-alpha2-2022-03-22)
-  - [Bug Fixes](#bug-fixes-9)
-  - [Code Generation](#code-generation-9)
-- [0.9.0-alpha.1 (2022-03-21)](#090-alpha1-2022-03-21)
+- [0.11.0 (2022-12-02)](#0110-2022-12-02)
+  - [Code Generation](#code-generation-6)
+  - [Features](#features-6)
+- [0.11.0-alpha.0.pre.2 (2022-11-28)](#0110-alpha0pre2-2022-11-28)
   - [Breaking Changes](#breaking-changes-6)
-    - [Bug Fixes](#bug-fixes-10)
-    - [Code Generation](#code-generation-10)
-    - [Code Refactoring](#code-refactoring-3)
-    - [Documentation](#documentation-7)
-    - [Features](#features-8)
+    - [Bug Fixes](#bug-fixes-6)
+    - [Code Generation](#code-generation-7)
+    - [Code Refactoring](#code-refactoring-1)
+    - [Documentation](#documentation-6)
+    - [Features](#features-7)
+    - [Reverts](#reverts-1)
     - [Tests](#tests-7)
     - [Unclassified](#unclassified-5)
-- [0.8.3-alpha.1.pre.0 (2022-01-21)](#083-alpha1pre0-2022-01-21)
+- [0.10.1 (2022-06-01)](#0101-2022-06-01)
+  - [Bug Fixes](#bug-fixes-7)
+  - [Code Generation](#code-generation-8)
+- [0.10.0 (2022-05-30)](#0100-2022-05-30)
   - [Breaking Changes](#breaking-changes-7)
-    - [Bug Fixes](#bug-fixes-11)
-    - [Code Generation](#code-generation-11)
-    - [Code Refactoring](#code-refactoring-4)
-    - [Documentation](#documentation-8)
-    - [Features](#features-9)
+    - [Bug Fixes](#bug-fixes-8)
+    - [Code Generation](#code-generation-9)
+    - [Code Refactoring](#code-refactoring-2)
+    - [Documentation](#documentation-7)
+    - [Features](#features-8)
     - [Tests](#tests-8)
-- [0.8.2-alpha.1 (2021-12-17)](#082-alpha1-2021-12-17)
-  - [Bug Fixes](#bug-fixes-12)
-  - [Code Generation](#code-generation-12)
-  - [Documentation](#documentation-9)
-- [0.8.1-alpha.1 (2021-12-13)](#081-alpha1-2021-12-13)
-  - [Bug Fixes](#bug-fixes-13)
-  - [Code Generation](#code-generation-13)
-  - [Documentation](#documentation-10)
-  - [Features](#features-10)
-  - [Tests](#tests-9)
-- [0.8.0-alpha.4.pre.0 (2021-11-09)](#080-alpha4pre0-2021-11-09)
-  - [Breaking Changes](#breaking-changes-8)
-    - [Bug Fixes](#bug-fixes-14)
-    - [Code Generation](#code-generation-14)
-    - [Documentation](#documentation-11)
-    - [Features](#features-11)
-    - [Tests](#tests-10)
-- [0.8.0-alpha.3 (2021-10-28)](#080-alpha3-2021-10-28)
-  - [Bug Fixes](#bug-fixes-15)
-  - [Code Generation](#code-generation-15)
-- [0.8.0-alpha.2 (2021-10-28)](#080-alpha2-2021-10-28)
-  - [Code Generation](#code-generation-16)
-- [0.8.0-alpha.1 (2021-10-27)](#080-alpha1-2021-10-27)
-  - [Breaking Changes](#breaking-changes-9)
-    - [Bug Fixes](#bug-fixes-16)
-    - [Code Generation](#code-generation-17)
-    - [Code Refactoring](#code-refactoring-5)
-    - [Documentation](#documentation-12)
-    - [Features](#features-12)
-    - [Reverts](#reverts-2)
-    - [Tests](#tests-11)
     - [Unclassified](#unclassified-6)
-- [0.7.6-alpha.1 (2021-09-12)](#076-alpha1-2021-09-12)
+- [0.9.0-alpha.3 (2022-03-25)](#090-alpha3-2022-03-25)
+  - [Breaking Changes](#breaking-changes-8)
+    - [Bug Fixes](#bug-fixes-9)
+    - [Code Generation](#code-generation-10)
+    - [Documentation](#documentation-8)
+- [0.9.0-alpha.2 (2022-03-22)](#090-alpha2-2022-03-22)
+  - [Bug Fixes](#bug-fixes-10)
+  - [Code Generation](#code-generation-11)
+- [0.9.0-alpha.1 (2022-03-21)](#090-alpha1-2022-03-21)
+  - [Breaking Changes](#breaking-changes-9)
+    - [Bug Fixes](#bug-fixes-11)
+    - [Code Generation](#code-generation-12)
+    - [Code Refactoring](#code-refactoring-3)
+    - [Documentation](#documentation-9)
+    - [Features](#features-9)
+    - [Tests](#tests-9)
+    - [Unclassified](#unclassified-7)
+- [0.8.3-alpha.1.pre.0 (2022-01-21)](#083-alpha1pre0-2022-01-21)
+  - [Breaking Changes](#breaking-changes-10)
+    - [Bug Fixes](#bug-fixes-12)
+    - [Code Generation](#code-generation-13)
+    - [Code Refactoring](#code-refactoring-4)
+    - [Documentation](#documentation-10)
+    - [Features](#features-10)
+    - [Tests](#tests-10)
+- [0.8.2-alpha.1 (2021-12-17)](#082-alpha1-2021-12-17)
+  - [Bug Fixes](#bug-fixes-13)
+  - [Code Generation](#code-generation-14)
+  - [Documentation](#documentation-11)
+- [0.8.1-alpha.1 (2021-12-13)](#081-alpha1-2021-12-13)
+  - [Bug Fixes](#bug-fixes-14)
+  - [Code Generation](#code-generation-15)
+  - [Documentation](#documentation-12)
+  - [Features](#features-11)
+  - [Tests](#tests-11)
+- [0.8.0-alpha.4.pre.0 (2021-11-09)](#080-alpha4pre0-2021-11-09)
+  - [Breaking Changes](#breaking-changes-11)
+    - [Bug Fixes](#bug-fixes-15)
+    - [Code Generation](#code-generation-16)
+    - [Documentation](#documentation-13)
+    - [Features](#features-12)
+    - [Tests](#tests-12)
+- [0.8.0-alpha.3 (2021-10-28)](#080-alpha3-2021-10-28)
+  - [Bug Fixes](#bug-fixes-16)
+  - [Code Generation](#code-generation-17)
+- [0.8.0-alpha.2 (2021-10-28)](#080-alpha2-2021-10-28)
   - [Code Generation](#code-generation-18)
-- [0.7.5-alpha.1 (2021-09-11)](#075-alpha1-2021-09-11)
-  - [Code Generation](#code-generation-19)
-- [0.7.4-alpha.1 (2021-09-09)](#074-alpha1-2021-09-09)
-  - [Bug Fixes](#bug-fixes-17)
+- [0.8.0-alpha.1 (2021-10-27)](#080-alpha1-2021-10-27)
+  - [Breaking Changes](#breaking-changes-12)
+    - [Bug Fixes](#bug-fixes-17)
+    - [Code Generation](#code-generation-19)
+    - [Code Refactoring](#code-refactoring-5)
+    - [Documentation](#documentation-14)
+    - [Features](#features-13)
+    - [Reverts](#reverts-2)
+    - [Tests](#tests-13)
+    - [Unclassified](#unclassified-8)
+- [0.7.6-alpha.1 (2021-09-12)](#076-alpha1-2021-09-12)
   - [Code Generation](#code-generation-20)
-  - [Documentation](#documentation-13)
-  - [Features](#features-13)
-  - [Tests](#tests-12)
-- [0.7.3-alpha.1 (2021-08-28)](#073-alpha1-2021-08-28)
-  - [Bug Fixes](#bug-fixes-18)
+- [0.7.5-alpha.1 (2021-09-11)](#075-alpha1-2021-09-11)
   - [Code Generation](#code-generation-21)
-  - [Documentation](#documentation-14)
-  - [Features](#features-14)
-- [0.7.1-alpha.1 (2021-07-22)](#071-alpha1-2021-07-22)
-  - [Bug Fixes](#bug-fixes-19)
+- [0.7.4-alpha.1 (2021-09-09)](#074-alpha1-2021-09-09)
+  - [Bug Fixes](#bug-fixes-18)
   - [Code Generation](#code-generation-22)
   - [Documentation](#documentation-15)
-  - [Tests](#tests-13)
+  - [Features](#features-14)
+  - [Tests](#tests-14)
+- [0.7.3-alpha.1 (2021-08-28)](#073-alpha1-2021-08-28)
+  - [Bug Fixes](#bug-fixes-19)
+  - [Code Generation](#code-generation-23)
+  - [Documentation](#documentation-16)
+  - [Features](#features-15)
+- [0.7.1-alpha.1 (2021-07-22)](#071-alpha1-2021-07-22)
+  - [Bug Fixes](#bug-fixes-20)
+  - [Code Generation](#code-generation-24)
+  - [Documentation](#documentation-17)
+  - [Tests](#tests-15)
 - [0.7.0-alpha.1 (2021-07-13)](#070-alpha1-2021-07-13)
-  - [Breaking Changes](#breaking-changes-10)
-    - [Bug Fixes](#bug-fixes-20)
-    - [Code Generation](#code-generation-23)
-    - [Code Refactoring](#code-refactoring-6)
-    - [Documentation](#documentation-16)
-    - [Features](#features-15)
-    - [Tests](#tests-14)
-    - [Unclassified](#unclassified-7)
-- [0.6.3-alpha.1 (2021-05-17)](#063-alpha1-2021-05-17)
-  - [Breaking Changes](#breaking-changes-11)
+  - [Breaking Changes](#breaking-changes-13)
     - [Bug Fixes](#bug-fixes-21)
-    - [Code Generation](#code-generation-24)
+    - [Code Generation](#code-generation-25)
+    - [Code Refactoring](#code-refactoring-6)
+    - [Documentation](#documentation-18)
+    - [Features](#features-16)
+    - [Tests](#tests-16)
+    - [Unclassified](#unclassified-9)
+- [0.6.3-alpha.1 (2021-05-17)](#063-alpha1-2021-05-17)
+  - [Breaking Changes](#breaking-changes-14)
+    - [Bug Fixes](#bug-fixes-22)
+    - [Code Generation](#code-generation-26)
     - [Code Refactoring](#code-refactoring-7)
 - [0.6.2-alpha.1 (2021-05-14)](#062-alpha1-2021-05-14)
-  - [Code Generation](#code-generation-25)
-  - [Documentation](#documentation-17)
-- [0.6.1-alpha.1 (2021-05-11)](#061-alpha1-2021-05-11)
-  - [Code Generation](#code-generation-26)
-  - [Features](#features-16)
-- [0.6.0-alpha.2 (2021-05-07)](#060-alpha2-2021-05-07)
-  - [Bug Fixes](#bug-fixes-22)
   - [Code Generation](#code-generation-27)
-  - [Features](#features-17)
-- [0.6.0-alpha.1 (2021-05-05)](#060-alpha1-2021-05-05)
-  - [Breaking Changes](#breaking-changes-12)
-    - [Bug Fixes](#bug-fixes-23)
-    - [Code Generation](#code-generation-28)
-    - [Code Refactoring](#code-refactoring-8)
-    - [Documentation](#documentation-18)
-    - [Features](#features-18)
-    - [Tests](#tests-15)
-    - [Unclassified](#unclassified-8)
-- [0.5.5-alpha.1 (2020-12-09)](#055-alpha1-2020-12-09)
-  - [Bug Fixes](#bug-fixes-24)
-  - [Code Generation](#code-generation-29)
   - [Documentation](#documentation-19)
-  - [Features](#features-19)
-  - [Tests](#tests-16)
-  - [Unclassified](#unclassified-9)
-- [0.5.4-alpha.1 (2020-11-11)](#054-alpha1-2020-11-11)
+- [0.6.1-alpha.1 (2021-05-11)](#061-alpha1-2021-05-11)
+  - [Code Generation](#code-generation-28)
+  - [Features](#features-17)
+- [0.6.0-alpha.2 (2021-05-07)](#060-alpha2-2021-05-07)
+  - [Bug Fixes](#bug-fixes-23)
+  - [Code Generation](#code-generation-29)
+  - [Features](#features-18)
+- [0.6.0-alpha.1 (2021-05-05)](#060-alpha1-2021-05-05)
+  - [Breaking Changes](#breaking-changes-15)
+    - [Bug Fixes](#bug-fixes-24)
+    - [Code Generation](#code-generation-30)
+    - [Code Refactoring](#code-refactoring-8)
+    - [Documentation](#documentation-20)
+    - [Features](#features-19)
+    - [Tests](#tests-17)
+    - [Unclassified](#unclassified-10)
+- [0.5.5-alpha.1 (2020-12-09)](#055-alpha1-2020-12-09)
   - [Bug Fixes](#bug-fixes-25)
-  - [Code Generation](#code-generation-30)
-  - [Code Refactoring](#code-refactoring-9)
-  - [Documentation](#documentation-20)
-  - [Features](#features-20)
-- [0.5.3-alpha.1 (2020-10-27)](#053-alpha1-2020-10-27)
-  - [Bug Fixes](#bug-fixes-26)
   - [Code Generation](#code-generation-31)
   - [Documentation](#documentation-21)
-  - [Features](#features-21)
-  - [Tests](#tests-17)
-- [0.5.2-alpha.1 (2020-10-22)](#052-alpha1-2020-10-22)
-  - [Bug Fixes](#bug-fixes-27)
-  - [Code Generation](#code-generation-32)
-  - [Documentation](#documentation-22)
+  - [Features](#features-20)
   - [Tests](#tests-18)
-- [0.5.1-alpha.1 (2020-10-20)](#051-alpha1-2020-10-20)
-  - [Bug Fixes](#bug-fixes-28)
+  - [Unclassified](#unclassified-11)
+- [0.5.4-alpha.1 (2020-11-11)](#054-alpha1-2020-11-11)
+  - [Bug Fixes](#bug-fixes-26)
+  - [Code Generation](#code-generation-32)
+  - [Code Refactoring](#code-refactoring-9)
+  - [Documentation](#documentation-22)
+  - [Features](#features-21)
+- [0.5.3-alpha.1 (2020-10-27)](#053-alpha1-2020-10-27)
+  - [Bug Fixes](#bug-fixes-27)
   - [Code Generation](#code-generation-33)
   - [Documentation](#documentation-23)
   - [Features](#features-22)
   - [Tests](#tests-19)
-  - [Unclassified](#unclassified-10)
-- [0.5.0-alpha.1 (2020-10-15)](#050-alpha1-2020-10-15)
-  - [Breaking Changes](#breaking-changes-13)
-    - [Bug Fixes](#bug-fixes-29)
-    - [Code Generation](#code-generation-34)
-    - [Code Refactoring](#code-refactoring-10)
-    - [Documentation](#documentation-24)
-    - [Features](#features-23)
-    - [Tests](#tests-20)
-    - [Unclassified](#unclassified-11)
-- [0.4.6-alpha.1 (2020-07-13)](#046-alpha1-2020-07-13)
-  - [Bug Fixes](#bug-fixes-30)
+- [0.5.2-alpha.1 (2020-10-22)](#052-alpha1-2020-10-22)
+  - [Bug Fixes](#bug-fixes-28)
+  - [Code Generation](#code-generation-34)
+  - [Documentation](#documentation-24)
+  - [Tests](#tests-20)
+- [0.5.1-alpha.1 (2020-10-20)](#051-alpha1-2020-10-20)
+  - [Bug Fixes](#bug-fixes-29)
   - [Code Generation](#code-generation-35)
-- [0.4.5-alpha.1 (2020-07-13)](#045-alpha1-2020-07-13)
-  - [Bug Fixes](#bug-fixes-31)
-  - [Code Generation](#code-generation-36)
-- [0.4.4-alpha.1 (2020-07-10)](#044-alpha1-2020-07-10)
-  - [Bug Fixes](#bug-fixes-32)
-  - [Code Generation](#code-generation-37)
   - [Documentation](#documentation-25)
-- [0.4.3-alpha.1 (2020-07-08)](#043-alpha1-2020-07-08)
-  - [Bug Fixes](#bug-fixes-33)
-  - [Code Generation](#code-generation-38)
-- [0.4.2-alpha.1 (2020-07-08)](#042-alpha1-2020-07-08)
-  - [Bug Fixes](#bug-fixes-34)
-  - [Code Generation](#code-generation-39)
-- [0.4.0-alpha.1 (2020-07-08)](#040-alpha1-2020-07-08)
-  - [Breaking Changes](#breaking-changes-14)
-    - [Bug Fixes](#bug-fixes-35)
-    - [Code Generation](#code-generation-40)
-    - [Code Refactoring](#code-refactoring-11)
+  - [Features](#features-23)
+  - [Tests](#tests-21)
+  - [Unclassified](#unclassified-12)
+- [0.5.0-alpha.1 (2020-10-15)](#050-alpha1-2020-10-15)
+  - [Breaking Changes](#breaking-changes-16)
+    - [Bug Fixes](#bug-fixes-30)
+    - [Code Generation](#code-generation-36)
+    - [Code Refactoring](#code-refactoring-10)
     - [Documentation](#documentation-26)
     - [Features](#features-24)
-    - [Unclassified](#unclassified-12)
-- [0.3.0-alpha.1 (2020-05-15)](#030-alpha1-2020-05-15)
-  - [Breaking Changes](#breaking-changes-15)
+    - [Tests](#tests-22)
+    - [Unclassified](#unclassified-13)
+- [0.4.6-alpha.1 (2020-07-13)](#046-alpha1-2020-07-13)
+  - [Bug Fixes](#bug-fixes-31)
+  - [Code Generation](#code-generation-37)
+- [0.4.5-alpha.1 (2020-07-13)](#045-alpha1-2020-07-13)
+  - [Bug Fixes](#bug-fixes-32)
+  - [Code Generation](#code-generation-38)
+- [0.4.4-alpha.1 (2020-07-10)](#044-alpha1-2020-07-10)
+  - [Bug Fixes](#bug-fixes-33)
+  - [Code Generation](#code-generation-39)
+  - [Documentation](#documentation-27)
+- [0.4.3-alpha.1 (2020-07-08)](#043-alpha1-2020-07-08)
+  - [Bug Fixes](#bug-fixes-34)
+  - [Code Generation](#code-generation-40)
+- [0.4.2-alpha.1 (2020-07-08)](#042-alpha1-2020-07-08)
+  - [Bug Fixes](#bug-fixes-35)
+  - [Code Generation](#code-generation-41)
+- [0.4.0-alpha.1 (2020-07-08)](#040-alpha1-2020-07-08)
+  - [Breaking Changes](#breaking-changes-17)
     - [Bug Fixes](#bug-fixes-36)
+    - [Code Generation](#code-generation-42)
+    - [Code Refactoring](#code-refactoring-11)
+    - [Documentation](#documentation-28)
+    - [Features](#features-25)
+    - [Unclassified](#unclassified-14)
+- [0.3.0-alpha.1 (2020-05-15)](#030-alpha1-2020-05-15)
+  - [Breaking Changes](#breaking-changes-18)
+    - [Bug Fixes](#bug-fixes-37)
     - [Chores](#chores)
     - [Code Refactoring](#code-refactoring-12)
-    - [Documentation](#documentation-27)
-    - [Features](#features-25)
-    - [Unclassified](#unclassified-13)
-- [0.2.1-alpha.1 (2020-05-05)](#021-alpha1-2020-05-05)
-  - [Chores](#chores-1)
-  - [Documentation](#documentation-28)
-- [0.2.0-alpha.2 (2020-05-04)](#020-alpha2-2020-05-04)
-  - [Breaking Changes](#breaking-changes-16)
-    - [Bug Fixes](#bug-fixes-37)
-    - [Chores](#chores-2)
-    - [Code Refactoring](#code-refactoring-13)
     - [Documentation](#documentation-29)
     - [Features](#features-26)
-    - [Unclassified](#unclassified-14)
-- [0.1.1-alpha.1 (2020-02-18)](#011-alpha1-2020-02-18)
-  - [Bug Fixes](#bug-fixes-38)
-  - [Code Refactoring](#code-refactoring-14)
+    - [Unclassified](#unclassified-15)
+- [0.2.1-alpha.1 (2020-05-05)](#021-alpha1-2020-05-05)
+  - [Chores](#chores-1)
   - [Documentation](#documentation-30)
-- [0.1.0-alpha.6 (2020-02-16)](#010-alpha6-2020-02-16)
+- [0.2.0-alpha.2 (2020-05-04)](#020-alpha2-2020-05-04)
+  - [Breaking Changes](#breaking-changes-19)
+    - [Bug Fixes](#bug-fixes-38)
+    - [Chores](#chores-2)
+    - [Code Refactoring](#code-refactoring-13)
+    - [Documentation](#documentation-31)
+    - [Features](#features-27)
+    - [Unclassified](#unclassified-16)
+- [0.1.1-alpha.1 (2020-02-18)](#011-alpha1-2020-02-18)
   - [Bug Fixes](#bug-fixes-39)
-  - [Code Refactoring](#code-refactoring-15)
-  - [Documentation](#documentation-31)
-  - [Features](#features-27)
-- [0.1.0-alpha.5 (2020-02-06)](#010-alpha5-2020-02-06)
+  - [Code Refactoring](#code-refactoring-14)
   - [Documentation](#documentation-32)
+- [0.1.0-alpha.6 (2020-02-16)](#010-alpha6-2020-02-16)
+  - [Bug Fixes](#bug-fixes-40)
+  - [Code Refactoring](#code-refactoring-15)
+  - [Documentation](#documentation-33)
   - [Features](#features-28)
+- [0.1.0-alpha.5 (2020-02-06)](#010-alpha5-2020-02-06)
+  - [Documentation](#documentation-34)
+  - [Features](#features-29)
 - [0.1.0-alpha.4 (2020-02-06)](#010-alpha4-2020-02-06)
   - [Continuous Integration](#continuous-integration)
-  - [Documentation](#documentation-33)
+  - [Documentation](#documentation-35)
 - [0.1.0-alpha.3 (2020-02-06)](#010-alpha3-2020-02-06)
   - [Continuous Integration](#continuous-integration-1)
 - [0.1.0-alpha.2 (2020-02-03)](#010-alpha2-2020-02-03)
-  - [Bug Fixes](#bug-fixes-40)
-  - [Documentation](#documentation-34)
-  - [Features](#features-29)
-  - [Unclassified](#unclassified-15)
-- [0.1.0-alpha.1 (2020-01-31)](#010-alpha1-2020-01-31)
-  - [Documentation](#documentation-35)
-- [0.0.3-alpha.15 (2020-01-31)](#003-alpha15-2020-01-31)
-  - [Unclassified](#unclassified-16)
-- [0.0.3-alpha.14 (2020-01-31)](#003-alpha14-2020-01-31)
+  - [Bug Fixes](#bug-fixes-41)
+  - [Documentation](#documentation-36)
+  - [Features](#features-30)
   - [Unclassified](#unclassified-17)
-- [0.0.3-alpha.13 (2020-01-31)](#003-alpha13-2020-01-31)
+- [0.1.0-alpha.1 (2020-01-31)](#010-alpha1-2020-01-31)
+  - [Documentation](#documentation-37)
+- [0.0.3-alpha.15 (2020-01-31)](#003-alpha15-2020-01-31)
   - [Unclassified](#unclassified-18)
-- [0.0.3-alpha.11 (2020-01-31)](#003-alpha11-2020-01-31)
+- [0.0.3-alpha.14 (2020-01-31)](#003-alpha14-2020-01-31)
   - [Unclassified](#unclassified-19)
-- [0.0.3-alpha.10 (2020-01-31)](#003-alpha10-2020-01-31)
+- [0.0.3-alpha.13 (2020-01-31)](#003-alpha13-2020-01-31)
   - [Unclassified](#unclassified-20)
-- [0.0.3-alpha.7 (2020-01-30)](#003-alpha7-2020-01-30)
+- [0.0.3-alpha.11 (2020-01-31)](#003-alpha11-2020-01-31)
   - [Unclassified](#unclassified-21)
+- [0.0.3-alpha.10 (2020-01-31)](#003-alpha10-2020-01-31)
+  - [Unclassified](#unclassified-22)
+- [0.0.3-alpha.7 (2020-01-30)](#003-alpha7-2020-01-30)
+  - [Unclassified](#unclassified-23)
 - [0.0.3-alpha.5 (2020-01-30)](#003-alpha5-2020-01-30)
   - [Continuous Integration](#continuous-integration-2)
-  - [Unclassified](#unclassified-22)
-- [0.0.3-alpha.4 (2020-01-30)](#003-alpha4-2020-01-30)
-  - [Unclassified](#unclassified-23)
-- [0.0.3-alpha.2 (2020-01-30)](#003-alpha2-2020-01-30)
   - [Unclassified](#unclassified-24)
-- [0.0.3-alpha.1 (2020-01-30)](#003-alpha1-2020-01-30)
+- [0.0.3-alpha.4 (2020-01-30)](#003-alpha4-2020-01-30)
   - [Unclassified](#unclassified-25)
+- [0.0.3-alpha.2 (2020-01-30)](#003-alpha2-2020-01-30)
+  - [Unclassified](#unclassified-26)
+- [0.0.3-alpha.1 (2020-01-30)](#003-alpha1-2020-01-30)
+  - [Unclassified](#unclassified-27)
 - [0.0.1-alpha.9 (2020-01-29)](#001-alpha9-2020-01-29)
   - [Continuous Integration](#continuous-integration-3)
 - [0.0.2-alpha.1 (2020-01-29)](#002-alpha1-2020-01-29)
-  - [Unclassified](#unclassified-26)
+  - [Unclassified](#unclassified-28)
 - [0.0.1-alpha.6 (2020-01-29)](#001-alpha6-2020-01-29)
   - [Continuous Integration](#continuous-integration-4)
 - [0.0.1-alpha.5 (2020-01-29)](#001-alpha5-2020-01-29)
   - [Continuous Integration](#continuous-integration-5)
-  - [Unclassified](#unclassified-27)
+  - [Unclassified](#unclassified-29)
 - [0.0.1-alpha.3 (2020-01-28)](#001-alpha3-2020-01-28)
   - [Continuous Integration](#continuous-integration-6)
-  - [Documentation](#documentation-36)
-  - [Unclassified](#unclassified-28)
+  - [Documentation](#documentation-38)
+  - [Unclassified](#unclassified-30)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# [](https://github.com/ory/kratos/compare/v1.1.0-pre.0...v) (2024-02-16)
+# [](https://github.com/ory/kratos/compare/v1.3.0...v) (2025-05-19)
+
+## Breaking Changes
+
+The `require_verified_address` hook no longer returns a plain error. Previously,
+users had to manually start the verification flow, which caused a poor
+experience. Now, Ory Kratos automatically creates a verification flow and
+redirects the user using `continue_with` or an HTTP redirect. The verification
+flow starts with the first verified address found for the user. This aligns the
+behavior of `require_verified_address` with using the `verification` and
+`show_verification_ui` hook combination for login.
+
+Going forward, the node group of fields that are failing validation during oidc
+sign up are `default` and no longer `oidc`. For now, you can get the legacy
+behavior back by turning on
+`feature_flags.legacy_oidc_registration_node_group=true`.
+
+Co-authored-by: Jonas Hungershausen <jonas.hungershausen@ory.sh>
+
+Before this change, `show_verification_ui` would always be included in
+`continue_with` for the registration flow when verification was enabled. After
+this change, `show_verification_ui` is only included when the
+`show_verification_ui` post-registration hook is defined.
+
+Account linking incorrectly returned a 200 OK status code even though the login
+flow was not completed successfully. Going forward, the correct 400 OK status
+code will be sent when using the API flow or `Accept: application/json`.
+
+This patch changes the behavior of configuration item `foo` to do bar. To keep
+the existing behavior please do baz.
+
+```
+-->
+
+## Related issue(s)
+
+<!--
+If this pull request
+
+1. is a fix for a known bug, link the issue where the bug was reported
+
+This patch changes the behavior of configuration item `foo` to do bar. To keep the existing
+behavior please do baz.
+```
+
+-->
+
+## Related issue(s)
+
+<!--
+If this pull request
+
+1. is a fix for a known bug, link the issue where the bug was reported
+
+This patch changes the behavior of configuration item `foo` to do bar. To keep the existing
+behavior please do baz.
+```
+-->
+
+## Related issue(s)
+
+<!--
+If this pull request
+
+1. is a fix for a known bug, link the issue where the bug was reported
+
+This patch changes the behavior of configuration item `foo` to do bar. To keep the existing
+behavior please do baz.
+```
+-->
+
+## Related issue(s)
+
+<!--
+If this pull request
+
+1. is a fix for a known bug, link the issue where the bug was reported
+
+This patch changes the behavior of configuration item `foo` to do bar. To keep the existing
+behavior please do baz.
+```
+-->
+
+## Related issue(s)
+
+<!--
+If this pull request
+
+1. is a fix for a known bug, link the issue where the bug was reported
+
+This patch changes the behavior of configuration item `foo` to do bar. To keep the existing
+behavior please do baz.
+```
+-->
+
+## Related issue(s)
+
+<!--
+If this pull request
+
+1. is a fix for a known bug, link the issue where the bug was reported
+
+The total count header `x-total-count` will no longer be sent in response to `GET /admin/sessions` requests.
+
+Closes https://github.com/ory-corp/cloud/issues/7177
+Closes https://github.com/ory-corp/cloud/issues/7175
+Closes https://github.com/ory-corp/cloud/issues/7176
+
+
 
 ### Bug Fixes
 
-- Add consistency flag ([#3733](https://github.com/ory/kratos/issues/3733))
-  ([fd79950](https://github.com/ory/kratos/commit/fd7995077307cc101550eda5d7724ea1f68fa98a))
-- Don't require code credential for MFA flows
-  ([#3753](https://github.com/ory/kratos/issues/3753))
-  ([40ed809](https://github.com/ory/kratos/commit/40ed809db631149874864f216a106c43ea5df670))
-- Http courier using should use lower case json
-  ([#3740](https://github.com/ory/kratos/issues/3740))
-  ([84149c4](https://github.com/ory/kratos/commit/84149c4b420ea89f0a16a579c017a8e7e1670204))
-- Set iss from userinfo claims if missing
-  ([#3744](https://github.com/ory/kratos/issues/3744))
-  ([241a911](https://github.com/ory/kratos/commit/241a911af74e8ad7353d6e3cab86db20758b86fc))
+* Accept login challenge in session_issuer on SPA flows ([#4288](https://github.com/ory/kratos/issues/4288)) ([e13687a](https://github.com/ory/kratos/commit/e13687ad51cdb889f0e680a005145a0134086fc7))
+* Accept login_challenge in SPA verification flows ([#4284](https://github.com/ory/kratos/issues/4284)) ([7ca3b6b](https://github.com/ory/kratos/commit/7ca3b6be14c53e16c3a8f4e7eb83efe0b0e7c88e))
+* Account linking should only happen after 2fa when required ([#4174](https://github.com/ory/kratos/issues/4174)) ([8e29b68](https://github.com/ory/kratos/commit/8e29b68a595d2ef18e48c2a01072335cefa36d86))
+* Account linking with 2FA ([#4188](https://github.com/ory/kratos/issues/4188)) ([4a870a6](https://github.com/ory/kratos/commit/4a870a678dd3676abda7afc9803399dec4411b05)):
+
+    This fixes some edge cases with OIDC account linking for accounts with 2FA enabled.
+
+* Add default issuer URL for LINE ([#4415](https://github.com/ory/kratos/issues/4415)) ([292f65d](https://github.com/ory/kratos/commit/292f65d6bd1bc70b2f13b92bdbcb8e30256e0a17)):
+
+    Fixed+expanded relevant comment.
+
+    Fixed some tracing issues.
+
+    Added error info and missing res.Body.Close() in courier.
+
+* Add exists clause ([#4191](https://github.com/ory/kratos/issues/4191)) ([a313dd6](https://github.com/ory/kratos/commit/a313dd6ba6d823deb40f14c738e3b609dbaad56c))
+* Add missing autocomplete attributes to identifier_first strategy ([#4215](https://github.com/ory/kratos/issues/4215)) ([e1f29c2](https://github.com/ory/kratos/commit/e1f29c2d3524f9444ec067c52d2c9f1d44fa6539))
+* Add missing csrf_token ([#4363](https://github.com/ory/kratos/issues/4363)) ([f441f41](https://github.com/ory/kratos/commit/f441f41312b81a570e99348f69b88008f4516660))
+* Add missing discriminator ([#4365](https://github.com/ory/kratos/issues/4365)) ([c10bb06](https://github.com/ory/kratos/commit/c10bb06bb9125fbc71863c5aa82194da2f2e2888))
+* Add missing saml group ([#4268](https://github.com/ory/kratos/issues/4268)) ([44eb305](https://github.com/ory/kratos/commit/44eb305cf91672798f7d57550a026c6b970f7566))
+* Add missing submit group ([#4354](https://github.com/ory/kratos/issues/4354)) ([106163d](https://github.com/ory/kratos/commit/106163d15e2eb84c3403d0ce8f829a9d9b3ce94f))
+* Add resend node to after registration verification flow ([#4260](https://github.com/ory/kratos/issues/4260)) ([9bc83a4](https://github.com/ory/kratos/commit/9bc83a410b8de9d649b6393f136889dd14098b0d))
+* Add transient payload to fedcm ([#4369](https://github.com/ory/kratos/issues/4369)) ([245f5dc](https://github.com/ory/kratos/commit/245f5dc1c83d35d7e228a45ee267d6bcdb705e98)), closes [#1234](https://github.com/ory/kratos/issues/1234) [#1234](https://github.com/ory/kratos/issues/1234):
+
+    <!--
+    Describe the big picture of your changes here to communicate to the
+    maintainers why we should accept this pull request.
+
+    This text will be included in the changelog. If applicable, include
+    links to documentation or pieces of code.
+    If your change includes breaking changes please add a code block
+    documenting the breaking change:
+
+    ```
+
+* Allow patching some /credentials sub-paths ([#4277](https://github.com/ory/kratos/issues/4277)) ([aefa806](https://github.com/ory/kratos/commit/aefa80623ee942254653b03ef4b273ae2779af0e)), closes [#1234](https://github.com/ory/kratos/issues/1234) [#1234](https://github.com/ory/kratos/issues/1234):
+
+    <!--
+    Describe the big picture of your changes here to communicate to the
+    maintainers why we should accept this pull request.
+
+    This text will be included in the changelog. If applicable, include
+    links to documentation or pieces of code.
+    If your change includes breaking changes please add a code block
+    documenting the breaking change:
+
+    ```
+
+* Also update identifiers ([#4321](https://github.com/ory/kratos/issues/4321)) ([7c63727](https://github.com/ory/kratos/commit/7c6372794a94868555f647f6160be8205072c506)):
+
+    This fixes a bug where when an identity is merged into another, the
+    identifier of the original identity was not updated.
+
+* Apply strategy filters in identifier first as well ([#4352](https://github.com/ory/kratos/issues/4352)) ([ec3ecc5](https://github.com/ory/kratos/commit/ec3ecc562a4d6ab511e53210d14c143903176b8c))
+* Cancel conditional passkey before trying again ([#4247](https://github.com/ory/kratos/issues/4247)) ([d9f6f75](https://github.com/ory/kratos/commit/d9f6f75b6a43aad996f6390f73616a2cf596c6e4))
+* Check aal on sessions list endpoint ([#4305](https://github.com/ory/kratos/issues/4305)) ([44f97b8](https://github.com/ory/kratos/commit/44f97b85e36160b8cce272fd61fbe3ac7d810fbf)), closes [#3671](https://github.com/ory/kratos/issues/3671):
+
+    The session check to list a user's own sessions now requires the same AAL level as the whoami check.
+
+* Count MFA addresses in CountActiveMultiFactorCredentials for code method ([9860c9a](https://github.com/ory/kratos/commit/9860c9a4faa5bd5d725c742c4d4ce9473baa0963)), closes [ory/network#409](https://github.com/ory/network/issues/409)
+* Div decoding ([#4362](https://github.com/ory/kratos/issues/4362)) ([ef9ee23](https://github.com/ory/kratos/commit/ef9ee235866c6f3958574d2e98f09de3ca1e83af))
+* Do not roll back transaction on partial identity insert error ([#4211](https://github.com/ory/kratos/issues/4211)) ([82660f0](https://github.com/ory/kratos/commit/82660f04e2f33d0aa86fccee42c90773a901d400))
+* Don't show oidc subject in login hints ([#4264](https://github.com/ory/kratos/issues/4264)) ([b95fd3f](https://github.com/ory/kratos/commit/b95fd3fa723521807824cad84e4a9ce812172311))
+* Duplicate autocomplete trigger ([6bbf915](https://github.com/ory/kratos/commit/6bbf91593a37e4973a86f610290ebab44df8dc81))
+* Enable b2b_sso hook in more places ([#4168](https://github.com/ory/kratos/issues/4168)) ([0c48ad1](https://github.com/ory/kratos/commit/0c48ad12b978bf58b6bc68b0684a7879f93ebf06)):
+
+    fix: allow b2b_sso hook in more places
+
+* Ensure `make quickstart-dev` works without options ([#4401](https://github.com/ory/kratos/issues/4401)) ([327c5a4](https://github.com/ory/kratos/commit/327c5a44f6d646fc6e318a50154c0e3bb4574557)):
+
+    `make quickstart-dev` uses the make variable `QUICKSTART_OPTIONS` which
+    is set to `""` by default. This will result in two double quotes (`""`)
+    in the final shell command e.g. `docker-compose "" up` when the variable
+    is not set on the make command line, which fails at the shell level. The
+    fix is to leave the variable empty by default. No semantic changes.
+
+* Ensure context is not canceled during password hashing ([#4364](https://github.com/ory/kratos/issues/4364)) ([e9c6a18](https://github.com/ory/kratos/commit/e9c6a1803daa622e559d0b8904cde4dc8834f1e2)):
+
+    Especially during large imports of plaintext passwords there can be a
+    lot of useless hashing, even after the request timed out or got
+    canceled.
+
+* Ensure that auto_link_credentials markers are being properly overwritten ([#4320](https://github.com/ory/kratos/issues/4320)) ([a4fd8ac](https://github.com/ory/kratos/commit/a4fd8acbbbd0cd0ff054e0f8737b076745aa71c8)), closes [#1234](https://github.com/ory/kratos/issues/1234) [#1234](https://github.com/ory/kratos/issues/1234):
+
+    <!--
+    Describe the big picture of your changes here to communicate to the
+    maintainers why we should accept this pull request.
+
+    This text will be included in the changelog. If applicable, include
+    links to documentation or pieces of code.
+    If your change includes breaking changes please add a code block
+    documenting the breaking change:
+
+    ```
+
+* Exclude orgs ([#4351](https://github.com/ory/kratos/issues/4351)) ([68500d1](https://github.com/ory/kratos/commit/68500d14509a2697d2832eafafa5608fd8cfbf47))
+* Explicity set updated_at field when updating identity ([#4131](https://github.com/ory/kratos/issues/4131)) ([66afac1](https://github.com/ory/kratos/commit/66afac173dc08b1d6666b107cf7050a2b0b27774))
+* Force profile to be first hydrator in profile_first strategy ([#4380](https://github.com/ory/kratos/issues/4380)) ([f475aea](https://github.com/ory/kratos/commit/f475aea476fee5c7cbde74b695a3f080a585b868))
+* Gracefully handle unused index ([#4196](https://github.com/ory/kratos/issues/4196)) ([3dbeb64](https://github.com/ory/kratos/commit/3dbeb64b3f99a3aeba5f7126c301b72fda4c3e3c))
+* IdentityCreated is over-reporting on error inserts ([#4323](https://github.com/ory/kratos/issues/4323)) ([c3f4ecf](https://github.com/ory/kratos/commit/c3f4ecf2562ffe400e500da97a93327b6115ddb6)):
+
+    `defer` was the incorrect code path here, as we should only record
+    identity created if the transaction did not error (aka was rolled back).
+
+* Ignore CSRF on all apple provider callback URLs ([#4291](https://github.com/ory/kratos/issues/4291)) ([b60edba](https://github.com/ory/kratos/commit/b60edba1f4642f07b411271b6c7a442665dc2a74))
+* Improve linking on OIDC signup ([#4314](https://github.com/ory/kratos/issues/4314)) ([687d578](https://github.com/ory/kratos/commit/687d5787b12450895ba613ceee47da408917a0a7)), closes [#1234](https://github.com/ory/kratos/issues/1234) [#1234](https://github.com/ory/kratos/issues/1234):
+
+    <!--
+    Describe the big picture of your changes here to communicate to the
+    maintainers why we should accept this pull request.
+
+    This text will be included in the changelog. If applicable, include
+    links to documentation or pieces of code.
+    If your change includes breaking changes please add a code block
+    documenting the breaking change:
+
+    ```
+
+* Incorrect if switch in previous sceen case in two step registration ([f8ee403](https://github.com/ory/kratos/commit/f8ee40396a36a2e7a348c9cf983dec7db13814c5)), closes [#374](https://github.com/ory/kratos/issues/374)
+* Incorrect query plan ([#4218](https://github.com/ory/kratos/issues/4218)) ([7d0e78a](https://github.com/ory/kratos/commit/7d0e78a4f6631b0662beee3b8e9dd0d774b875ea))
+* Incorrect response code on account linking ([#4336](https://github.com/ory/kratos/issues/4336)) ([ed4fba3](https://github.com/ory/kratos/commit/ed4fba3efd1e1c88a4920216a515e9820b74eb93))
+* Order-by clause and span names ([#4200](https://github.com/ory/kratos/issues/4200)) ([b6278af](https://github.com/ory/kratos/commit/b6278af5c7ed7fb845a71ad0e64f8b87402a8f4b))
+* Pass on correct context during verification ([#4151](https://github.com/ory/kratos/issues/4151)) ([7e0b500](https://github.com/ory/kratos/commit/7e0b500aada9c1931c759a43db7360e85afb57e3))
+* Preview_credentials_identifier_similar ([#4246](https://github.com/ory/kratos/issues/4246)) ([5ee54ed](https://github.com/ory/kratos/commit/5ee54eda909638fa10c543f156042a217b34cba6))
+* Registration post persist hooks should not be cancelable ([#4148](https://github.com/ory/kratos/issues/4148)) ([18056a0](https://github.com/ory/kratos/commit/18056a0f1cfdf42769e5a974b2526ccf5c608cc2))
+* Rename b2b_sso hook ([#4349](https://github.com/ory/kratos/issues/4349)) ([d9e3295](https://github.com/ory/kratos/commit/d9e3295d98b0446a90a960d0f0e957e7a6513dfc))
+* Return `return_to` code if already authenticated ([#4286](https://github.com/ory/kratos/issues/4286)) ([119841a](https://github.com/ory/kratos/commit/119841a304917e222d8c0fd4606419a520f481c1)):
+
+    This fixes a bug in native OIDC login and registration flows, where the
+    user already has a session in the browser the flow is continued with
+    (usually a web view, but depending on the platform it already has a
+    session cookie set). In the callback, we now correctly handle the case
+    in `alreadyAuthenticated` to return the session token exchange code.
+
+* Schema key ([#4332](https://github.com/ory/kratos/issues/4332)) ([306316f](https://github.com/ory/kratos/commit/306316fedf20467059776c003f8285880d272c95))
+* **sdk:** Add missing captcha group ([#4254](https://github.com/ory/kratos/issues/4254)) ([241111b](https://github.com/ory/kratos/commit/241111b21f5d96b26ff8bc8106dc8a527c68063b))
+* **sdk:** Add missing enum type to autocomplete ([#4396](https://github.com/ory/kratos/issues/4396)) ([4127cbb](https://github.com/ory/kratos/commit/4127cbb35ca3b7b1ea9d0f8c61d2aa56af57ce9a)):
+
+    -
+
+* **sdk:** Remove incorrect attributes ([#4163](https://github.com/ory/kratos/issues/4163)) ([88c68aa](https://github.com/ory/kratos/commit/88c68aa07281a638c9897e76d300d1095b17601d))
+* Send correct verification status in post-recovery hook ([#4224](https://github.com/ory/kratos/issues/4224)) ([7f50400](https://github.com/ory/kratos/commit/7f5040080578e194dde3605dbb1a344fe9ff27ae)):
+
+    The verification status is now correctly being transported when executing a recovery hook.
+
+* Set correct request url in acc linking and oidc flows ([#4282](https://github.com/ory/kratos/issues/4282)) ([07cb83c](https://github.com/ory/kratos/commit/07cb83c672326848162998a9cfbc8ca34af42bf0))
+* Settings linking error override ([#4368](https://github.com/ory/kratos/issues/4368)) ([6e30865](https://github.com/ory/kratos/commit/6e30865e1314bc4c4fdc3b472b34c92019eadfa4))
+* Show code email in most error states ([#4338](https://github.com/ory/kratos/issues/4338)) ([905d1e5](https://github.com/ory/kratos/commit/905d1e5dc8fcdc7f96afa14a5ee036060ea43056))
+* Show_verification_ui in continue_with only if configured ([#4402](https://github.com/ory/kratos/issues/4402)) ([5b00fe1](https://github.com/ory/kratos/commit/5b00fe15d94c5169fd62809ef44ffd8102078297)):
+
+    This patch modifies the self-service registration flow so that the
+    show_verification_ui continue_with element is only returned when the
+    relevant post‑registration hook is defined (or when legacy behavior is
+    enabled via configuration). It also adds a new attribute key and
+    internal context handling for the registration flow and updates related
+    tests and API signatures.
+
+* Span names ([#4232](https://github.com/ory/kratos/issues/4232)) ([dbae98a](https://github.com/ory/kratos/commit/dbae98a26b8e2a3328d8510745ddb58c18b7ad3d))
+* Stricter JSON patch checking for PATCH identities ([#4263](https://github.com/ory/kratos/issues/4263)) ([906f6c8](https://github.com/ory/kratos/commit/906f6c8fdf9ec0834993a44f8a19697b38dd63d2))
+* Support `show_verification_hook` in settings hooks ([#4410](https://github.com/ory/kratos/issues/4410)) ([c433c44](https://github.com/ory/kratos/commit/c433c44aa121a6011309eaec115370f266a4a2a6))
+* Truncate updated at ([#4149](https://github.com/ory/kratos/issues/4149)) ([2f8aaee](https://github.com/ory/kratos/commit/2f8aaee0716835caaba0dff9b6cc457c2cdff5d4))
+* Use context for readiness probes ([#4219](https://github.com/ory/kratos/issues/4219)) ([e6d2d4d](https://github.com/ory/kratos/commit/e6d2d4d0c04e60ab5b0658b9e5c4c52104446368))
+* Use default group for signup nodes in oidc ([#4414](https://github.com/ory/kratos/issues/4414)) ([dc8b32e](https://github.com/ory/kratos/commit/dc8b32e0049e842d7aca27a38bf73c8cefb9cae3))
+
+### Chores
+
+* Document test migration ([#4265](https://github.com/ory/kratos/issues/4265)) ([9959545](https://github.com/ory/kratos/commit/9959545cb9d90364e1928fcc4f01b3171e052360)), closes [#1234](https://github.com/ory/kratos/issues/1234) [#1234](https://github.com/ory/kratos/issues/1234):
+
+    <!--
+    Describe the big picture of your changes here to communicate to the
+    maintainers why we should accept this pull request.
+
+    This text will be included in the changelog. If applicable, include
+    links to documentation or pieces of code.
+    If your change includes breaking changes please add a code block
+    documenting the breaking change:
+
+    ```
+
+* Upgrade to go 1.24 ([#4313](https://github.com/ory/kratos/issues/4313)) ([bdb046d](https://github.com/ory/kratos/commit/bdb046da36c290f775ad4cabdbe6191295252cc7)), closes [#1234](https://github.com/ory/kratos/issues/1234) [#1234](https://github.com/ory/kratos/issues/1234):
+
+    <!--
+    Describe the big picture of your changes here to communicate to the
+    maintainers why we should accept this pull request.
+
+    This text will be included in the changelog. If applicable, include
+    links to documentation or pieces of code.
+    If your change includes breaking changes please add a code block
+    documenting the breaking change:
+
+    ```
+
+
+### Code Refactoring
+
+* Hash comparator instantiation ([#4195](https://github.com/ory/kratos/issues/4195)) ([53a5a8b](https://github.com/ory/kratos/commit/53a5a8b93cec274456df3d988eb3bd12bc11fa87))
+* Remove total count from listSessions and improve secondary indices ([#4173](https://github.com/ory/kratos/issues/4173)) ([e24f993](https://github.com/ory/kratos/commit/e24f993ea4236bac4e23bd4250c11b5932040fd9)):
+
+    This patch changes sorting to improve performance on list session endpoints. It also removes the `x-total-count` header from list responses.
+
+* Two-step registration ([#4348](https://github.com/ory/kratos/issues/4348)) ([f46aed1](https://github.com/ory/kratos/commit/f46aed12a244094e9e3e4014792543d6fb1a2a4b)):
+
+    Refactors internals of the two-step registration to better fit into the architecture.
+
+
+### Documentation
+
+* Add return_to query parameter to OAS Verification Flow for Native Apps ([#4086](https://github.com/ory/kratos/issues/4086)) ([b22135f](https://github.com/ory/kratos/commit/b22135fa05d7fb47dfeaccd7cdc183d16921a7ac))
+* Clarify facebook graph API versioning ([#4208](https://github.com/ory/kratos/issues/4208)) ([a90df58](https://github.com/ory/kratos/commit/a90df5852ba96704863cc576edcb8286eaa9b3f9))
+* Defining oid as oidc subject_source ([#4270](https://github.com/ory/kratos/issues/4270)) ([b388a4a](https://github.com/ory/kratos/commit/b388a4ab9fe101def70ca604fbfbef2bcccd01a9))
+* Improve SecurityError error message for ory elements local ([#4205](https://github.com/ory/kratos/issues/4205)) ([0062d45](https://github.com/ory/kratos/commit/0062d45b6c9a6323f9dccb10f63dce752836c29e))
+* Remove unused SMS config from schema ([#4212](https://github.com/ory/kratos/issues/4212)) ([f076fe4](https://github.com/ory/kratos/commit/f076fe4e1487f67f355eaa7f238090abf3796578))
+* Usage of `organization` parameter in native self-service flows ([#4176](https://github.com/ory/kratos/issues/4176)) ([cb71e38](https://github.com/ory/kratos/commit/cb71e38147d21f73e9bd1e081dc3443abb63353e))
 
 ### Features
 
-- Add request URL to email and SMS templates
-  ([bf5f8c3](https://github.com/ory/kratos/commit/bf5f8c3cfb2eb523a77239addb8249adf9f8b31d))
-- Improved webhook tracing ([#3746](https://github.com/ory/kratos/issues/3746))
-  ([9d7021d](https://github.com/ory/kratos/commit/9d7021d87f47690c2c1f8000e87b425e49bc9496))
-- List by OIDC cred ([#3721](https://github.com/ory/kratos/issues/3721))
-  ([bff9c61](https://github.com/ory/kratos/commit/bff9c61b147648ab139e7e86cda4336b5d1cfd39))
+* Add a policy callback to customize OIDC credential linking ([#4302](https://github.com/ory/kratos/issues/4302)) ([e2f878a](https://github.com/ory/kratos/commit/e2f878a3ed25b4617bf6bd43b6e147d87d3b8ca2))
+* Add attributes to webhook events for better debugging ([#4206](https://github.com/ory/kratos/issues/4206)) ([00da05d](https://github.com/ory/kratos/commit/00da05da9f77bbfb68b364b3ba2a5d0a2d9e4f15))
+* Add captcha group to first-step registration ([eca4ae9](https://github.com/ory/kratos/commit/eca4ae9dcce37d03bbd1bf5f0cd492466c02acde))
+* Add context param to policy ([#4315](https://github.com/ory/kratos/issues/4315)) ([261596b](https://github.com/ory/kratos/commit/261596b7261c315b7d8291e886023c34fc9135c5))
+* Add email domain matcher ([#4373](https://github.com/ory/kratos/issues/4373)) ([1c33c39](https://github.com/ory/kratos/commit/1c33c39875c5c766f3fc18578e036156d6214ade))
+* Add explicit config flag for secure cookies ([#4180](https://github.com/ory/kratos/issues/4180)) ([2aabe12](https://github.com/ory/kratos/commit/2aabe12e5329acc807c495445999e5591bdf982b)):
+
+    Adds a new config flag  for session and all other cookies. Falls back to the previous behavior of using the dev mode to decide if the cookie should be secure or not.
+
+* Add failure reason to events ([#4203](https://github.com/ory/kratos/issues/4203)) ([afa7618](https://github.com/ory/kratos/commit/afa76180e77df0ee0f96eef3b3f2b2d3fe08a33d))
+* Add HTML email support to HTTP channel ([#4387](https://github.com/ory/kratos/issues/4387)) ([fb8856e](https://github.com/ory/kratos/commit/fb8856eb11a3762ffb69dc2639b36d91121b4476)), closes [#4350](https://github.com/ory/kratos/issues/4350)
+* Add LoginStarted and RegistrationStarted events ([#4404](https://github.com/ory/kratos/issues/4404)) ([7032fec](https://github.com/ory/kratos/commit/7032fec71a01bfd0838310dd2b2d8ea4b9fcee63)):
+
+    <!--
+
+    This text will be used for the merge commit.
+
+    Please read
+    https://www.notion.so/Merging-PRs-998760750c5740debdb6d7ea1661ac01
+
+    -->
+
+    **Changes:**
+    - Add `LoginStarted` and `RegistrationStarted` events along their
+    required attributes
+    - Sort all event attributes alphabetically
+    - Emit these events when a new login/registration flow is created,
+    *after* basic validation passed
+    - It is unclear yet how many of these events will be emitted, as such it
+    is suggested that in a first phase, they remain internal and are not yet
+    sent externally to avoid surprises (note: sometimes, these events can be
+    emitted without user action such as simply visiting/being redirected to
+    the sign-in page, etc)
+
+    **Documentation PR:**
+    [ory/docs#2144](https://github.com/ory/docs/pull/2144)
+
+    **Issue:** https://github.com/ory-corp/cloud/issues/7895
+
+    <!-- Dependency update:
+    https://github.com/ory/{repo}/compare/{old-commit-hash}...{new-commit-hash}
+    -->
+
+
+    Examples in Grafana:
+    - LoginStarted: <img width="955" alt="Screenshot 2025-05-06 at 14 54 32"
+    src="https://github.com/user-attachments/assets/f066f0a7-4b03-4f71-b6e9-385c3f772425"
+    />
+    - RegistrationStarted: <img width="953" alt="Screenshot 2025-05-06 at 14
+    46 17"
+    src="https://github.com/user-attachments/assets/e4e07f59-ecbb-4bfb-a01e-72412adca2f5"
+    />
+
+- Add migrate sql up|down|status
+  ([#4228](https://github.com/ory/kratos/issues/4228))
+  ([e6fa520](https://github.com/ory/kratos/commit/e6fa520058ca778e01d4e93a8ab4b31a74dd2e11)):
+
+  This patch adds the ability to execute down migrations using:
+
+  ```
+  kratos migrate sql down -e --steps {num_of_steps}
+  ```
+
+  Please read `kratos migrate sql down --help` carefully.
+
+  Going forward, please use the following commands
+
+  ```
+  kratos migrate sql up ...
+  kratos migrate sql status ...
+  ```
+
+  instead of the previous, now deprecated
+
+  ```
+  kratos migrate sql ...
+  kratos migrate status ...
+  ```
+
+  commands.
+
+  See https://github.com/ory-corp/cloud/issues/7350
+
+- Add new Division ui node attributes
+  ([235af52](https://github.com/ory/kratos/commit/235af527dea47b87ad0f18ff04f9b807e4639ae3)):
+
+  Division nodes may be used to hook dynamic scripts and are not actively used
+  in the Ory Kratos open source.
+
+- Add oid as subject source for microsoft
+  ([#4171](https://github.com/ory/kratos/issues/4171))
+  ([77beb4d](https://github.com/ory/kratos/commit/77beb4de5209cee0bea4b63dfec21d656cf64473)),
+  closes [#4170](https://github.com/ory/kratos/issues/4170):
+
+  In the case of Microsoft, using `sub` as an identifier can lead to problems.
+  Because the use of OIDC at Microsoft is based on an app registration, the
+  content of `sub` changes with every new app registration. `Sub` is therefore
+  not uniquely related to the user. It is therefore not possible to transfer
+  users from one app registration to another without further problems.
+  https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference#payload-claims
+
+  With the use of `oid` it is possible to identify a user by a unique id.
+
+- Add support for Line v2.1 OIDC provider
+  ([#4240](https://github.com/ory/kratos/issues/4240))
+  ([729effd](https://github.com/ory/kratos/commit/729effd61e4b08f28099bba09acef87aeb0c7ffd)):
+
+  For OIDC Line Login, you only need to add id_token_key_type=JWK in the
+  exchange step to issue tokens in ES256 format.
+
+  https://github.com/ory/kratos/discussions/1116
+
+- Allow deleting password credentials
+  ([#4304](https://github.com/ory/kratos/issues/4304))
+  ([f2212d4](https://github.com/ory/kratos/commit/f2212d48af47f24ca6e504ca98bc31afe6774241)):
+
+  The admin API did not allow to delete passwords at all. The restriction is now
+  lifted to only block deletion of the first-factor credential if it is the last
+  one.
+
+- Allow extra go migrations in persister
+  ([#4183](https://github.com/ory/kratos/issues/4183))
+  ([7bec935](https://github.com/ory/kratos/commit/7bec935c33b9adb6033aaecfa9a6dbe6c9c3daa1))
+- Allow listing identities by organization ID
+  ([#4115](https://github.com/ory/kratos/issues/4115))
+  ([b4c453b](https://github.com/ory/kratos/commit/b4c453b0472f67d0a52b345691f66aa48777a897))
+- Allow setting the org ID on creation
+  ([#4306](https://github.com/ory/kratos/issues/4306))
+  ([bccd2fb](https://github.com/ory/kratos/commit/bccd2fb8c8efac96938e564f1f34cd711b41d0a1))
+- Cache OIDC providers ([#4222](https://github.com/ory/kratos/issues/4222))
+  ([30485c4](https://github.com/ory/kratos/commit/30485c44e61c17231e0c46b321be842b19ea5a5f)):
+
+  This change significantly reduces the number of requests to
+  `/.well-known/openid-configuration` endpoints.
+
+- Drop unused indices post index migration
+  ([#4201](https://github.com/ory/kratos/issues/4201))
+  ([1008639](https://github.com/ory/kratos/commit/1008639428a6b72e0aa47bd13fe9c1d120aafb6e))
+- Emit admin recovery code event
+  ([#4230](https://github.com/ory/kratos/issues/4230))
+  ([a7cdc3a](https://github.com/ory/kratos/commit/a7cdc3a6911e265f4e78c780d8e4b8922066875c))
+- Emit event on Jsonnet claims mapping error
+  ([#4394](https://github.com/ory/kratos/issues/4394))
+  ([8caebdb](https://github.com/ory/kratos/commit/8caebdb6eb67c2039251b53804aac6a9f166f578)):
+
+  We now emit an event containing the Jsonnet input and output in anonymized
+  form when mapping the claims in the OIDC flow fails.
+
+- Emit events on jsonnet failure when templating a jwt
+  ([#4409](https://github.com/ory/kratos/issues/4409))
+  ([959ded5](https://github.com/ory/kratos/commit/959ded5c8bb17b12b2bf242e959802a56f7c43e0)):
+
+  - Fix typo: parital -> partial
+  - Document with comments why an event is not emitted or not documented
+  - Emit `JsonnetMappingFailed` events on jsonnet failure when templating a jwt
+    (see https://www.ory.sh/docs/identities/session-to-jwt-cors). After review
+    it seems we otherwise always emit events in all the right places, except in
+    this very case. Tested end-to-end manually with the UI.
+
+  ## Related issue(s)
+
+  https://github.com/ory-corp/cloud/issues/7291
+
+  ## Checklist
+
+  - [x] I have read the
+        [contributing guidelines](../blob/master/CONTRIBUTING.md).
+  - [x] I have referenced an issue containing the design document if my change
+        introduces a new feature.
+  - [x] I am following the
+        [contributing code guidelines](../blob/master/CONTRIBUTING.md#contributing-code).
+  - [x] I have read the [security policy](../security/policy).
+  - [x] I confirm that this pull request does not address a security
+        vulnerability. If this pull request addresses a security vulnerability,
+        I confirm that I got the approval (please contact
+        [security@ory.sh](mailto:security@ory.sh)) from the maintainers to push
+        the changes.
+  - [ ] I have added tests that prove my fix is effective or that my feature
+        works.
+  - [ ] I have added or changed
+        [the documentation](https://github.com/ory/docs).
+
+  ## Further Comments
+
+- Enable JSONNet templating for password migration hook
+  ([#4390](https://github.com/ory/kratos/issues/4390))
+  ([b162897](https://github.com/ory/kratos/commit/b1628976a0251a0ad84fd2128d1df23f4dff5e99)):
+
+  This enables JSONNet body templating for the password migration hook. There is
+  also a significant refactoring of some internals around webhook config
+  handling.
+
+- Fast add credential type lookups
+  ([#4177](https://github.com/ory/kratos/issues/4177))
+  ([eeb1355](https://github.com/ory/kratos/commit/eeb13552118504f17b48f2c7e002e777f5ee73f4))
+- Fewer DB loads when linking credentials, add tracing
+  ([2c5bb21](https://github.com/ory/kratos/commit/2c5bb21224e28d5218354349f77514f4fbe71762))
+- Gracefully handle failing password rehashing during login
+  ([#4235](https://github.com/ory/kratos/issues/4235))
+  ([3905787](https://github.com/ory/kratos/commit/39057879821b387b49f5d4f7cb19b9e02ec924a7)):
+
+  This fixes an issue where we would successfully import long passwords (>72
+  chars), but fail when the user attempts to login with the correct password
+  because we can't rehash it. In this case, we simply issue a warning to the
+  logs, keep the old hash intact, and continue logging in the user.
+
+- Improve identity import limits
+  ([#4378](https://github.com/ory/kratos/issues/4378))
+  ([e38e812](https://github.com/ory/kratos/commit/e38e812314850c80cb18f8e1921dffc7d324aeda))
+- Improve QueryForCredentials
+  ([#4181](https://github.com/ory/kratos/issues/4181))
+  ([ca0d6a7](https://github.com/ory/kratos/commit/ca0d6a7ea717495429b8bac7fd843ac69c1ebf16))
+- Improve secondary indices for self service tables
+  ([#4179](https://github.com/ory/kratos/issues/4179))
+  ([825aec2](https://github.com/ory/kratos/commit/825aec208d966b54df9eeac6643e6d8129cf2253))
+- Improve verification required flows
+  ([#4407](https://github.com/ory/kratos/issues/4407))
+  ([2014a40](https://github.com/ory/kratos/commit/2014a403e0bc05a10d1f805b9ef81bdd4d8e2223))
+- Improved tracing for courier
+  ([85a7071](https://github.com/ory/kratos/commit/85a7071d20d0f072316c74bee82c76ee690276f8))
+- Index hint for CRDB when deleting identity credentials
+  ([#4276](https://github.com/ory/kratos/issues/4276))
+  ([c703a33](https://github.com/ory/kratos/commit/c703a338894f865c7dc1dcebc6e6980ad98eaa1d)):
+
+  Ref https://support.cockroachlabs.com/hc/en-us/requests/25430
+
+- Jackson provider ([#4242](https://github.com/ory/kratos/issues/4242))
+  ([f18d1b2](https://github.com/ory/kratos/commit/f18d1b24539f7d8dcf9c27986af861d0f8cb9683)):
+
+  This adds a jackson provider to Kratos.
+
+- Load session only once when middleware is used
+  ([#4187](https://github.com/ory/kratos/issues/4187))
+  ([234b6f2](https://github.com/ory/kratos/commit/234b6f2f6435c62b7e161c032b888c4e2b3328d4))
+- More extension points ([#4272](https://github.com/ory/kratos/issues/4272))
+  ([373a2e6](https://github.com/ory/kratos/commit/373a2e6552f0da0488638306a58d8bd63a6ca10a)):
+
+  This adds more extension points to the Kratos registry.
+
+- Optimize identity-related secondary indices
+  ([#4182](https://github.com/ory/kratos/issues/4182))
+  ([53874c1](https://github.com/ory/kratos/commit/53874c1753940e08e0bf50753a1d3126add77af1))
+- Passwordless SMS and expiry notice in code / link templates
+  ([#4104](https://github.com/ory/kratos/issues/4104))
+  ([462cea9](https://github.com/ory/kratos/commit/462cea91448a00a0db21e20c2c347bf74957dc8f)):
+
+  This feature allows Ory Kratos to use the SMS gateway for login and
+  registration with code via SMS.
+
+  Additionally, the default email and sms templates have been updated. We now
+  also expose `ExpiresInMinutes` / `expires_in_minutes` in the templates, making
+  it easier to remind the user how long the code or link is valid for.
+
+  Closes https://github.com/ory/kratos/issues/1570 Closes
+  https://github.com/ory/kratos/issues/3779
+
+- Refactor cmd/daemon ([#4371](https://github.com/ory/kratos/issues/4371))
+  ([7fe55d9](https://github.com/ory/kratos/commit/7fe55d9fec5e5f4048b211eaa56ac61e29635157))
+- Remove duplicate queries during settings flow and use better index hint for
+  credentials lookup ([#4193](https://github.com/ory/kratos/issues/4193))
+  ([c33965e](https://github.com/ory/kratos/commit/c33965e5735ead3acddac87ef84c3a730874f9ab)):
+
+  This patch reduces duplicate GetIdentity queries as part of submitting the
+  settings flow, and improves an index to significantly reduce credential
+  lookup.
+
+  For better debugging, more tracing ha been added to the settings module.
+
+- Remove more unused indices
+  ([#4186](https://github.com/ory/kratos/issues/4186))
+  ([b294804](https://github.com/ory/kratos/commit/b2948044de4eee1841110162fe874055182bd2d2))
+- Rework the OTP code submit count mechanism
+  ([#4251](https://github.com/ory/kratos/issues/4251))
+  ([4ca4d79](https://github.com/ory/kratos/commit/4ca4d79cff5185caad27eddee7e6f8d0e58463ba)):
+
+  - feat: rework the OTP code submit count mechanism
+
+  Unlike what the previous comment suggested, incrementing and checking the
+  submit count inside the database transaction is not actually optimal
+  peformance- or security-wise.
+
+  We now check atomically increment and check the submit count as the first part
+  of the operation, and abort as early as possible if we detect brute-forcing.
+  This prevents a situation where the check works only on certain transaction
+  isolation levels.
+
+  - chore: bump dependencies
+
+- Support android webauthn origins
+  ([#4155](https://github.com/ory/kratos/issues/4155))
+  ([a82d288](https://github.com/ory/kratos/commit/a82d288014411ae4eb82c718bfe825ca55b4fab0)):
+
+  This patch adds the ability to verify Android APK origins used during
+  WebAuthn/Passkey exchange.
+
+  Upgrades go-webauthn and includes fixes for Go 1.23 and workarounds for
+  Swagger.
+
+- Support importing more credentials
+  ([#4361](https://github.com/ory/kratos/issues/4361))
+  ([9a6dadf](https://github.com/ory/kratos/commit/9a6dadfefaf0d54c227cdbab5a2cbe7da14faa96)):
+
+  Adds support to import SAML credentials. SAML connections are only available
+  in Ory Enterprise License / Ory Network.
+
+- Update only necessary database columns in UpdateVerifiableAddress
+  ([#4292](https://github.com/ory/kratos/issues/4292))
+  ([168a3f6](https://github.com/ory/kratos/commit/168a3f6c68b1fbc0ddcd455f8762f6de19879442)):
+
+  This is an optimization to reduce database load.
+
+  When we specify exactly which columns changed, we should be able to elide
+  updates to the
+  `identity_verifiable_addresses_status_via_uq_idx (nid,via,value)` index.
+  Updating that index requires contacting remote regions.
+
+  Also fixed a bug where we did not set the `verified_at` timestamp correctly
+  sometimes.
+
+- Use one transaction for `/admin/recovery/code`
+  ([#4225](https://github.com/ory/kratos/issues/4225))
+  ([3e87e0c](https://github.com/ory/kratos/commit/3e87e0c4559736f9476eba943bac8d67cde91aad))
+- Webhook header allowlist configuration option
+  ([#4309](https://github.com/ory/kratos/issues/4309))
+  ([871f5aa](https://github.com/ory/kratos/commit/871f5aab6d7b2a655ebcd6f0f90e79635ffc85f6)),
+  closes [#4290](https://github.com/ory/kratos/issues/4290):
+
+  Adds a `clients.web_hook.header_allowlist` configuration option for
+  configuring the webhook header allowlist.
 
 ### Tests
 
-- Fix hydra tests on master ([#3737](https://github.com/ory/kratos/issues/3737))
-  ([12166b4](https://github.com/ory/kratos/commit/12166b4370d607a069f268227752bb7b18a50b57))
+- Update snapshots ([#4167](https://github.com/ory/kratos/issues/4167))
+  ([b51f780](https://github.com/ory/kratos/commit/b51f780b7e4abc79a757ac1efe1cb65b3d35c8a4))
 
-# [1.1.0-pre.0](https://github.com/ory/kratos/compare/v1.0.0...v1.1.0-pre.0) (2024-02-01)
+# [1.3.0](https://github.com/ory/kratos/compare/v1.2.0...v1.3.0) (2024-09-26)
 
-autogen: pin v1.1.0-pre.0 release commit
+We are thrilled to announce the release
+of [Ory Kratos v1.3.0](https://www.ory.sh/kratos)! This release includes
+significant updates, enhancements, and fixes to improve your experience with Ory
+Kratos.
+
+![Ory Kratos 1.3.0 Release](https://www.ory.sh/images/newsletter/kratos-1.3.0/kratos-1.3-release.png)
+
+Enhance your sign-in experience with Identifier First Authentication. This
+feature allows users to first identify themselves (e.g., by providing their
+email or username) and then proceed with the chosen authentication method,
+whether it be OTP code, passkeys, passwords, or social login. By streamlining
+the sign-in process, users can select the authentication method that best suits
+their needs, reducing friction and enhancing security. Identifier First
+Authentication improves user flow and reduces the likelihood of errors,
+resulting in a more user-friendly and efficient login experience.
+
+![Identifier First Authentication](https://www.ory.sh/images/newsletter/kratos-1.3.0/identifier-first-demo.png)
+
+The UI for OpenID Connect (OIDC) account linking has been improved to provide
+better user guidance and error messages during the linking process. As a result,
+account linking error rates have dropped significantly, making it easier for
+users to link multiple identities (e.g., social login and email-based accounts)
+to the same profile. This improvement enhances user convenience, reduces support
+inquiries, and offers a seamless multi-account experience.
+
+You can now use Salesforce as an identity provider, expanding the range of
+supported identity providers. This integration allows organizations already
+using Salesforce for identity management to leverage their existing
+infrastructure, simplifying user management and enhancing the authentication
+experience.
+
+Social sign-in has been enhanced with better detection and handling of
+double-submit issues, especially for platforms like Facebook and Apple mobile
+login. These changes make the social login process more reliable, reducing
+errors and improving the user experience. Additionally, Ory Kratos now supports
+social providers in credential discovery, offering more flexibility during
+sign-up and sign-in flows.
+
+One-Time Password (OTP) MFA has been improved with more robust handling of
+code-based authentication. The enhancements ensure a smoother flow when using
+OTP for multi-factor authentication (MFA), providing clearer guidance to users
+and improving fallback mechanisms. These updates help to prevent users from
+being locked out due to misconfigurations or errors during the MFA process,
+increasing security without compromising user convenience.
+
+- **Deprecated `via` Parameter for SMS 2FA**: The `via` parameter is now
+  deprecated when performing SMS 2FA. If not included, users will see all their
+  phone/email addresses to perform the flow. This parameter will be removed in a
+  future version. Ensure your identity schema has the appropriate code
+  configuration for passwordless or 2FA login.
+- **Endpoint Change**: The `/admin/session/.../extend` endpoint will now return
+  204 No Content for new Ory Network projects. Returning 200 with the session
+  body will be deprecated in future versions.
+
+- **SDK Enhancements**: Added new methods and support for additional actions in
+  the SDK, improving integration capabilities.
+- **Password Migration Hook**: Added a password migration hook to facilitate
+  migrating passwords where the hash is unavailable, easing the transition to
+  Ory Kratos.
+- **Partially Failing Batch Inserts:** When batch-inserting multiple identities,
+  conflicts or validation errors of a subset of identities in the batch still
+  allow the rest of the identities to be inserted. The returned JSON contains
+  the error details that led to the failure.
+
+- **Security Fixes**: Fixed a security vulnerability where the `code` method did
+  not respect the `highest_available`setting. Refer to
+  the [security advisory](https://github.com/ory/kratos/security/advisories/GHSA-wc43-73w7-x2f5) for
+  more details.
+- **Session Extension Issues**: Fixed issues related to session extension to
+  prevent long response times on `/session/whoami` when extending sessions
+  simultaneously.
+- **OIDC and Social Sign-In**: Fixed UI and error handling for OpenID Connect
+  and social sign-in flows, improving the overall experience.
+- **Credential Identifier Handling**: Corrected handling of code credential
+  identifiers, ensuring proper detection of phone numbers and correct
+  functioning of SMS/email MFA.
+- **Concurrent Updates for Webhooks**: Fixed concurrent map update issues for
+  webhook headers, improving webhook reliability.
+
+- **Passwordless & 2FA Login**: Before upgrading, ensure your identity schema
+  has the appropriate code configuration when using the code method for
+  passwordless or 2FA login.
+- **Code Method for 2FA**: If you use the code method for 2FA or 1FA login but
+  haven't configured the code identifier,
+  set `selfservice.methods.code.config.missing_credential_fallback_enabled` to `true` to
+  avoid user lockouts.
+
+We hope you enjoy the new features and improvements in Ory Kratos v1.3.0. Please
+remember to leave a [GitHub star](https://github.com/ory/kratos) and check out
+our other [open-source projects](https://github.com/ory). Your feedback is
+valuable to us, so join the [Ory community](https://slack.ory.sh/) and help us
+shape the future of identity management.
+
+## Breaking Changes
+
+When using two-step registration, it was previously possible to send
+`method=profile:back` to get to the previous screen. This feature was not
+documented in the SDK API yet. Going forward, please instead use
+`screen=previous`.
+
+Please note that the `via` parameter is deprecated when performing SMS 2FA. It
+will be removed in a future version. If the parameter is not included in the
+request, the user will see all their phone/email addresses from which to perform
+the flow.
+
+Before upgrading, ensure that your identity schema has the appropriate code
+configuration when using the code method for passwordless or 2fa login.
+
+If you are using the code method for 2FA login already, or you are using it for
+1FA login but have not yet configured the code identifier, set
+`selfservice.methods.code.config.missing_credential_fallback_enabled` to `true`
+to prevent users from being locked out.
+
+Please note that the `via` parameter is deprecated when performing SMS 2FA. It
+will be removed in a future version. If the parameter is not included in the
+request, the user will see all their phone/email addresses from which to perform
+the flow.
+
+Before upgrading, ensure that your identity schema has the appropriate code
+configuration when using the code method for passwordless or 2fa login.
+
+If you are using the code method for 2FA login already, or you are using it for
+1FA login but have not yet configured the code identifier, set
+`selfservice.methods.code.config.missing_credential_fallback_enabled` to `true`
+to prevent users from being locked out.
+
+Going forward, the `/admin/session/.../extend` endpoint will return 204 no
+content for new Ory Network projects. We will deprecate returning 200 + session
+body in the future.
+
+### Bug Fixes
+
+- Add continue with only for json browser requests
+  ([#4002](https://github.com/ory/kratos/issues/4002))
+  ([e0a4010](https://github.com/ory/kratos/commit/e0a4010b84b43f364be14414a380c872b166274d))
+- Add fallback to providerLabel
+  ([#3999](https://github.com/ory/kratos/issues/3999))
+  ([d26f204](https://github.com/ory/kratos/commit/d26f2042eb5325a8d639c08d95a005724e61cb8e)):
+
+  This adds a fallback to the provider label when trying to register a duplicate
+  identifier with an oidc.
+
+  Current error message:
+
+  `Signing in will link your account to "test@test.com" at provider "". If you do not wish to link that account, please start a new login flow.`
+
+  The label represents an optional label for the UI, but in my case it's always
+  empty. I suggest we fallback to the provider when the label is not present. In
+  case the label is present, the behaviour won't change.
+
+  Fallback to provider:
+
+  `Signing in will link your account to "test@test.com" at provider "google". If you do not wish to link that account, please start a new login flow.`
+
+- Add missing JS triggers
+  ([7597bc6](https://github.com/ory/kratos/commit/7597bc6345848b66161d5a9b7a42307bbc85c978))
+- Add PKCE config key to config schema
+  ([#4098](https://github.com/ory/kratos/issues/4098))
+  ([2c7ff3c](https://github.com/ory/kratos/commit/2c7ff3c8baab6aaa105e2d733a483fc07537470f))
+- Batch identity created event
+  ([#4111](https://github.com/ory/kratos/issues/4111))
+  ([340f698](https://github.com/ory/kratos/commit/340f698243bd908e217394710b475a7f686a8cf9))
+- Concurrent map update for webhook header
+  ([#4055](https://github.com/ory/kratos/issues/4055))
+  ([6ceb2f1](https://github.com/ory/kratos/commit/6ceb2f1213e1b28d3aa72380661e4aa985bfa437))
+- Do not populate `id_first` first step for account linking flows
+  ([#4074](https://github.com/ory/kratos/issues/4074))
+  ([6ab2637](https://github.com/ory/kratos/commit/6ab2637652013e0ff377f52355e2025d68c7b3d3))
+- Downgrade go-webauthn ([#4035](https://github.com/ory/kratos/issues/4035))
+  ([4d1954a](https://github.com/ory/kratos/commit/4d1954ac74dee358f9a08e619848dfe94e4934ce))
+- Emit SelfServiceMethodUsed in SettingsSucceeded event
+  ([#4056](https://github.com/ory/kratos/issues/4056))
+  ([76af303](https://github.com/ory/kratos/commit/76af303b20ae5dffb932169a73667a55be3f3f80))
+- Filter web hook headers ([#4048](https://github.com/ory/kratos/issues/4048))
+  ([ddb838e](https://github.com/ory/kratos/commit/ddb838e0e8f7d752cd1708c505e80b6c0ccc0b8a))
+- Improve OIDC account linking UI
+  ([#4036](https://github.com/ory/kratos/issues/4036))
+  ([2b4a618](https://github.com/ory/kratos/commit/2b4a618485c9d79762243f59b35f142083f5492c))
+- Include duplicate credentials in account linking message
+  ([#4079](https://github.com/ory/kratos/issues/4079))
+  ([122b63d](https://github.com/ory/kratos/commit/122b63d68a3ff2ad78107300869c5a6d2aa43354))
+- Incorrect append of code credential identifier
+  ([#4102](https://github.com/ory/kratos/issues/4102))
+  ([3215792](https://github.com/ory/kratos/commit/3215792df4cab494c05ef09e969b2fa0ed95a98b)),
+  closes [#4076](https://github.com/ory/kratos/issues/4076)
+- Jsonnet timeouts ([#3979](https://github.com/ory/kratos/issues/3979))
+  ([7c5299f](https://github.com/ory/kratos/commit/7c5299f1f832ebbe0622d0920b7a91253d26b06c))
+- Move password migration hook config
+  ([#3986](https://github.com/ory/kratos/issues/3986))
+  ([b5a66e0](https://github.com/ory/kratos/commit/b5a66e0dde3a8fa6fdeb727482481b6302589631)):
+
+  This moves the password migration hook to
+
+  ```yaml
+  selfservice:
+    methods:
+      password:
+        config:
+          migrate_hook: ...
+  ```
+
+- Normalize code credentials and deprecate via parameter
+  ([c417b4a](https://github.com/ory/kratos/commit/c417b4aa76a76d3aebb4474999d7bb072615bd9f)):
+
+  Before this, code credentials for passwordless and mfa login were incorrectly
+  stored and normalized. This could cause issues where the system would not
+  detect the user's phone number, and where SMS/email MFA would not properly
+  work with the `highest_available` setting.
+
+- Passthrough correct organization ID to CompletedLoginForWithProvider
+  ([#4124](https://github.com/ory/kratos/issues/4124))
+  ([ad1acd5](https://github.com/ory/kratos/commit/ad1acd51d8dd7582b05a3078b92f73970e1e2715))
+- Password migration hook config
+  ([#4001](https://github.com/ory/kratos/issues/4001))
+  ([50deedf](https://github.com/ory/kratos/commit/50deedfeecf7adbc948521371b181306a0c26cf1)):
+
+  This fixes the config loading for the password migration hook.
+
+- Pw migration param ([#3998](https://github.com/ory/kratos/issues/3998))
+  ([6016cc8](https://github.com/ory/kratos/commit/6016cc88a076eeea71a85d75cfb5191808b69844))
+- Refactor internal API to prevent panics
+  ([#4028](https://github.com/ory/kratos/issues/4028))
+  ([81bc152](https://github.com/ory/kratos/commit/81bc1525f09504729c666192d458cf2eaafab99f))
+- Remove flows from log messages
+  ([#3913](https://github.com/ory/kratos/issues/3913))
+  ([310a405](https://github.com/ory/kratos/commit/310a405202c6b44633b15ad30e1fdb8ebd153e4b))
+- Replace submit with continue button for recovery and verification and add
+  maxlength
+  ([04850f4](https://github.com/ory/kratos/commit/04850f45cfbdc89223366ffa3b540d579a3b44be))
+- Return credentials in FindByCredentialsIdentifier
+  ([#4068](https://github.com/ory/kratos/issues/4068))
+  ([f949173](https://github.com/ory/kratos/commit/f949173b3ed3d45167bb4af8b95440d5e4a39636)):
+
+  Instead of re-fetching the credentials later (expensive), we load them only
+  once.
+
+- Return error if invalid UUID is supplied to ids filter
+  ([#4116](https://github.com/ory/kratos/issues/4116))
+  ([98140f2](https://github.com/ory/kratos/commit/98140f2fd43ccd889e2635e4f3e7582b92fe96ab))
+- **security:** Code credential does not respect `highest_available` setting
+  ([b0111d4](https://github.com/ory/kratos/commit/b0111d4bd561d0f0e2f5883f30fac36fcf7135d5)):
+
+  This patch fixes a security vulnerability which prevents the `code` method to
+  properly report it's credentials count to the `highest_available` mechanism.
+
+  For more details on this issue please refer to the
+  [security advisory](https://github.com/ory/kratos/security/advisories/GHSA-wc43-73w7-x2f5).
+
+- Timestamp precision on mysql
+  ([9a1f171](https://github.com/ory/kratos/commit/9a1f171c1a4a8d20dc2103073bdc11ee3fdc70af))
+- Transient_payload is lost when verification flow started as part of
+  registration ([#3983](https://github.com/ory/kratos/issues/3983))
+  ([192f10f](https://github.com/ory/kratos/commit/192f10f4ad9eb44a612baaccfc71765d52c7e1ed))
+- Trigger oidc web hook on sign in after registration
+  ([#4027](https://github.com/ory/kratos/issues/4027))
+  ([ad5fb09](https://github.com/ory/kratos/commit/ad5fb09687f863e7c5d45868d0b8f5ec2d965372))
+- Typo in login link CLI error messages
+  ([#3995](https://github.com/ory/kratos/issues/3995))
+  ([8350625](https://github.com/ory/kratos/commit/835062542077b9dd8d6a30836d0455adb015265d))
+- Validate page tokens for better error codes
+  ([#4021](https://github.com/ory/kratos/issues/4021))
+  ([32737dc](https://github.com/ory/kratos/commit/32737dc708c1ecf0ec0ceaa4bbc0ac09286186fd))
+- Whoami latency ([#4070](https://github.com/ory/kratos/issues/4070))
+  ([ff6ed5b](https://github.com/ory/kratos/commit/ff6ed5b70b7f715fc38a41cedd17b5323aebd79e))
+
+### Code Generation
+
+- Pin v1.3.0 release commit
+  ([0a49fd0](https://github.com/ory/kratos/commit/0a49fd05245f179501b117163cd574786f287fe8))
+
+### Documentation
+
+- Add google to supported providers in ID Token doc strings
+  ([#4026](https://github.com/ory/kratos/issues/4026))
+  ([955bd8f](https://github.com/ory/kratos/commit/955bd8fbc1353d7a9f84d8f591c3af31781cf7b7))
+- Typo in changelog
+  ([c508980](https://github.com/ory/kratos/commit/c5089801af2a656e9c1fc371a11aeb23918ba359))
+
+### Features
+
+- Add additional messages
+  ([735fc5b](https://github.com/ory/kratos/commit/735fc5b2c5a99746d3012cc38ee2e1b7cc3a67f2))
+- Add browser return_to continue_with action
+  ([7b636d8](https://github.com/ory/kratos/commit/7b636d860c6917cb1133d6d1d7401808adb890c7))
+- Add if method to sdk
+  ([612e3bf](https://github.com/ory/kratos/commit/612e3bf09dbffd3feba08d5100bffbc39cbd240a))
+- Add redirect to continue_with for SPA flows
+  ([99c945c](https://github.com/ory/kratos/commit/99c945c92d0c2745dc8df4402d755afd53e1b9aa)):
+
+  This patch adds the new `continue_with` action `redirect_browser_to`, which
+  contains the redirect URL the app should redirect to. It is only supported for
+  SPA (not server-side browser apps, not native apps) flows at this point in
+  time.
+
+- Add social providers to credential discovery as well
+  ([5f4a2bf](https://github.com/ory/kratos/commit/5f4a2bf619d540d45e96586129c8ee1e7850e745))
+- Add support for Salesforce as identity provider
+  ([#4003](https://github.com/ory/kratos/issues/4003))
+  ([3bf1ca9](https://github.com/ory/kratos/commit/3bf1ca9030555df90ef9903c34313ae4bd1fecae))
+- Add tests for two step login
+  ([#3959](https://github.com/ory/kratos/issues/3959))
+  ([8225e40](https://github.com/ory/kratos/commit/8225e40e3d767e945006b33eebdfc47fd242ff06))
+- Allow deletion of an individual OIDC credential
+  ([#3968](https://github.com/ory/kratos/issues/3968))
+  ([a43cef2](https://github.com/ory/kratos/commit/a43cef23c177acddbf8b03afef087feeaca51981)):
+
+  This extends the existing `DELETE /admin/identities/{id}/credentials/{type}`
+  API to accept an `?identifier=foobar` query parameter for `{type}==oidc` like
+  such:
+
+  `DELETE /admin/identities/{id}/credentials/oidc?identifier=github%3A012345`
+
+  This will delete the GitHub OIDC credential with the identifier
+  `github:012345` (`012345` is the subject as returned by GitHub).
+
+  To find out which OIDC credentials exist, call
+  `GET /admin/identities/{id}?include_credential=oidc` beforehand.
+
+  This will allow you to delete individual OIDC credentials for users even if
+  they have several set up.
+
+- Allow partially failing batch inserts
+  ([#4083](https://github.com/ory/kratos/issues/4083))
+  ([4ba7033](https://github.com/ory/kratos/commit/4ba70330cf9e0eda9044b0a5a504c34493ae17ed)):
+
+  When batch-inserting multiple identities, conflicts or validation errors of a
+  subset of identities in the batch still allow the rest of the identities to be
+  inserted. The returned JSON contains the error details that lead to the
+  failure.
+
+- Better detection if credentials exist on identifier first login
+  ([#3963](https://github.com/ory/kratos/issues/3963))
+  ([42ade94](https://github.com/ory/kratos/commit/42ade94e32a9a7ad6c0bda785e86d7209c46d8bb))
+- Change `method=profile:back` to `screen=previous`
+  ([#4119](https://github.com/ory/kratos/issues/4119))
+  ([2cd8483](https://github.com/ory/kratos/commit/2cd8483e809170d0524fe6a5d13837108d29fa54))
+- Clarify session extend behavior
+  ([#3962](https://github.com/ory/kratos/issues/3962))
+  ([af5ea35](https://github.com/ory/kratos/commit/af5ea35759e74d7a1637823abcc21dc8e3e39a9d))
+- Client-side PKCE take 3 ([#4078](https://github.com/ory/kratos/issues/4078))
+  ([f7c1024](https://github.com/ory/kratos/commit/f7c102456a71b226d8353b9d59cc03fb2ba0af40)):
+
+  - feat: client-side PKCE
+
+  This change introduces a new configuration for OIDC providers: pkce with
+  values auto (default), never, force.
+
+  When auto is specified or the field is omitted, Kratos will perform
+  autodiscovery and perform PKCE when the server advertises support for it. This
+  requires the issuer_url to be set for the provider.
+
+  never completely disables PKCE support. This is only theoretically useful:
+  when a provider advertises PKCE support but doesn't actually implement it.
+
+  force always sends a PKCE challenge in the initial redirect URL, regardless of
+  what the provider advertises. This setting is useful when the provider offers
+  PKCE but doesn't advertise it in his ./well-known/openid-configuration.
+
+  Important: When setting pkce: force, you must whitelist a different return URL
+  for your OAuth2 client in the provider's configuration. Instead of
+  <base-url>/self-service/methods/oidc/callback/<provider>, you must use
+  <base-url>/self-service/methods/oidc/callback (note missing last path
+  segment). This is to enable the use of the same OAuth client ID+secret when
+  configuring several Kratos OIDC providers, without having to whitelist
+  individual redirect_uris for each Kratos provider config.
+
+  - chore: regenerate SDK, bump DB versions, cleanup tool install
+
+  - chore: get final organization ID from provider config during registration
+    and login
+
+  - chore: fixup OIDC function signatures and improve tests
+
+- Emit events in identity persister
+  ([#4107](https://github.com/ory/kratos/issues/4107))
+  ([20156f6](https://github.com/ory/kratos/commit/20156f651f2faa0a79842de8d2fb4a09ee7094c1))
+- Enable new-style OIDC state generation
+  ([#4121](https://github.com/ory/kratos/issues/4121))
+  ([eb97243](https://github.com/ory/kratos/commit/eb97243d6499e2d9f2338a2ce3f5e39579d19086))
+- Identifier first auth
+  ([1bdc19a](https://github.com/ory/kratos/commit/1bdc19ae3e1a3df38234cb892f65de4a2c95f041))
+- Identifier first login for all first factor login methods
+  ([638b274](https://github.com/ory/kratos/commit/638b27431312bcd91844ac4a00733a840976aa4f))
+- Improve session extend performance
+  ([#3948](https://github.com/ory/kratos/issues/3948))
+  ([4e3fad4](https://github.com/ory/kratos/commit/4e3fad4b4739b5cf00d658155350cb599f2cd06a)):
+
+  This patch improves the performance for extending session lifespans. Lifespan
+  extension is tricky as it is often part of the middleware of Ory Kratos
+  consumers. As such, it is prone to transaction contention when we read and
+  write to the same session row at the same time (and potentially multiple
+  times).
+
+  To address this, we:
+
+  1. Introduce a locking mechanism on the row to reduce transaction contention;
+  2. Add a new feature flag that toggles returning 204 no content instead of
+     200 + session.
+
+  Be aware that all reads on the session table will have to wait for the
+  transaction to commit before they return a value. This may cause long(er)
+  response times on `/session/whoami` for sessions that are being extended at
+  the same time.
+
+- Password migration hook ([#3978](https://github.com/ory/kratos/issues/3978))
+  ([c9d5573](https://github.com/ory/kratos/commit/c9d55730a10b71ac61bb5097f5f9c33f144f2a95)):
+
+  This adds a password migration hook to easily migrate passwords for which we
+  do not have the hash.
+
+  For each user that needs to be migrated to Ory Network, a new identity is
+  created with a credential of type password with a config of
+  {"use_password_migration_hook": true} . When a user logs in, the credential
+  identifier and password will be sent to the password_migration web hook if all
+  of these are true: The user’s identity’s password credential is
+  {"use_password_migration_hook": true} The password_migration hook is
+  configured After calling the password_migration hook, the HTTP status code
+  will be inspected: On 200, we parse the response as JSON and look for
+  {"status": "password_match"}. The password credential config will be replaced
+  with the hash of the actual password. On any other status code, we assume that
+  the password is not valid.
+
+- **sdk:** Add missing profile discriminator to update registration
+  ([0150795](https://github.com/ory/kratos/commit/0150795d902dcc7cfb2298c3b5a98da1c2541e46))
+- **sdk:** Avoid eval with javascript triggers
+  ([dd6e53d](https://github.com/ory/kratos/commit/dd6e53d62f343a317edf403218b20599539218c6)):
+
+  Using `OnLoadTrigger` and `OnClickTrigger` one can now map the trigger to the
+  corresponding JavaScript function.
+
+  For example, trigger `{"on_click_trigger":"oryWebAuthnRegistration"}` should
+  be translated to `window.oryWebAuthnRegistration()`:
+
+  ```
+  if (attrs.onClickTrigger) {
+    window[attrs.onClickTrigger]()
+  }
+  ```
+
+- Separate 2fa refresh from 1st factor refresh
+  ([#3961](https://github.com/ory/kratos/issues/3961))
+  ([89355d8](https://github.com/ory/kratos/commit/89355d86258ace19c03fcb38dd3861f88e28af59))
+- Set maxlength for totp input
+  ([51042d9](https://github.com/ory/kratos/commit/51042d99fab301f0bb44665e56c5a2364e7d8866))
+
+### Tests
+
+- Add form hydration tests for code login
+  ([37781a9](https://github.com/ory/kratos/commit/37781a93dda9b8f0127217a6b0ac2434dda1cc58))
+- Add form hydration tests for idfirst login
+  ([633b0ba](https://github.com/ory/kratos/commit/633b0ba7f724374f4c02128a5b0f748bd2e9413e))
+- Add form hydration tests for oidc login
+  ([df0cdcb](https://github.com/ory/kratos/commit/df0cdcb424cae6c49143ef2ef2d0b2c95f14fffb))
+- Add form hydration tests for passkey login
+  ([a777854](https://github.com/ory/kratos/commit/a777854e8d99336ab8f5755fdbc9d257e5edd1c0))
+- Add form hydration tests for password login
+  ([7186e7e](https://github.com/ory/kratos/commit/7186e7e060e04a4918e22e0b03fefbf4eb9f4a4b))
+- Add form hydration tests for webauthn login
+  ([8b68163](https://github.com/ory/kratos/commit/8b68163a3f293f7dceb58397f0ef555f1d8fd7c3))
+- Add tests for idfirst
+  ([5f76c15](https://github.com/ory/kratos/commit/5f76c1565e89bfb99f23c3f0f3a9beadbdfa270c))
+- Additional code credential test case
+  ([#4122](https://github.com/ory/kratos/issues/4122))
+  ([4f2c854](https://github.com/ory/kratos/commit/4f2c8542ab04b88c7112d7b564d91bcfd8f5791a))
+- Deflake and parallelize persister tests
+  ([#3953](https://github.com/ory/kratos/issues/3953))
+  ([61f87d9](https://github.com/ory/kratos/commit/61f87d90bd67e5bb1f00ee110d986e4f72fc4c91))
+- Deflake session extend config side-effect
+  ([#3950](https://github.com/ory/kratos/issues/3950))
+  ([b192c92](https://github.com/ory/kratos/commit/b192c92d6c969d470d6479bc33dbc351d327c1f9))
+- Enable server-side config from context
+  ([#3954](https://github.com/ory/kratos/issues/3954))
+  ([e0001b0](https://github.com/ory/kratos/commit/e0001b0db784457652581366bd7ead7cdf6b3898))
+- Improve stability of refresh test
+  ([#4037](https://github.com/ory/kratos/issues/4037))
+  ([68693a4](https://github.com/ory/kratos/commit/68693a43e4e1e3028f17789e72d0b79f6298d139))
+- Resolve CI failures ([#4067](https://github.com/ory/kratos/issues/4067))
+  ([dbf7274](https://github.com/ory/kratos/commit/dbf7274f7a4be56c33b06559875c42725bf4a351))
+- Resolve issues and update snapshots for all selfservice strategies
+  ([e2e81ac](https://github.com/ory/kratos/commit/e2e81ac16726b180d33c57913e3cac099daf946b))
+- Update incorrect usage of Auth0 in Salesforce tests
+  ([#4007](https://github.com/ory/kratos/issues/4007))
+  ([6ce3068](https://github.com/ory/kratos/commit/6ce306824cec81890c50dcf23c2b8a5825f20a10))
+- Verify redirect continue_with in hook executor for browser clients
+  ([7b0b94d](https://github.com/ory/kratos/commit/7b0b94d30ec9069de6978427814d55a30e62adb8))
+
+### Unclassified
+
+- Merge commit from fork
+  ([123e807](https://github.com/ory/kratos/commit/123e80782b392095631ee2e0d1bd6ec337c1fb79)):
+
+  - fix(security): code credential does not respect `highest_available` setting
+
+  This patch fixes a security vulnerability which prevents the `code` method to
+  properly report it's credentials count to the `highest_available` mechanism.
+
+  For more details on this issue please refer to the
+  [security advisory](https://github.com/ory/kratos/security/advisories/GHSA-wc43-73w7-x2f5).
+
+  - fix: normalize code credentials and deprecate via parameter
+
+  Before this, code credentials for passwordless and mfa login were incorrectly
+  stored and normalized. This could cause issues where the system would not
+  detect the user's phone number, and where SMS/email MFA would not properly
+  work with the `highest_available` setting.
+
+- Update .github/workflows/ci.yaml
+  ([2d60772](https://github.com/ory/kratos/commit/2d60772062a684c3a27f28b8836c3548f5b8cea9))
+- Update Code QL action to v2
+  ([#4008](https://github.com/ory/kratos/issues/4008))
+  ([e3f1da0](https://github.com/ory/kratos/commit/e3f1da0f4bf41a8a8733758fcd9edb9910c55cfa))
+
+# [1.2.0](https://github.com/ory/kratos/compare/v1.1.0...v1.2.0) (2024-06-05)
+
+Ory Kratos v1.2 is the most complete, scalable, and secure open-source identity
+server available. We are thrilled to announce its release!
+
+![Ory Kratos 1.2 released](https://www.ory.sh/images/newsletter/kratos-1.2.0/banner.png)
+
+This release introduces two major features: two-step registration and full
+PassKey with resident key support.
+
+Passkeys provide a secure and convenient authentication method, eliminating the
+need for passwords while ensuring strong security. With this release, we have
+added support for resident keys, enabling offline authentication. Credential
+discovery allows users to link existing passkeys to their Ory account
+seamlessly.
+
+[Watch the PassKey demo video](https://github.com/aeneasr/web-next-deprecated/assets/3372410/e676c518-c82a-42a6-821e-28aecadb270c)
+
+Two-step registration improves the user experience by dividing the registration
+process into two steps. Users first enter their identity traits, and then choose
+a credential method for authentication, resulting in a streamlined process. This
+feature is especially useful when enabling multiple authentication strategies,
+as it eliminates the need to repeat identity traits for each strategy.
+
+![Two-Step Registration](https://ik.imagekit.io/launchnotes/production/tr:w-1640,c-at_max,f-auto/ngul9dzfjdt3pe8benegjjeeagi1)
+
+The 107 commits since v1.1 include several improvements:
+
+- **Webhooks** now carry session information if available.
+- **Transient Payloads** are now available across all self-service flows.
+- **Sign in with Twitter** is now available.
+- **Sign in with LinkedIn** now includes an additional v2 provider compatible
+  with LinkedIn's new SSO API.
+- **Two-Step Registration**: An improved registration experience that separates
+  entering profile information from choosing authentication methods.
+- **User Credentials Meta-Information** can now be included on the list
+  endpoint.
+- **Social Sign-In** is now resilient to double-submit issues common with
+  Facebook and Apple mobile login.
+
+**Two-Step Registration Enabled by Default**: This is now the default setting.
+To disable, set `selfservice.flows.registration.enable_legacy_flow` to `true`.
+
+- Improved account linking and credential discovery during sign-up.
+- The `return_to` parameter is now respected in OIDC API flows.
+- Adjustments to database indices.
+- Enhanced error messages for security violations.
+- Improved SDK types.
+- The `verification` and `verification_ui` hooks are now available in the login
+  flow.
+- Webhooks now contain the correct identity state in the after-verification hook
+  chain.
+
+We are doing this survey to find out how we can support self-hosted Ory users
+better. We strive to provide you with the best product and service possible and
+your feedback will help us understand what we're doing well and where we can
+improve to better meet your needs. We truly value your opinion and thank you in
+advance for taking the time to share your thoughts with us!
+
+Fill out the
+[survey now](https://share-eu1.hsforms.com/15DiCnJpcRuijnpAdnDhxxwextgn)!
+
+## Breaking Changes
+
+This feature enables two-step registration per default. Two-step registration is
+a significantly improved sign up flow and recommended when using more than one
+sign up methods. To disable two-step registration, set
+`selfservice.flows.registration.enable_legacy_flow` to `true`. This value
+defaults to `false`.
+
+### Bug Fixes
+
+- Add login succeeded event to post registration hook
+  ([#3739](https://github.com/ory/kratos/issues/3739))
+  ([b685fa5](https://github.com/ory/kratos/commit/b685fa5477be2ba099fd2420b27b2411fafc7e51))
+- Add missing env vars to set up guide
+  ([#3855](https://github.com/ory/kratos/issues/3855))
+  ([da90502](https://github.com/ory/kratos/commit/da90502dc3bf8e3d34fb4ecc531834b1919989ad)):
+
+  Closes https://github.com/ory/kratos/issues/3828
+
+- Add missing indexes and remove unused index
+  ([6d7372e](https://github.com/ory/kratos/commit/6d7372ee3d88ee4fc552b969dd0ff338dcc0544c))
+- Add missing indexes and remove unused index
+  ([#3756](https://github.com/ory/kratos/issues/3756))
+  ([c905f02](https://github.com/ory/kratos/commit/c905f02473c5d77ab309a45f10251b1ba7e88584))
+- Add sms mfa via parameter to spec
+  ([#3766](https://github.com/ory/kratos/issues/3766))
+  ([b291c95](https://github.com/ory/kratos/commit/b291c959c18c72f5edc55607ab23b4592faf8d53))
+- Allow updating just the verified_at timestamp of addresses
+  ([#3880](https://github.com/ory/kratos/issues/3880))
+  ([696cc1b](https://github.com/ory/kratos/commit/696cc1b59b18627fec63915070f4d8c5b3e3250d))
+- Always issue session last ([#3876](https://github.com/ory/kratos/issues/3876))
+  ([e942507](https://github.com/ory/kratos/commit/e94250705e999567e2ed58cebdb3f6a9d589e3ef)):
+
+  In post persist hooks, the session issuance hook always needs to come last.
+  This fixes the getHooks function to ensure this.
+
+- Audit issues ([#3797](https://github.com/ory/kratos/issues/3797))
+  ([7017490](https://github.com/ory/kratos/commit/7017490caa9c70e22d5c626773c0266521813ff5))
+- Change return urls in quickstarts
+  ([#3928](https://github.com/ory/kratos/issues/3928))
+  ([9730e09](https://github.com/ory/kratos/commit/9730e099a656d211389d8e993c64d8082784c929))
+- Close res body ([#3870](https://github.com/ory/kratos/issues/3870))
+  ([cc39f8d](https://github.com/ory/kratos/commit/cc39f8df7c235af0df616432bc4f88681896ad85))
+- CVEs in dependencies ([#3902](https://github.com/ory/kratos/issues/3902))
+  ([e5d3b0a](https://github.com/ory/kratos/commit/e5d3b0afde3c80c6c9cf8815c56d82e291ede663))
+- Db index and duplicate credentials error
+  ([#3896](https://github.com/ory/kratos/issues/3896))
+  ([9f34a21](https://github.com/ory/kratos/commit/9f34a21ea2035a5d33edd96753023a3c8c6c054c)):
+
+  - fix: don't return password cred type if empty
+  - fix: better index for config.user_handle on identity_credentials
+
+- Do not require method to be passkey in settings schema
+  ([#3862](https://github.com/ory/kratos/issues/3862))
+  ([660f330](https://github.com/ory/kratos/commit/660f330ab69ef0e6fd21501fbc9dfed693d4a715))
+- Don't require connection_uri in SMTP
+  ([#3861](https://github.com/ory/kratos/issues/3861))
+  ([800f8f1](https://github.com/ory/kratos/commit/800f8f1036ef46a561d24dcdec45dd48803978d7))
+- Don't treat passkeys as AAL2
+  ([#3853](https://github.com/ory/kratos/issues/3853))
+  ([8eee972](https://github.com/ory/kratos/commit/8eee972d89accb02b3caa053fca2f16ed2c876f1))
+- Drop index if exists ([#3846](https://github.com/ory/kratos/issues/3846))
+  ([ad0619d](https://github.com/ory/kratos/commit/ad0619d803cd2842a67c56a545ec5ab252501b0f))
+- Drop trigram index on identifiers
+  ([#3827](https://github.com/ory/kratos/issues/3827))
+  ([8f8fd90](https://github.com/ory/kratos/commit/8f8fd90304886ecd689a85fc60c4712e47526cdd))
+- Enum type of session expandables
+  ([#3891](https://github.com/ory/kratos/issues/3891))
+  ([63d785e](https://github.com/ory/kratos/commit/63d785e5e73ff067ec804ecc2107fac1525d3688))
+- Enum type of session expandables
+  ([#3895](https://github.com/ory/kratos/issues/3895))
+  ([c435727](https://github.com/ory/kratos/commit/c435727c1e3c70c040b7fc7648ce621b136e5fc2))
+- Execute verification & verification_ui properly in login flows
+  ([#3847](https://github.com/ory/kratos/issues/3847))
+  ([5aad1c1](https://github.com/ory/kratos/commit/5aad1c1e6cc92f72af56511dacb9812edb600813))
+- Ignore decrypt errors in WithDeclassifiedCredentials
+  ([#3731](https://github.com/ory/kratos/issues/3731))
+  ([8f5192f](https://github.com/ory/kratos/commit/8f5192fbb74c4b952029a6856284de8d59027770))
+- Improve SDK discriminators
+  ([#3844](https://github.com/ory/kratos/issues/3844))
+  ([c08b3ad](https://github.com/ory/kratos/commit/c08b3ad76c5adb712c945cdbd92a9a51832e94b9))
+- Include all creds in duplicate credential err
+  ([#3881](https://github.com/ory/kratos/issues/3881))
+  ([e06c241](https://github.com/ory/kratos/commit/e06c241ffe3f0e696bb1cbc1d1080f9d4e09fbd2))
+- Linkedin issuer override ([#3875](https://github.com/ory/kratos/issues/3875))
+  ([11d221a](https://github.com/ory/kratos/commit/11d221a4d33878930ca7025ae1b5c18b25dd1add))
+- Make sure emails can still be sent with SMS enabled
+  ([#3795](https://github.com/ory/kratos/issues/3795))
+  ([7c68c5a](https://github.com/ory/kratos/commit/7c68c5aa69ed76a84a37a37a3555277ddc772cf8))
+- Missing indices and foreign keys
+  ([#3800](https://github.com/ory/kratos/issues/3800))
+  ([0b32ce1](https://github.com/ory/kratos/commit/0b32ce113be47aa724d3468062ced09f8f60c52a))
+- **oidc:** Grace period for continuity container on oidc callbacks
+  ([#3915](https://github.com/ory/kratos/issues/3915))
+  ([1a9a096](https://github.com/ory/kratos/commit/1a9a096d619925dd3718ad9dd9daf77387572ece))
+- Passing transient payloads
+  ([#3838](https://github.com/ory/kratos/issues/3838))
+  ([d01b670](https://github.com/ory/kratos/commit/d01b6705bf36efb6e0f3d71ed22d0574ab8a98a4))
+- Prevent SMTP URL leak on unparsable URL
+  ([#3770](https://github.com/ory/kratos/issues/3770))
+  ([c5f39f4](https://github.com/ory/kratos/commit/c5f39f4bc481e400f736ede7f8f0be546a55eebf))
+- Respect return_to in OIDC API flow error case
+  ([#3893](https://github.com/ory/kratos/issues/3893))
+  ([e8f1bcb](https://github.com/ory/kratos/commit/e8f1bcb1342af994b8e08282aa4066ee00ffe7d4)):
+
+  - fix: respect return_to in OIDC API flow error case
+
+  This fix ensures that we redirect the user to the return_to URL when an error
+  occurs during the OIDC login for native flows.
+
+  Native flows are initialized through the API, and the browser URL is retrieved
+  from a 422 response after a POST to submit the login flow. Successful OIDC
+  flows already returned the `code` to the `return_to` URL. Now, unsuccessful
+  flows return the `flow` with the current flow ID (which might have changed),
+  so that the caller can retrieve the full flow and act accordingly.
+
+  - fix: ignore trivvy CVE report
+
+  Bump in distroless is still open
+
+- **sdk:** Expand identity in session extension
+  ([#3843](https://github.com/ory/kratos/issues/3843))
+  ([04f0231](https://github.com/ory/kratos/commit/04f02318d4de5290cbf100e9b301284d5ee40fe7)),
+  closes [#3842](https://github.com/ory/kratos/issues/3842)
+- **sdk:** Improve discriminators for node and Go
+  ([#3821](https://github.com/ory/kratos/issues/3821))
+  ([9ddf7cc](https://github.com/ory/kratos/commit/9ddf7cc7c52313c4ee13ccdc2886ad94b5d1317f))
+- Show error page on identity mismatch
+  ([#3790](https://github.com/ory/kratos/issues/3790))
+  ([e6db689](https://github.com/ory/kratos/commit/e6db689e0de41067e6e78889c3dab9637a96236e))
+- Test assertions on declassifying OIDC tokens
+  ([#3773](https://github.com/ory/kratos/issues/3773))
+  ([7f8a7f1](https://github.com/ory/kratos/commit/7f8a7f142a91c8c74f32eadb41224fc4f69c2109))
+- Tolerate more "truthy" values when creating new flows
+  ([#3841](https://github.com/ory/kratos/issues/3841))
+  ([49d93c0](https://github.com/ory/kratos/commit/49d93c0e3383f602fe6be3c7bf749b54f344aa72)),
+  closes [#3839](https://github.com/ory/kratos/issues/3839):
+
+  Use strconv.ParseBool to accept multiple "truthy" values for the `refresh` and
+  `return_session_token_exchange_code` query parameters when creating a new
+  login flow.
+
+  For some SDKs (e.g.: Python), these stringification of booleans is not
+  user-controlled and these endpoints could not be used fully due to the backend
+  ignoring any value other than `true` (all lowercase).
+
+- Tweaks to UpsertSessions ([#3878](https://github.com/ory/kratos/issues/3878))
+  ([da51dcd](https://github.com/ory/kratos/commit/da51dcdb8c82a5dbd290ab2f48ad74a1c6dd18f0))
+- Use correct post-verification identity state in post-hooks
+  ([#3863](https://github.com/ory/kratos/issues/3863))
+  ([6e63d06](https://github.com/ory/kratos/commit/6e63d06db1cd1ab62f8a2d0b202ec74572420204))
+- Webhook transient payload in OIDC login flows
+  ([#3857](https://github.com/ory/kratos/issues/3857))
+  ([2cdfc70](https://github.com/ory/kratos/commit/2cdfc70c726a166790b98d419895f0396d13176f)):
+
+  - fix: transient payload with OIDC login
+
+### Code Generation
+
+- Pin v1.2.0 release commit
+  ([1a70648](https://github.com/ory/kratos/commit/1a70648c4d5b9b8d135dd7bea3842057e67b574e))
+
+### Documentation
+
+- Remove delete reference from batch patch identity
+  ([#3906](https://github.com/ory/kratos/issues/3906))
+  ([cd01cb9](https://github.com/ory/kratos/commit/cd01cb9fb23a24e52d46538a9ea63c2144c3b145))
+
+### Features
+
+- Add `include_credential` query param to `/admin/identities` list call
+  ([#3343](https://github.com/ory/kratos/issues/3343))
+  ([d94530a](https://github.com/ory/kratos/commit/d94530a716358895b01b65babd77226fab69f494))
+- Add headers to web hooks ([#3849](https://github.com/ory/kratos/issues/3849))
+  ([4642de0](https://github.com/ory/kratos/commit/4642de0cfd1fb15bc48c7093be9449abd488755c))
+- Add session to post login webhook
+  ([#3877](https://github.com/ory/kratos/issues/3877))
+  ([386078e](https://github.com/ory/kratos/commit/386078e0b5c74c54ce2c7dc6fd12fd865817b87a))
+- Add transient payloads to all flows
+  ([#3738](https://github.com/ory/kratos/issues/3738))
+  ([b8b747b](https://github.com/ory/kratos/commit/b8b747b2adc59c8cf938a0ee30accdb4135634b8))
+- Add twitter SSO ([#3778](https://github.com/ory/kratos/issues/3778))
+  ([930fb19](https://github.com/ory/kratos/commit/930fb19842e527e5e9c415efa983b36e02829516))
+- Add verification hook to login flow
+  ([#3829](https://github.com/ory/kratos/issues/3829))
+  ([43e4ead](https://github.com/ory/kratos/commit/43e4eadce7fa6e66bf1f9c03136d141bffd3094f))
+- Allow admin to create API code recovery flows
+  ([#3939](https://github.com/ory/kratos/issues/3939))
+  ([25d1ecd](https://github.com/ory/kratos/commit/25d1ecd90317193095e01b97ff21d92920035b02))
+- Control edge cache ttl ([#3808](https://github.com/ory/kratos/issues/3808))
+  ([c9dcce5](https://github.com/ory/kratos/commit/c9dcce5a41137937df1aad7ac81170b443740f88))
+- Linkedin v2 provider ([#3804](https://github.com/ory/kratos/issues/3804))
+  ([a6ad983](https://github.com/ory/kratos/commit/a6ad983ac83aa3ea65c4dc0c46b582096574c25a)):
+
+  - feat: add linkedin-v2 provider
+
+  - docs: document linkedin special-case
+
+- PassKeys with Resident Keys and two-step registration
+  ([#3748](https://github.com/ory/kratos/issues/3748))
+  ([3621411](https://github.com/ory/kratos/commit/3621411dc4386d841bc6766a5ab8d03e65812073))
+- Send OIDC claim keys to tracing
+  ([#3798](https://github.com/ory/kratos/issues/3798))
+  ([04390be](https://github.com/ory/kratos/commit/04390bee426befe51af2ee8177afabaa9ce4fa80))
+- Use authenticate endpoint for x
+  ([#3833](https://github.com/ory/kratos/issues/3833))
+  ([3d9ba5d](https://github.com/ory/kratos/commit/3d9ba5df85e0d0c4d8002365987e536b37678104)):
+
+  Improves the "Log in with X" experience by not asking the user to
+  re-authenticate every time.
+
+### Tests
+
+- Deflake session test ([#3864](https://github.com/ory/kratos/issues/3864))
+  ([6b275f3](https://github.com/ory/kratos/commit/6b275f35a0732ffb723d47df5b6afbdc06eaf71f))
+- Resolve failing test for empty tokens
+  ([#3775](https://github.com/ory/kratos/issues/3775))
+  ([7277368](https://github.com/ory/kratos/commit/7277368bc28df8f0badffc7e739cef20f05e9a02))
+- Resolve flaky e2e tests ([#3935](https://github.com/ory/kratos/issues/3935))
+  ([a14927d](https://github.com/ory/kratos/commit/a14927dfa5f8d0fbda7e5a831f0a09a42369e06c)):
+
+  - test: resolve flaky code registration tests
+
+  - chore: don't fail logout if cookie is not found
+
+  - chore: remove .only
+
+  - chore: reduce wait
+
+  - chore: u
+
+  - chore: u
+
+  - chore: u
+
+### Unclassified
+
+- Remove unnecessary COPY command from Dockerfile (#3771)
+  ([087748c](https://github.com/ory/kratos/commit/087748c0651ff0fc93259f7ab6b10668c09f5eba)),
+  closes [#3771](https://github.com/ory/kratos/issues/3771)
+
+# [1.1.0](https://github.com/ory/kratos/compare/v1.0.0...v1.1.0) (2024-02-20)
+
+![Ory Kratos v1.1.0](https://www.ory.sh/images/newsletter/kratos-1.1.0/banner.png)
+
+Ory Kratos v1.1 is the most complete, most scalable, and most secure open-source
+identity server on the planet, and we are thrilled to announce its release! This
+release comes with over 270 commits and an incredible amount of new features and
+capabilities!
+
+- **Phone Verification & 2FA with SMS**: Enhance convenient security with phone
+  verification and two-factor authentication (2FA) via SMS, integrating easily
+  with SMS gateways like Twilio. This feature not only adds a convenient layer
+  of security but also offers a straightforward method for user verification,
+  increasing your trust in user accounts.
+- **Translations & Internationalization**: Ory Kratos now supports multiple
+  languages, making it accessible to a global audience. This improvement
+  enhances the user experience by providing a localized interface, ensuring
+  users interact with the system in their preferred language.
+- **Native Support for Sign in with Google and Apple on Android/iOS**: Get more
+  sign-ups with native support for "Sign in with Google" and "Sign in with
+  Apple" on mobile platforms. Great user experience matters!
+- **Account Linking**: Simplify user management with new features that
+  facilitate account linking. If a user registers with a password and later
+  signs in with a social account sharing the same email, new screens make
+  account linking straightforward, enhancing user convenience and reducing
+  support inquiries.
+- **Passwordless "Magic Code"**: Introduce a passwordless login method with
+  "Magic Code," which sends a one-time code to the user's email for sign-up and
+  login. This method can also serve as a fallback when users forget their
+  password or their social login is unavailable, streamlining the login process
+  and improving user accessibility.
+- **Session to JWT Conversion**: Convert an Ory Session Cookie or Ory Session
+  Token into a JSON Web Token (JWT), providing more flexibility in handling
+  sessions and integrating with other systems. This feature allows for seamless
+  authentication and authorization processes across different platforms and
+  services.
+
+**Note:** To ensure a seamless upgrade experience with minimal impact, some of
+these features are gated behind the `feature_flags` config parameter, allowing
+controlled deployment and testing.
+
+The following features have been shipped exclusively to Ory Network for this
+version:
+
+- **[B2B SSO](https://www.ory.sh/docs/kratos/organizations)** allows your
+  customers to connect their LDAP / Okta / AD / … to your login. Ory selects the
+  correct login provider based on the user’s email domain.
+- [\*\*Significantly better API performance](https://www.ory.sh/docs/api/eventual-consistency)\*\*
+  for expensive API operations by specifying the desired consistency
+  (`strong`, `eventual`).
+- **Finding users effortlessly** with our new fuzzy search for credential
+  identifiers available for
+  the [Identity List API](https://www.ory.sh/docs/kratos/reference/api#tag/identity/operation/listIdentities).
+
+- Better reliability when sending out emails across different providers.
+- Streamlining the HTTP API and improving related SDK methods.
+- Better performance when calling the whoami API endpoint, updating identities,
+  and listing identities.
+- The performance of listing identities has significantly improved with the
+  introduction of keyset pagination. Page pagination is still available but will
+  be fully deprecated soon.
+- Ability to list multiple identities in a batch call.
+- Passkeys and WebAuthn now support multiple origins, useful when working with
+  subdomains.
+- The logout flow now redirects the user back to the `return_to` parameter set
+  in the API call.
+- When updating their settings, the user was sometimes incorrectly asked to
+  confirm the changes by providing their password. This issue has now been
+  fixed.
+- When signing up with an account that already exists, the user will be shown a
+  hint helping them sign in to their existing account.
+- CORS configuration can now be hot-reloaded.
+- The integration with Ory OAuth2 / Ory Hydra has improved for logout, login
+  session management, verification, and recovery flows.
+- A new passwordless method has been added: "Magic code". It sends a one-time
+  code to the user's email during sign-up and log-in. This method can
+  additionally be used as a fallback login method when the user forgets their
+  password.
+- Integration with social sign-in has improved, and it is now possible to use
+  the email verified status from the social sign-in provider.
+- Ory Elements and the default Ory Account Experience are now internationalized
+  with translations.
+- It is now possible to convert an Ory Session Cookie or Ory Session Token into
+  a JSON Web Token.
+- Recovery on native apps has improved significantly and no longer requires the
+  user to switch to a browser for the recovery step.
+- Administrators can now find users by their identifiers with fuzzy search -
+  this feature is still in preview.
+- Importing HMAC-hashed passwords is now possible.
+- Webhooks can now update identity admin metadata.
+- New screens have been added to make account linking possible when a user has
+  registered with a password and later tries signing in with a social account
+  sharing the same email.
+- Ability to revoke all sessions of a user when they change their password.
+- Webhooks are now available for all login, registration, and login methods,
+  including Passkeys, TOTP, and others.
+- The login screen now longer shows “ID” for the primary identifier, but instead
+  extracts the correct label - for example, “Email” or “Username” from the
+  Identity Schema.
+- Login hints help users with guidance when they are unable to sign in (wrong
+  social sign-in provider) but have an active account.
+- Phone numbers can now be verified via an SMS gateway like Twilio.
+- SMS OTP is now a two-factor option. Ory Kratos 1.1 is a major release that
+  marks a significant milestone in our journey.
+
+We sincerely hope that you find these new features and improvements in Ory
+Kratos 1.1 valuable for your projects. To experience the power of the latest
+release, we encourage you to get the latest version of Ory
+Kratos [here](https://github.com/ory/kratos) or leverage Ory Kratos
+in [Ory Network](https://www.ory.sh/network/) — the easiest, simplest, and most
+cost-effective way to run Ory.
+
+For organizations seeking to upgrade their self-hosted solution, **Ory offers
+enterprise support services to ensure a smooth transition**. Our team is ready
+to assist you throughout the migration process, ensuring uninterrupted access to
+the latest features and improvements. Additionally, we provide
+various [support plans](https://www.ory.sh/support/) specifically tailored for
+self-hosting organizations. These plans offer comprehensive assistance and
+guidance to optimize your Ory deployments and meet your unique requirements. We
+extend our heartfelt gratitude to the vibrant and supportive Ory Community.
+Without your constant support, feedback, and contributions, reaching this
+significant milestone would not have been possible. As we continue on this
+journey, your feedback and suggestions are invaluable to us. Together, we are
+shaping the future of identity management and authentication in the digital
+landscape.
+
+Contributors to this release in no particular
+order: [moose115](https://github.com/ory/kratos/commits?author=moose115), [K3das](https://github.com/ory/kratos/commits?author=K3das), [sidartha](https://github.com/ory/kratos/commits?author=sidartha), [efesler](https://github.com/ory/kratos/commits?author=efesler), [BrandonNoad](https://github.com/ory/kratos/commits?author=BrandonNoad) ,[Saancreed](https://github.com/ory/kratos/commits?author=Saancreed), [jpogorzelski](https://github.com/ory/kratos/commits?author=jpogorzelski), [dreksx](https://github.com/ory/kratos/commits?author=dreksx), [martinloesethjensen](https://github.com/ory/kratos/commits?author=martinloesethjensen), [cpoyatos1](https://github.com/ory/kratos/commits?author=cpoyatos1), [misamu](https://github.com/ory/kratos/commits?author=misamu), [tristankenney](https://github.com/ory/kratos/commits?author=tristankenney), [nxy7](https://github.com/ory/kratos/commits?author=nxy7), [anhnmt](https://github.com/ory/kratos/commits?author=anhnmt)
+
+Are you passionate about security and want to make a meaningful impact in one of
+the biggest open-source communities? Join
+the [Ory community](https://slack.ory.sh/) and become a part of the new ID
+stack. Together, we are building the next generation of IAM solutions that
+empower organizations and individuals to secure their identities effectively.
+Want to check out Ory Kratos yourself? Use these commands to get your Ory Kratos
+project running on the Ory Network:
+
+```
+brew install ory/tap/cli
+
+scoop bucket add ory <https://github.com/ory/scoop.git>
+scoop install ory
+
+bash <(curl <https://raw.githubusercontent.com/ory/meta/master/install.sh>) -b . ory
+sudo mv ./ory /usr/local/bin/
+
+ory auth login
+
+ory create project --name "My first Kratos project"
+
+ory open account-experience registration
+
+ory patch identity-config \
+  --replace '/identity/default_schema_id="preset://username"' \
+  --replace '/identity/schemas=[{"id":"preset://username","url":"preset://username"}]' \
+  --format yaml
+
+ory open account-experience registration
+```
 
 ## Breaking Changes
 
@@ -413,6 +2039,8 @@ https://github.com/ory/kratos/pull/3480
 - Add caching to Jsonnet snippet during session JWT tokenization
   ([#3699](https://github.com/ory/kratos/issues/3699))
   ([1da8180](https://github.com/ory/kratos/commit/1da818072154baa5c0921134919afde595031e94))
+- Add consistency flag ([#3733](https://github.com/ory/kratos/issues/3733))
+  ([fd79950](https://github.com/ory/kratos/commit/fd7995077307cc101550eda5d7724ea1f68fa98a))
 - Add max-age to default cors headers
   ([#3584](https://github.com/ory/kratos/issues/3584))
   ([c5b4aaa](https://github.com/ory/kratos/commit/c5b4aaa2df5d010b62a99ccf45850583daad3a66))
@@ -496,6 +2124,9 @@ https://github.com/ory/kratos/pull/3480
 - Don't list org SSOs in settings
   ([#3637](https://github.com/ory/kratos/issues/3637))
   ([6c7068c](https://github.com/ory/kratos/commit/6c7068cf41df51cde5fe9fc79cca84ec6124d38a))
+- Don't require code credential for MFA flows
+  ([#3753](https://github.com/ory/kratos/issues/3753))
+  ([40ed809](https://github.com/ory/kratos/commit/40ed809db631149874864f216a106c43ea5df670))
 - Don't require session for OIDC verification
   ([#3443](https://github.com/ory/kratos/issues/3443))
   ([e08f831](https://github.com/ory/kratos/commit/e08f831c2715e515bf58dc2dbb47fc3576421a5c))
@@ -520,6 +2151,9 @@ https://github.com/ory/kratos/pull/3480
 - False-positives for requiring re-authentication on update
   ([#3421](https://github.com/ory/kratos/issues/3421))
   ([ce8139f](https://github.com/ory/kratos/commit/ce8139f2325a8317388cbcaaa98f3f83d626657b))
+- Http courier using should use lower case json
+  ([#3740](https://github.com/ory/kratos/issues/3740))
+  ([84149c4](https://github.com/ory/kratos/commit/84149c4b420ea89f0a16a579c017a8e7e1670204))
 - Identity list pagination in CLI command and SDK
   ([#3482](https://github.com/ory/kratos/issues/3482))
   ([1e8b1ae](https://github.com/ory/kratos/commit/1e8b1aeb4bf866892788986f62a31255372de999)):
@@ -709,6 +2343,9 @@ https://github.com/ory/kratos/pull/3480
 
 - Schema test errors ([#3528](https://github.com/ory/kratos/issues/3528))
   ([bee0341](https://github.com/ory/kratos/commit/bee0341c5bf5708a2210146fc59f050a1b9df663))
+- Set iss from userinfo claims if missing
+  ([#3744](https://github.com/ory/kratos/issues/3744))
+  ([241a911](https://github.com/ory/kratos/commit/241a911af74e8ad7353d6e3cab86db20758b86fc))
 - Specify correct minimum versions in migratest
   ([18b89ea](https://github.com/ory/kratos/commit/18b89ea588d129fa88379f7b0d7f4fd00ec6023d))
 - Tracing context passing in /sessions/whoami
@@ -750,8 +2387,8 @@ https://github.com/ory/kratos/pull/3480
 
 ### Code Generation
 
-- Pin v1.1.0-pre.0 release commit
-  ([1c3eeb7](https://github.com/ory/kratos/commit/1c3eeb71d6fc83918ac367d1654361f8fd98a93e))
+- Pin v1.1.0 release commit
+  ([f47675b](https://github.com/ory/kratos/commit/f47675b82012e0ff74b05b9b7e713b3aa2fdda54))
 
 ### Documentation
 
@@ -797,6 +2434,8 @@ https://github.com/ory/kratos/pull/3480
 - Add OpenTelemetry span for password hash comparison
   ([#3383](https://github.com/ory/kratos/issues/3383))
   ([e3fcf0c](https://github.com/ory/kratos/commit/e3fcf0c31db9742ed61bcf783e37ee119ed19d42))
+- Add request URL to email and SMS templates
+  ([bf5f8c3](https://github.com/ory/kratos/commit/bf5f8c3cfb2eb523a77239addb8249adf9f8b31d))
 - Add sms verification for phone numbers
   ([#3649](https://github.com/ory/kratos/issues/3649))
   ([e3a3c4f](https://github.com/ory/kratos/commit/e3a3c4fe0d6697f6864283daf4be8a8f8971c7b4))
@@ -989,6 +2628,8 @@ https://github.com/ory/kratos/pull/3480
 - Improve performance by computing password hashes while validating
   ([#3508](https://github.com/ory/kratos/issues/3508))
   ([a9786c5](https://github.com/ory/kratos/commit/a9786c599d09f61e2e07df5066ce94feb2d99bac))
+- Improved webhook tracing ([#3746](https://github.com/ory/kratos/issues/3746))
+  ([9d7021d](https://github.com/ory/kratos/commit/9d7021d87f47690c2c1f8000e87b425e49bc9496))
 - Jsonnet caching for OIDC claims mapper, webhooks, JWT session tokenizer
   ([#3701](https://github.com/ory/kratos/issues/3701))
   ([1d26e09](https://github.com/ory/kratos/commit/1d26e097b273aeda36f73637765da5bdb2aa4a66))
@@ -1005,6 +2646,8 @@ https://github.com/ory/kratos/pull/3480
   allows user to link OIDC credentials to existing account right in the login
   flow, without switching to settings flow.
 
+- List by OIDC cred ([#3721](https://github.com/ory/kratos/issues/3721))
+  ([bff9c61](https://github.com/ory/kratos/commit/bff9c61b147648ab139e7e86cda4336b5d1cfd39))
 - Login with code on any credential type
   ([#3549](https://github.com/ory/kratos/issues/3549))
   ([ceed7d5](https://github.com/ory/kratos/commit/ceed7d5478c5cca894587698c57f676dda100b27)):
@@ -1115,6 +2758,8 @@ https://github.com/ory/kratos/pull/3480
 - Fix e2e failures and speed up e2e tests
   ([#3483](https://github.com/ory/kratos/issues/3483))
   ([70a6171](https://github.com/ory/kratos/commit/70a617194d61763f4b75691b22cfa76ba71ab019))
+- Fix hydra tests on master ([#3737](https://github.com/ory/kratos/issues/3737))
+  ([12166b4](https://github.com/ory/kratos/commit/12166b4370d607a069f268227752bb7b18a50b57))
 - Reduce logging in go tests
   ([#3562](https://github.com/ory/kratos/issues/3562))
   ([05de3a2](https://github.com/ory/kratos/commit/05de3a29fed020593c44ea7a7b29e45197fef4f7))
@@ -1932,10 +3577,7 @@ flows.
   closes [#2975](https://github.com/ory/kratos/issues/2975)
 - Show "continue" screen after successful verification
   ([#3090](https://github.com/ory/kratos/issues/3090))
-  ([fb6b160](https://github.com/ory/kratos/commit/fb6b1600d3d75e5d11fb98445c499a6218e6b869)),
-  closes
-  [/github.com/ory-corp/cloud#3925](https://github.com//github.com/ory-corp/cloud/issues/3925)
-  [/github.com/ory/network#228](https://github.com//github.com/ory/network/issues/228):
+  ([fb6b160](https://github.com/ory/kratos/commit/fb6b1600d3d75e5d11fb98445c499a6218e6b869)):
 
   The `link` strategy for verification now shows a confirmation screen with a
   "continue" link after successful verification, aligning its behavior to the
@@ -1943,6 +3585,10 @@ flows.
 
   Also fixes a bug, where the `default_browser_return_url` of the verification
   flow was not respected when using the code strategy.
+
+  Closes https://github.com/ory-corp/cloud#3925 Fixes
+  https://github.com/ory/network#228 Fixes
+  https://github.com/ory/network/issues/224
 
 - Social sign in via linkedin
   ([#3079](https://github.com/ory/kratos/issues/3079))
@@ -5684,6 +7330,34 @@ We also streamlined how credentials are used. We now differentiate between:
   })
   ```
 
+We hope you enjoy the vastly improved experience! There are still many things
+that we want to iterate on. For full context, we recommend reading the proposal
+and discussion around these changes at
+[kratos#1424](https://github.com/ory/kratos/issues/1424).
+
+Additionally, the Self-Service Error endpoint was updated. First, the endpoint
+`/self-service/errors` is now located at the public port only with the admin
+port redirecting to it. Second, the parameter `?error` was renamed to `?id` for
+better SDK compatibility. Parameter `?error` is still working but will be
+deprecated at some point. Third, the response no longer contains an error array
+in `errors` but instead just a single error under `error`:
+
+```patch
+{
+  "id": "60208346-3a61-4880-96ae-0419cde8fca8",
+- "errors": [{
++ "error": {
+    "code": 404,
+    "status": "Not Found",
+    "reason": "foobar",
+    "message": "The requested resource could not be found"
+- }],
++ },
+  "created_at": "2021-07-07T11:20:15.310506+02:00",
+  "updated_at": "2021-07-07T11:20:15.310506+02:00"
+}
+```
+
 This patch introduces CSRF countermeasures for fetching all self-service flows.
 This ensures that users can not accidentally leak sensitive information when
 copy/pasting e.g. login URLs (see #1282). If a self-service flow for browsers is
@@ -5904,8 +7578,7 @@ for now.
   ([0202dc5](https://github.com/ory/kratos/commit/0202dc57aacc0d48e4c1ee4e68c91654451f63fa))
 - Finalize SDK refactoring
   ([e772641](https://github.com/ory/kratos/commit/e772641f9bcfa462aa5111cf1329a479e3cdff99)),
-  closes [kratos#1424](https://github.com/kratos/issues/1424)
-  [#1424](https://github.com/ory/kratos/issues/1424)
+  closes [#1424](https://github.com/ory/kratos/issues/1424)
 - Identity SDKs
   ([d8658dc](https://github.com/ory/kratos/commit/d8658dc887a76d82e3cf23386c03b5ebf7053189)),
   closes [#1477](https://github.com/ory/kratos/issues/1477)
@@ -7315,9 +8988,9 @@ because the validation process has improved significantly.
 - Update verification code samples
   ([4285dec](https://github.com/ory/kratos/commit/4285dec59a8fc31fa3416b594c765f5da9a9de1c))
 - Use correct extension for identity-data-model
-  ([acab3e8](https://github.com/ory/kratos/commit/acab3e8b489d9865e4bf0805895f0b7ae9e6f1b8)),
-  closes
-  [/github.com/ory/kratos/pull/1197#issuecomment-819455322](https://github.com//github.com/ory/kratos/pull/1197/issues/issuecomment-819455322)
+  ([acab3e8](https://github.com/ory/kratos/commit/acab3e8b489d9865e4bf0805895f0b7ae9e6f1b8)):
+
+  See https://github.com/ory/kratos/pull/1197#issuecomment-819455322
 
 ### Features
 
@@ -9900,9 +11573,10 @@ and might be confusing when used in combination with OpenID Connect.
   ([2b77fba](https://github.com/ory/kratos/commit/2b77fba79b724dcd68ff0cd739cd65517aea4325))
 - Properly annotate forms disabled field
   ([#486](https://github.com/ory/kratos/issues/486))
-  ([be1acb3](https://github.com/ory/kratos/commit/be1acb3d161412d18599c970364f0c91fa6ebffb)),
-  closes
-  [/github.com/ory/kratos/pull/467#discussion_r434764266](https://github.com//github.com/ory/kratos/pull/467/issues/discussion_r434764266)
+  ([be1acb3](https://github.com/ory/kratos/commit/be1acb3d161412d18599c970364f0c91fa6ebffb)):
+
+  See https://github.com/ory/kratos/pull/467#discussion_r434764266
+
 - Remove rogue slash and fix closing tag
   ([#521](https://github.com/ory/kratos/issues/521))
   ([3fd1076](https://github.com/ory/kratos/commit/3fd1076929eeecffb7e8aa8e906970774283daeb))
@@ -10560,12 +12234,24 @@ keys in the forms key `{"methods": { "traits": { ... }, "password": { ... } }}`.
   ([ec49cae](https://github.com/ory/kratos/commit/ec49caec6ddea2c800db0779005bac6da73903e1))
 - Update self service reg docs
   ([#367](https://github.com/ory/kratos/issues/367))
-  ([4cf0323](https://github.com/ory/kratos/commit/4cf0323095990c5ec25283a01561cb9b8833f9ef)),
-  closes
-  [/github.com/ory/kratos-selfservice-ui-node/blob/489c76d1b0474ee55ef56804b28f54d8718747ba/src/routes/auth.ts#L28](https://github.com//github.com/ory/kratos-selfservice-ui-node/blob/489c76d1b0474ee55ef56804b28f54d8718747ba/src/routes/auth.ts/issues/L28):
+  ([4cf0323](https://github.com/ory/kratos/commit/4cf0323095990c5ec25283a01561cb9b8833f9ef)):
 
   The old links pointed at `/auth/browser/(login|registration)` which seems to
   be outdated now.
+
+  From the ui node code:
+  https://github.com/ory/kratos-selfservice-ui-node/blob/489c76d1b0474ee55ef56804b28f54d8718747ba/src/routes/auth.ts#L28
+  and the api documentation for kratos
+  https://www.ory.sh/kratos/docs/reference/api#get-the-request-context-of-browser-based-login-user-flows,
+  these seem to be incorrect.
+
+  The actual url hit is
+  `/self-service/browser/flows/requests/(login|registration)`. This commit
+  updates those links
+
+  This blob was previously one large inline string, which personally made the
+  docs a bit hard to read. This formats it into an (arguably) easier to parse
+  code block
 
 - Update user-settings-profile-management.md
   ([#322](https://github.com/ory/kratos/issues/322))

@@ -18,10 +18,12 @@ type (
 		m *RecoveryValidModel
 	}
 	RecoveryValidModel struct {
-		To          string                 `json:"to"`
-		RecoveryURL string                 `json:"recovery_url"`
-		Identity    map[string]interface{} `json:"identity"`
-		RequestURL  string                 `json:"request_url"`
+		To               string                 `json:"to"`
+		RecoveryURL      string                 `json:"recovery_url"`
+		Identity         map[string]interface{} `json:"identity"`
+		RequestURL       string                 `json:"request_url"`
+		TransientPayload map[string]interface{} `json:"transient_payload"`
+		ExpiresInMinutes int                    `json:"expires_in_minutes"`
 	}
 )
 

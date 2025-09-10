@@ -13,22 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  sdk-generate:
-    name: Generate SDKs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: ory/ci/sdk/generate@master
-        with:
-          token: ${{ secrets.ORY_BOT_PAT }}
-
   test:
     name: Run tests and lints
     runs-on: ubuntu-latest
-    needs:
-      - sdk-generate
     services:
       postgres:
-        image: postgres:11.8
+        image: postgres:14
         env:
           POSTGRES_DB: postgres
           POSTGRES_PASSWORD: test
@@ -36,7 +26,7 @@ jobs:
         ports:
           - 5432:5432
       mysql:
-        image: mysql:8.0
+        image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: test
         ports:
@@ -53,13 +43,15 @@ jobs:
     steps:
       - run: |
           docker create --name cockroach -p 26257:26257 \
-            cockroachdb/cockroach:v22.2.6 start-single-node --insecure
+           cockroachdb/cockroach:latest-v25.2 start-single-node --insecure \
+            || true
           docker start cockroach
         name: Start CockroachDB
       - run: |
           docker create --name mailhog -p 8025:8025 -p 1025:1025 \
             mailhog/mailhog:v1.0.0 \
-            MailHog -invite-jim -jim-linkspeed-affect=0.25 -jim-reject-auth=0.25 -jim-reject-recipient=0.25 -jim-reject-sender=0.25 -jim-disconnect=0.25 -jim-linkspeed-min=1250 -jim-linkspeed-max=12500
+            MailHog -invite-jim -jim-linkspeed-affect=0.25 -jim-reject-auth=0.25 -jim-reject-recipient=0.25 -jim-reject-sender=0.25 -jim-disconnect=0.25 -jim-linkspeed-min=1250 -jim-linkspeed-max=12500 \
+            || true
           docker start mailhog
         name: Start MailHog
       - run: |
@@ -70,7 +62,8 @@ jobs:
             -e URLS_CONSENT=http://localhost:4499/consent \
             -e LOG_LEAK_SENSITIVE_VALUES=true \
             -e SECRETS_SYSTEM=someverylongsecretthatis32byteslong \
-            oryd/hydra:v2.2.0@sha256:6c0f9195fe04ae16b095417b323881f8c9008837361160502e11587663b37c09 serve all --dev
+            oryd/hydra:v2.2.0@sha256:6c0f9195fe04ae16b095417b323881f8c9008837361160502e11587663b37c09 serve all --dev \
+            || true
           docker start hydra
           docker logs -f hydra &> /tmp/hydra.log &
         name: Start Hydra
@@ -79,26 +72,28 @@ jobs:
           fetch-depth: 2
       - uses: actions/setup-go@v4
         with:
-          go-version: "1.21"
+          go-version: "1.25"
       - run: go list -json > go.list
       - name: Run nancy
         uses: sonatype-nexus-community/nancy-github-action@v1.0.2
         with:
           nancyVersion: v1.0.42
+      - run: |
+          sudo apt-get update
+        name: apt-get update
       - run: npm install
         name: Install node deps
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v2
+        uses: golangci/golangci-lint-action@v8
         env:
           GOGC: 100
         with:
           args: --timeout 10m0s
-          version: v1.55.2
-          skip-go-installation: true
-          skip-pkg-cache: true
+          version: "v2.4.0"
+          only-new-issues: "true"
       - name: Build Kratos
         run: make install
-      - name: Run go-acc (tests)
+      - name: Run go tests
         run: make test-coverage
       - name: Submit to Codecov
         run: |
@@ -109,11 +104,9 @@ jobs:
   test-e2e:
     name: Run end-to-end tests
     runs-on: ubuntu-latest
-    needs:
-      - sdk-generate
     services:
       postgres:
-        image: postgres:11.8
+        image: postgres:14
         env:
           POSTGRES_DB: postgres
           POSTGRES_PASSWORD: test
@@ -121,7 +114,7 @@ jobs:
         ports:
           - 5432:5432
       mysql:
-        image: mysql:5.7
+        image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: test
         ports:
@@ -146,20 +139,23 @@ jobs:
           node-version: 16
       - run: |
           docker create --name cockroach -p 26257:26257 \
-            cockroachdb/cockroach:v22.2.6 start-single-node --insecure
+           cockroachdb/cockroach:latest-v25.2 start-single-node --insecure
           docker start cockroach
         name: Start CockroachDB
       - uses: browser-actions/setup-chrome@latest
         name: Install Chrome
-      - uses: browser-actions/setup-firefox@latest
-        name: Install Firefox
-      - uses: browser-actions/setup-geckodriver@latest
-        name: Install Geckodriver
-        with:
-          geckodriver-version: 0.32.0
+      # - uses: browser-actions/setup-firefox@latest
+      #   name: Install Firefox
+      # - uses: browser-actions/setup-geckodriver@latest
+      #   name: Install Geckodriver
+      #   with:
+      #     geckodriver-version: 0.32.0
       - uses: ory/ci/checkout@master
         with:
           fetch-depth: 2
+      - run: |
+          sudo apt-get update
+        name: apt-get update
       - run: |
           npm ci
           cd test/e2e; npm ci
@@ -171,7 +167,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: "1.21"
+          go-version: "1.25"
 
       - name: Install selfservice-ui-react-native
         uses: actions/checkout@v3
@@ -212,19 +208,17 @@ jobs:
           REACT_UI_PATH: react-ui
           CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
       - if: failure()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: logs
+          name: cypress-${{ matrix.database }}-logs
           path: test/e2e/*.e2e.log
 
   test-e2e-playwright:
     name: Run Playwright end-to-end tests
     runs-on: ubuntu-latest
-    needs:
-      - sdk-generate
     services:
       postgres:
-        image: postgres:11.8
+        image: postgres:14
         env:
           POSTGRES_DB: postgres
           POSTGRES_PASSWORD: test
@@ -232,7 +226,7 @@ jobs:
         ports:
           - 5432:5432
       mysql:
-        image: mysql:5.7
+        image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: test
         ports:
@@ -257,12 +251,15 @@ jobs:
           node-version: 16
       - run: |
           docker create --name cockroach -p 26257:26257 \
-            cockroachdb/cockroach:v22.2.6 start-single-node --insecure
+           cockroachdb/cockroach:latest-v25.2 start-single-node --insecure
           docker start cockroach
         name: Start CockroachDB
       - uses: ory/ci/checkout@master
         with:
           fetch-depth: 2
+      - run: |
+          sudo apt-get update
+        name: apt-get update
       - run: |
           npm ci
           cd test/e2e; npm ci
@@ -275,7 +272,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: "1.21"
+          go-version: "1.25"
       - run: go build -tags sqlite,json1 .
 
       - name: Install selfservice-ui-react-native
@@ -322,14 +319,14 @@ jobs:
           NODE_UI_PATH: node-ui
           REACT_UI_PATH: react-ui
       - if: failure()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: logs
+          name: playwright-${{ matrix.database }}-logs
           path: test/e2e/*.e2e.log
       - if: failure()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: playwright-test-results-${{ github.sha }}
+          name: playwright-test-results-${{ matrix.database }}-${{ github.sha }}
           path: |
             test/e2e/test-results/
             test/e2e/playwright-report/
@@ -357,21 +354,6 @@ jobs:
       - uses: ory/ci/changelog@master
         with:
           token: ${{ secrets.ORY_BOT_PAT }}
-
-  sdk-release:
-    name: Release SDKs
-    runs-on: ubuntu-latest
-    if: ${{ github.ref_type == 'tag' }}
-    needs:
-      - test
-      - test-e2e
-      - sdk-generate
-      - release
-    steps:
-      - uses: ory/ci/sdk/release@master
-        with:
-          token: ${{ secrets.ORY_BOT_PAT }}
-          swag-spec-location: "spec/api.json"
 
   release:
     name: Generate release

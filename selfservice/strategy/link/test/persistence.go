@@ -8,35 +8,33 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ory/kratos/internal/testhelpers"
-	"github.com/ory/kratos/persistence"
-	"github.com/ory/kratos/selfservice/flow"
-	"github.com/ory/kratos/selfservice/strategy/link"
-	"github.com/ory/x/sqlcon"
-
 	"github.com/go-faker/faker/v4"
 	"github.com/gofrs/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ory/x/assertx"
-
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
+	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/persistence"
+	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/flow/verification"
+	"github.com/ory/kratos/selfservice/strategy/link"
 	"github.com/ory/kratos/x"
+	"github.com/ory/x/assertx"
+	"github.com/ory/x/contextx"
+	"github.com/ory/x/sqlcon"
 )
 
-func TestPersister(ctx context.Context, conf *config.Config, p interface {
+func TestPersister(ctx context.Context, p interface {
 	persistence.Persister
 },
 ) func(t *testing.T) {
 	return func(t *testing.T) {
 		nid, p := testhelpers.NewNetworkUnlessExisting(t, ctx, p)
 
-		testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
-		conf.MustSet(ctx, config.ViperKeySecretsDefault, []string{"secret-a", "secret-b"})
+		ctx := contextx.WithConfigValue(ctx, config.ViperKeySecretsDefault, []string{"secret-a", "secret-b"})
 
 		t.Run("token=recovery", func(t *testing.T) {
 			newRecoveryToken := func(t *testing.T, email string) (*link.RecoveryToken, *recovery.Flow) {

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ory/x/otelx"
+
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"github.com/tidwall/gjson"
@@ -68,6 +70,11 @@ type updateSettingsFlowWithTotpMethod struct {
 	//
 	// swagger:ignore
 	Flow string `json:"flow"`
+
+	// Transient data to pass along to any webhooks
+	//
+	// required: false
+	TransientPayload json.RawMessage `json:"transient_payload,omitempty" form:"transient_payload"`
 }
 
 func (p *updateSettingsFlowWithTotpMethod) GetFlowID() uuid.UUID {
@@ -78,33 +85,36 @@ func (p *updateSettingsFlowWithTotpMethod) SetFlowID(rid uuid.UUID) {
 	p.Flow = rid.String()
 }
 
-func (s *Strategy) Settings(w http.ResponseWriter, r *http.Request, f *settings.Flow, ss *session.Session) (*settings.UpdateContext, error) {
+func (s *Strategy) Settings(ctx context.Context, w http.ResponseWriter, r *http.Request, f *settings.Flow, ss *session.Session) (_ *settings.UpdateContext, err error) {
+	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.totp.Strategy.Settings")
+	defer otelx.End(span, &err)
+
 	var p updateSettingsFlowWithTotpMethod
 	ctxUpdate, err := settings.PrepareUpdate(s.d, w, r, f, ss, settings.ContinuityKey(s.SettingsStrategyID()), &p)
 	if errors.Is(err, settings.ErrContinuePreviousAction) {
-		return ctxUpdate, s.continueSettingsFlow(w, r, ctxUpdate, &p)
+		return ctxUpdate, s.continueSettingsFlow(ctx, r, ctxUpdate, p)
 	} else if err != nil {
-		return ctxUpdate, s.handleSettingsError(w, r, ctxUpdate, &p, err)
+		return ctxUpdate, s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 	}
 
 	if err := s.decodeSettingsFlow(r, &p); err != nil {
-		return ctxUpdate, s.handleSettingsError(w, r, ctxUpdate, &p, err)
+		return ctxUpdate, s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 	}
 
 	if p.UnlinkTOTP {
 		// This is a submit so we need to manually set the type to TOTP
 		p.Method = s.SettingsStrategyID()
-		if err := flow.MethodEnabledAndAllowed(r.Context(), f.GetFlowName(), s.SettingsStrategyID(), p.Method, s.d); err != nil {
-			return nil, s.handleSettingsError(w, r, ctxUpdate, &p, err)
+		if err := flow.MethodEnabledAndAllowed(ctx, f.GetFlowName(), s.SettingsStrategyID(), p.Method, s.d); err != nil {
+			return nil, s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 		}
 	} else if err := flow.MethodEnabledAndAllowedFromRequest(r, f.GetFlowName(), s.SettingsStrategyID(), s.d); err != nil {
-		return ctxUpdate, s.handleSettingsError(w, r, ctxUpdate, &p, err)
+		return ctxUpdate, s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 	}
 
 	// This does not come from the payload!
 	p.Flow = ctxUpdate.Flow.ID.String()
-	if err := s.continueSettingsFlow(w, r, ctxUpdate, &p); err != nil {
-		return ctxUpdate, s.handleSettingsError(w, r, ctxUpdate, &p, err)
+	if err := s.continueSettingsFlow(ctx, r, ctxUpdate, p); err != nil {
+		return ctxUpdate, s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 	}
 
 	return ctxUpdate, nil
@@ -117,29 +127,27 @@ func (s *Strategy) decodeSettingsFlow(r *http.Request, dest interface{}) error {
 	}
 
 	return decoderx.NewHTTP().Decode(r, dest, compiler,
+		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
 		decoderx.HTTPDecoderSetValidatePayloads(true),
 		decoderx.HTTPDecoderJSONFollowsFormFormat(),
 	)
 }
 
-func (s *Strategy) continueSettingsFlow(
-	w http.ResponseWriter, r *http.Request,
-	ctxUpdate *settings.UpdateContext, p *updateSettingsFlowWithTotpMethod,
-) error {
-	if err := flow.MethodEnabledAndAllowed(r.Context(), flow.SettingsFlow, s.SettingsStrategyID(), p.Method, s.d); err != nil {
+func (s *Strategy) continueSettingsFlow(ctx context.Context, r *http.Request, ctxUpdate *settings.UpdateContext, p updateSettingsFlowWithTotpMethod) error {
+	if err := flow.MethodEnabledAndAllowed(ctx, flow.SettingsFlow, s.SettingsStrategyID(), p.Method, s.d); err != nil {
 		return err
 	}
 
-	if err := flow.EnsureCSRF(s.d, r, ctxUpdate.Flow.Type, s.d.Config().DisableAPIFlowEnforcement(r.Context()), s.d.GenerateCSRFToken, p.CSRFToken); err != nil {
+	if err := flow.EnsureCSRF(s.d, r, ctxUpdate.Flow.Type, s.d.Config().DisableAPIFlowEnforcement(ctx), s.d.GenerateCSRFToken, p.CSRFToken); err != nil {
 		return err
 	}
 
-	if ctxUpdate.Session.AuthenticatedAt.Add(s.d.Config().SelfServiceFlowSettingsPrivilegedSessionMaxAge(r.Context())).Before(time.Now()) {
+	if ctxUpdate.Session.AuthenticatedAt.Add(s.d.Config().SelfServiceFlowSettingsPrivilegedSessionMaxAge(ctx)).Before(time.Now()) {
 		return errors.WithStack(settings.NewFlowNeedsReAuth())
 	}
 
-	hasTOTP, err := s.identityHasTOTP(r.Context(), ctxUpdate.Session.IdentityID)
+	hasTOTP, err := s.identityHasTOTP(ctx, ctxUpdate.Session.Identity)
 	if err != nil {
 		return err
 	}
@@ -150,9 +158,9 @@ func (s *Strategy) continueSettingsFlow(
 	// 2. TOTP should be added -> we do not have it yet
 	var i *identity.Identity
 	if hasTOTP {
-		i, err = s.continueSettingsFlowRemoveTOTP(w, r, ctxUpdate, p)
+		i, err = s.continueSettingsFlowRemoveTOTP(ctx, ctxUpdate, p)
 	} else {
-		i, err = s.continueSettingsFlowAddTOTP(w, r, ctxUpdate, p)
+		i, err = s.continueSettingsFlowAddTOTP(ctx, ctxUpdate, p)
 	}
 
 	if err != nil {
@@ -163,7 +171,7 @@ func (s *Strategy) continueSettingsFlow(
 	return nil
 }
 
-func (s *Strategy) continueSettingsFlowAddTOTP(w http.ResponseWriter, r *http.Request, ctxUpdate *settings.UpdateContext, p *updateSettingsFlowWithTotpMethod) (*identity.Identity, error) {
+func (s *Strategy) continueSettingsFlowAddTOTP(ctx context.Context, ctxUpdate *settings.UpdateContext, p updateSettingsFlowWithTotpMethod) (*identity.Identity, error) {
 	keyURL := gjson.GetBytes(ctxUpdate.Flow.InternalContext, flow.PrefixInternalContextKey(s.ID(), InternalContextKeyURL)).String()
 	if len(keyURL) == 0 {
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Could not find they TOTP key in the internal context. This is a code bug and should be reported to https://github.com/ory/kratos/."))
@@ -191,7 +199,7 @@ func (s *Strategy) continueSettingsFlowAddTOTP(w http.ResponseWriter, r *http.Re
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to encode totp options to JSON: %s", err))
 	}
 
-	i, err := s.d.PrivilegedIdentityPool().GetIdentityConfidential(r.Context(), ctxUpdate.Session.Identity.ID)
+	i, err := s.d.PrivilegedIdentityPool().GetIdentityConfidential(ctx, ctxUpdate.Session.Identity.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,12 +215,12 @@ func (s *Strategy) continueSettingsFlowAddTOTP(w http.ResponseWriter, r *http.Re
 		return nil, err
 	}
 
-	if err := s.d.SettingsFlowPersister().UpdateSettingsFlow(r.Context(), ctxUpdate.Flow); err != nil {
+	if err := s.d.SettingsFlowPersister().UpdateSettingsFlow(ctx, ctxUpdate.Flow); err != nil {
 		return nil, err
 	}
 
 	// Since we added the method, it also means that we have authenticated it
-	if err := s.d.SessionManager().SessionAddAuthenticationMethods(r.Context(), ctxUpdate.Session.ID, session.AuthenticationMethod{
+	if err := s.d.SessionManager().SessionAddAuthenticationMethods(ctx, ctxUpdate.Session.ID, session.AuthenticationMethod{
 		Method: s.ID(),
 		AAL:    identity.AuthenticatorAssuranceLevel2,
 	}); err != nil {
@@ -222,12 +230,12 @@ func (s *Strategy) continueSettingsFlowAddTOTP(w http.ResponseWriter, r *http.Re
 	return i, nil
 }
 
-func (s *Strategy) continueSettingsFlowRemoveTOTP(w http.ResponseWriter, r *http.Request, ctxUpdate *settings.UpdateContext, p *updateSettingsFlowWithTotpMethod) (*identity.Identity, error) {
+func (s *Strategy) continueSettingsFlowRemoveTOTP(ctx context.Context, ctxUpdate *settings.UpdateContext, p updateSettingsFlowWithTotpMethod) (*identity.Identity, error) {
 	if !p.UnlinkTOTP {
 		return ctxUpdate.Session.Identity, nil
 	}
 
-	i, err := s.d.PrivilegedIdentityPool().GetIdentityConfidential(r.Context(), ctxUpdate.Session.Identity.ID)
+	i, err := s.d.PrivilegedIdentityPool().GetIdentityConfidential(ctx, ctxUpdate.Session.Identity.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,13 +244,14 @@ func (s *Strategy) continueSettingsFlowRemoveTOTP(w http.ResponseWriter, r *http
 	return i, nil
 }
 
-func (s *Strategy) identityHasTOTP(ctx context.Context, id uuid.UUID) (bool, error) {
-	confidential, err := s.d.PrivilegedIdentityPool().GetIdentityConfidential(ctx, id)
-	if err != nil {
-		return false, err
+func (s *Strategy) identityHasTOTP(ctx context.Context, id *identity.Identity) (bool, error) {
+	if len(id.Credentials) == 0 {
+		if err := s.d.PrivilegedIdentityPool().HydrateIdentityAssociations(ctx, id, identity.ExpandCredentials); err != nil {
+			return false, err
+		}
 	}
 
-	count, err := s.CountActiveMultiFactorCredentials(confidential.Credentials)
+	count, err := s.CountActiveMultiFactorCredentials(ctx, id.Credentials)
 	if err != nil {
 		return false, err
 	}
@@ -250,10 +259,13 @@ func (s *Strategy) identityHasTOTP(ctx context.Context, id uuid.UUID) (bool, err
 	return count > 0, nil
 }
 
-func (s *Strategy) PopulateSettingsMethod(r *http.Request, id *identity.Identity, f *settings.Flow) error {
+func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, id *identity.Identity, f *settings.Flow) (err error) {
+	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.totp.Strategy.PopulateSettingsMethod")
+	defer otelx.End(span, &err)
+
 	f.UI.SetCSRF(s.d.GenerateCSRFToken(r))
 
-	hasTOTP, err := s.identityHasTOTP(r.Context(), id.ID)
+	hasTOTP, err := s.identityHasTOTP(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -263,10 +275,10 @@ func (s *Strategy) PopulateSettingsMethod(r *http.Request, id *identity.Identity
 		f.UI.Nodes.Upsert(NewUnlinkTOTPNode())
 	} else {
 		e := NewSchemaExtension(id.ID.String())
-		_ = s.d.IdentityValidator().ValidateWithRunner(r.Context(), id, e)
+		_ = s.d.IdentityValidator().ValidateWithRunner(ctx, id, e)
 
 		// No TOTP set up yet, add nodes allowing us to add it.
-		key, err := NewKey(r.Context(), e.AccountName, s.d)
+		key, err := NewKey(ctx, e.AccountName, s.d)
 		if err != nil {
 			return err
 		}
@@ -290,10 +302,10 @@ func (s *Strategy) PopulateSettingsMethod(r *http.Request, id *identity.Identity
 	return nil
 }
 
-func (s *Strategy) handleSettingsError(w http.ResponseWriter, r *http.Request, ctxUpdate *settings.UpdateContext, p *updateSettingsFlowWithTotpMethod, err error) error {
+func (s *Strategy) handleSettingsError(ctx context.Context, w http.ResponseWriter, r *http.Request, ctxUpdate *settings.UpdateContext, p updateSettingsFlowWithTotpMethod, err error) error {
 	// Do not pause flow if the flow type is an API flow as we can't save cookies in those flows.
 	if e := new(settings.FlowNeedsReAuth); errors.As(err, &e) && ctxUpdate.Flow != nil && ctxUpdate.Flow.Type == flow.TypeBrowser {
-		if err := s.d.ContinuityManager().Pause(r.Context(), w, r, settings.ContinuityKey(s.SettingsStrategyID()), settings.ContinuityOptions(p, ctxUpdate.GetSessionIdentity())...); err != nil {
+		if err := s.d.ContinuityManager().Pause(ctx, w, r, settings.ContinuityKey(s.SettingsStrategyID()), settings.ContinuityOptions(p, ctxUpdate.GetSessionIdentity())...); err != nil {
 			return err
 		}
 	}

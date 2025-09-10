@@ -5,6 +5,7 @@ package code_test
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,10 +14,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
-	_ "embed"
-
-	"github.com/gobuffalo/pop/v6"
 	"github.com/gofrs/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,8 +27,14 @@ import (
 	"github.com/ory/kratos/internal"
 	oryClient "github.com/ory/kratos/internal/httpclient"
 	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/registration"
 	"github.com/ory/kratos/selfservice/strategy/code"
+	"github.com/ory/kratos/ui/node"
+	"github.com/ory/pop/v6"
+	"github.com/ory/x/assertx"
+	"github.com/ory/x/snapshotx"
+	"github.com/ory/x/sqlcon"
 )
 
 type state struct {
@@ -38,6 +43,7 @@ type state struct {
 	email          string
 	testServer     *httptest.Server
 	resultIdentity *identity.Identity
+	body           string
 }
 
 func TestRegistrationCodeStrategyDisabled(t *testing.T) {
@@ -47,6 +53,7 @@ func TestRegistrationCodeStrategyDisabled(t *testing.T) {
 	conf.MustSet(ctx, fmt.Sprintf("%s.%s.enabled", config.ViperKeySelfServiceStrategyConfig, identity.CredentialsTypePassword.String()), false)
 	conf.MustSet(ctx, fmt.Sprintf("%s.%s.enabled", config.ViperKeySelfServiceStrategyConfig, identity.CredentialsTypeCodeAuth.String()), false)
 	conf.MustSet(ctx, fmt.Sprintf("%s.%s.passwordless_enabled", config.ViperKeySelfServiceStrategyConfig, identity.CredentialsTypeCodeAuth), false)
+	conf.MustSet(ctx, "selfservice.flows.registration.enable_legacy_one_step", true)
 
 	_ = testhelpers.NewRegistrationUIFlowEchoServer(t, reg)
 	_ = testhelpers.NewErrorTestServer(t, reg)
@@ -103,6 +110,7 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 		conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationAfter+".code.hooks", []map[string]interface{}{
 			{"hook": "session"},
 		})
+		conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationEnableLegacyOneStep, true)
 
 		_ = testhelpers.NewRegistrationUIFlowEchoServer(t, reg)
 		_ = testhelpers.NewErrorTestServer(t, reg)
@@ -112,7 +120,7 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 		return conf, reg, public
 	}
 
-	createRegistrationFlow := func(ctx context.Context, t *testing.T, public *httptest.Server, apiType ApiType) *state {
+	createRegistrationFlowInternal := func(ctx context.Context, t *testing.T, public *httptest.Server, apiType ApiType, identitySchema string) *state {
 		t.Helper()
 
 		var client *http.Client
@@ -127,9 +135,9 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 
 		var clientInit *oryClient.RegistrationFlow
 		if apiType == ApiTypeNative {
-			clientInit = testhelpers.InitializeRegistrationFlowViaAPI(t, client, public)
+			clientInit = testhelpers.InitializeRegistrationFlowViaAPI(t, client, public, testhelpers.InitFlowWithIdentitySchema(identitySchema))
 		} else {
-			clientInit = testhelpers.InitializeRegistrationFlowViaBrowser(t, client, public, apiType == ApiTypeSPA, false, false)
+			clientInit = testhelpers.InitializeRegistrationFlowViaBrowser(t, client, public, apiType == ApiTypeSPA, false, false, testhelpers.InitFlowWithIdentitySchema(identitySchema))
 		}
 
 		body, err := json.Marshal(clientInit)
@@ -152,6 +160,14 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 		}
 	}
 
+	createRegistrationFlow := func(ctx context.Context, t *testing.T, public *httptest.Server, apiType ApiType) *state {
+		return createRegistrationFlowInternal(ctx, t, public, apiType, "")
+	}
+
+	createRegistrationFlowWithIdentity := func(ctx context.Context, t *testing.T, public *httptest.Server, apiType ApiType, identitySchema string) *state {
+		return createRegistrationFlowInternal(ctx, t, public, apiType, identitySchema)
+	}
+
 	type onSubmitAssertion func(ctx context.Context, t *testing.T, s *state, body string, resp *http.Response)
 
 	registerNewUser := func(ctx context.Context, t *testing.T, s *state, apiType ApiType, submitAssertion onSubmitAssertion) *state {
@@ -161,7 +177,7 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 			s.email = testhelpers.RandomEmail()
 		}
 
-		rf, resp, err := testhelpers.NewSDKCustomClient(s.testServer, s.client).FrontendApi.GetRegistrationFlow(context.Background()).Id(s.flowID).Execute()
+		rf, resp, err := testhelpers.NewSDKCustomClient(s.testServer, s.client).FrontendAPI.GetRegistrationFlow(context.Background()).Id(s.flowID).Execute()
 		require.NoError(t, err)
 		require.EqualValues(t, http.StatusOK, resp.StatusCode)
 
@@ -171,6 +187,7 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 		values.Set("method", "code")
 
 		body, resp := testhelpers.RegistrationMakeRequest(t, apiType == ApiTypeNative, apiType == ApiTypeSPA, rf, s.client, testhelpers.EncodeFormAsJSON(t, apiType == ApiTypeNative, values))
+		s.body = body
 
 		if submitAssertion != nil {
 			submitAssertion(ctx, t, s, body, resp)
@@ -198,7 +215,7 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 	submitOTP := func(ctx context.Context, t *testing.T, reg *driver.RegistryDefault, s *state, vals func(v *url.Values), apiType ApiType, submitAssertion onSubmitAssertion) *state {
 		t.Helper()
 
-		rf, resp, err := testhelpers.NewSDKCustomClient(s.testServer, s.client).FrontendApi.GetRegistrationFlow(context.Background()).Id(s.flowID).Execute()
+		rf, resp, err := testhelpers.NewSDKCustomClient(s.testServer, s.client).FrontendAPI.GetRegistrationFlow(context.Background()).Id(s.flowID).Execute()
 		require.NoError(t, err)
 		require.EqualValues(t, http.StatusOK, resp.StatusCode)
 
@@ -212,13 +229,14 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 		vals(&values)
 
 		body, resp := testhelpers.RegistrationMakeRequest(t, apiType == ApiTypeNative, apiType == ApiTypeSPA, rf, s.client, testhelpers.EncodeFormAsJSON(t, apiType == ApiTypeNative, values))
+		s.body = body
 
 		if submitAssertion != nil {
 			submitAssertion(ctx, t, s, body, resp)
 			return s
 		}
 
-		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, http.StatusOK, resp.StatusCode, body)
 
 		verifiableAddress, err := reg.PrivilegedIdentityPool().FindVerifiableAddressByValue(ctx, identity.VerifiableAddressTypeEmail, s.email)
 		require.NoError(t, err)
@@ -239,7 +257,7 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 		t.Parallel()
 
 		ctx := context.Background()
-		_, reg, public := setup(ctx, t)
+		conf, reg, public := setup(ctx, t)
 
 		for _, tc := range []struct {
 			d       string
@@ -268,8 +286,8 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 					// 2. Submit Identifier (email)
 					state = registerNewUser(ctx, t, state, tc.apiType, nil)
 
-					message := testhelpers.CourierExpectMessage(ctx, t, reg, state.email, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, state.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
 
 					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode)
@@ -278,6 +296,15 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 					state = submitOTP(ctx, t, reg, state, func(v *url.Values) {
 						v.Set("code", registrationCode)
 					}, tc.apiType, nil)
+
+					if tc.apiType == ApiTypeSPA {
+						assert.EqualValues(t, flow.ContinueWithActionRedirectBrowserToString, gjson.Get(state.body, "continue_with.0.action").String(), "%s", state.body)
+						assert.Contains(t, gjson.Get(state.body, "continue_with.0.redirect_browser_to").String(), conf.SelfServiceBrowserDefaultReturnTo(ctx).String(), "%s", state.body)
+					} else if tc.apiType == ApiTypeSPA {
+						assert.Empty(t, gjson.Get(state.body, "continue_with").Array(), "%s", state.body)
+					} else if tc.apiType == ApiTypeNative {
+						assert.NotContains(t, gjson.Get(state.body, "continue_with").Raw, string(flow.ContinueWithActionRedirectBrowserToString), "%s", state.body)
+					}
 				})
 
 				t.Run("case=should normalize email address on sign up", func(t *testing.T) {
@@ -292,8 +319,8 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 					// 2. Submit Identifier (email)
 					state = registerNewUser(ctx, t, state, tc.apiType, nil)
 
-					message := testhelpers.CourierExpectMessage(ctx, t, reg, sourceMail, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, sourceMail, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
 
 					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode)
@@ -333,11 +360,11 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 						require.NotEmpty(t, attr)
 
 						val := gjson.Get(attr, "#(attributes.type==hidden).attributes.value").String()
-						require.Equal(t, "code", val)
+						require.Equal(t, "code", val, body)
 					})
 
-					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
 
 					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode)
@@ -357,12 +384,12 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 						} else {
 							require.NotEmptyf(t, csrfToken, "expected to find the csrf_token but got %s", body)
 						}
-						require.Containsf(t, gjson.Get(body, "ui.messages").String(), "An email containing a code has been sent to the email address you provided.", "%s", body)
+						require.Containsf(t, gjson.Get(body, "ui.messages").String(), "A code has been sent to the address(es) you provided", "%s", body)
 					})
 
 					// get the new code from email
-					message = testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message = testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
 
 					registrationCode2 := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode2)
@@ -395,8 +422,8 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 					// 2. Submit Identifier (email)
 					s = registerNewUser(ctx, t, s, tc.apiType, nil)
 
-					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
 
 					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode)
@@ -424,8 +451,8 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 					// 2. Submit Identifier (email)
 					s = registerNewUser(ctx, t, s, tc.apiType, nil)
 
-					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration")
 
 					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode)
@@ -511,8 +538,11 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 		} {
 			t.Run("test="+tc.d, func(t *testing.T) {
 				t.Run("case=should fail when schema does not contain the `code` extension", func(t *testing.T) {
-					testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/default.schema.json")
+					testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/no-code.schema.json")
+					conf.MustSet(ctx, config.ViperKeyCodeConfigMissingCredentialFallbackEnabled, false)
+
 					t.Cleanup(func() {
+						conf.MustSet(ctx, config.ViperKeyCodeConfigMissingCredentialFallbackEnabled, true)
 						testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/code.identity.schema.json")
 					})
 
@@ -525,7 +555,7 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 							// we expect a redirect to the registration page with the flow id
 							require.Equal(t, http.StatusOK, resp.StatusCode)
 							require.Equal(t, conf.SelfServiceFlowRegistrationUI(ctx).Path, resp.Request.URL.Path)
-							rf, resp, err := testhelpers.NewSDKCustomClient(public, s.client).FrontendApi.GetRegistrationFlow(ctx).Id(resp.Request.URL.Query().Get("flow")).Execute()
+							rf, resp, err := testhelpers.NewSDKCustomClient(public, s.client).FrontendAPI.GetRegistrationFlow(ctx).Id(resp.Request.URL.Query().Get("flow")).Execute()
 							require.NoError(t, err)
 							require.Equal(t, http.StatusOK, resp.StatusCode)
 							body, err := json.Marshal(rf)
@@ -555,8 +585,8 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 					// 2. Submit Identifier (email)
 					state = registerNewUser(ctx, t, state, tc.apiType, nil)
 
-					message := testhelpers.CourierExpectMessage(ctx, t, reg, state.email, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, state.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
 
 					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode)
@@ -579,8 +609,8 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 					// 2. Submit Identifier (email)
 					s = registerNewUser(ctx, t, s, tc.apiType, nil)
 
-					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Complete your account registration")
-					assert.Contains(t, message.Body, "please complete your account registration by entering the following code")
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, s.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
 
 					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 					assert.NotEmpty(t, registrationCode)
@@ -601,5 +631,178 @@ func TestRegistrationCodeStrategy(t *testing.T) {
 				})
 			})
 		}
+	})
+
+	t.Run("test=multi-schema select", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := context.Background()
+		conf, reg, public := setup(ctx, t)
+		conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
+			{ID: "code", URL: "file://./stub/code.identity.schema.json", SelfserviceSelectable: true},
+			{ID: "no-code", URL: "file://stub/no-code.schema.json", SelfserviceSelectable: true},
+		})
+		conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "no-code")
+
+		for _, tc := range []struct {
+			d       string
+			apiType ApiType
+		}{
+			{
+				d:       "SPA client",
+				apiType: ApiTypeSPA,
+			},
+			{
+				d:       "Browser client",
+				apiType: ApiTypeBrowser,
+			},
+			{
+				d:       "Native client",
+				apiType: ApiTypeNative,
+			},
+		} {
+			t.Run("flow="+tc.d, func(t *testing.T) {
+				t.Run("case=should be able to register with code identity credentials", func(t *testing.T) {
+					ctx := context.Background()
+
+					// 1. Initiate flow
+					state := createRegistrationFlowWithIdentity(ctx, t, public, tc.apiType, "code")
+					state.email = testhelpers.RandomEmail()
+
+					// 2. Submit Identifier (email)
+					state = registerNewUser(ctx, t, state, tc.apiType, nil)
+
+					message := testhelpers.CourierExpectMessage(ctx, t, reg, state.email, "Use code")
+					assert.Contains(t, message.Body, "Complete your account registration with the following code")
+
+					registrationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
+					assert.NotEmpty(t, registrationCode)
+
+					// 3. Submit OTP
+					state = submitOTP(ctx, t, reg, state, func(v *url.Values) {
+						v.Set("code", registrationCode)
+					}, tc.apiType, nil)
+
+					if tc.apiType == ApiTypeSPA {
+						assert.EqualValues(t, flow.ContinueWithActionRedirectBrowserToString, gjson.Get(state.body, "continue_with.0.action").String(), "%s", state.body)
+						assert.Contains(t, gjson.Get(state.body, "continue_with.0.redirect_browser_to").String(), conf.SelfServiceBrowserDefaultReturnTo(ctx).String(), "%s", state.body)
+					} else if tc.apiType == ApiTypeSPA {
+						assert.Empty(t, gjson.Get(state.body, "continue_with").Array(), "%s", state.body)
+					} else if tc.apiType == ApiTypeNative {
+						assert.NotContains(t, gjson.Get(state.body, "continue_with").Raw, string(flow.ContinueWithActionRedirectBrowserToString), "%s", state.body)
+					}
+
+					identity, _, err := reg.PrivilegedIdentityPool().FindByCredentialsIdentifier(ctx, identity.CredentialsTypeCodeAuth, state.email)
+					require.NoError(t, err, sqlcon.ErrNoRows)
+
+					assert.NotEmpty(t, identity.ID, "%s", identity.ID)
+					assert.Equal(t, state.email, gjson.Get(identity.Traits.String(), "email").String(), "%s", identity.Traits.String())
+					assert.Equal(t, "code", identity.SchemaID, "%s", identity.SchemaID)
+				})
+
+				t.Run("case=registration should fail with invalid form data", func(t *testing.T) {
+					ctx := context.Background()
+
+					// 1. Initiate flow
+					s := createRegistrationFlowWithIdentity(ctx, t, public, tc.apiType, "code")
+					s.email = "invalidemail"
+
+					// 2. Submit Identifier (email)
+					s = registerNewUser(ctx, t, s, tc.apiType, func(ctx context.Context, t *testing.T, s *state, body string, resp *http.Response) {
+						if tc.apiType == ApiTypeBrowser {
+							require.EqualValues(t, http.StatusOK, resp.StatusCode)
+						} else {
+							require.EqualValues(t, http.StatusBadRequest, resp.StatusCode)
+						}
+						require.Equal(t, int64(4000001), gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.id").Int(), "%s", body)
+						require.Equal(t, "\"invalidemail\" is not valid \"email\"", gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.text").String(), "%s", body)
+					})
+				})
+			})
+		}
+	})
+}
+
+func TestPopulateRegistrationMethod(t *testing.T) {
+	ctx := context.Background()
+	conf, reg := internal.NewFastRegistryWithMocks(t)
+	ctx = testhelpers.WithDefaultIdentitySchema(ctx, "file://stub/code.identity.schema.json")
+
+	conf.MustSet(ctx, fmt.Sprintf("%s.%s.passwordless_enabled", config.ViperKeySelfServiceStrategyConfig, identity.CredentialsTypeCodeAuth), true)
+
+	s, err := reg.AllRegistrationStrategies().Strategy(identity.CredentialsTypeCodeAuth)
+	require.NoError(t, err)
+
+	fh, ok := s.(registration.FormHydrator)
+	require.True(t, ok)
+
+	toSnapshot := func(t *testing.T, f node.Nodes) {
+		t.Helper()
+		// The CSRF token has a unique value that messes with the snapshot - ignore it.
+		f.ResetNodes("csrf_token")
+		snapshotx.SnapshotT(t, f, snapshotx.ExceptNestedKeys("nonce", "src"))
+	}
+
+	newFlow := func(ctx context.Context, t *testing.T) (*http.Request, *registration.Flow) {
+		r := httptest.NewRequest("GET", "/self-service/registration/browser", nil)
+		r = r.WithContext(ctx)
+		t.Helper()
+		f, err := registration.NewFlow(conf, time.Minute, "csrf_token", r, flow.TypeBrowser)
+		f.UI.Nodes = make(node.Nodes, 0)
+		require.NoError(t, err)
+		return r, f
+	}
+
+	t.Run("method=PopulateRegistrationMethod", func(t *testing.T) {
+		r, f := newFlow(ctx, t)
+		require.NoError(t, fh.PopulateRegistrationMethod(r, f))
+		toSnapshot(t, f.UI.Nodes)
+	})
+
+	t.Run("method=PopulateRegistrationMethodProfile", func(t *testing.T) {
+		r, f := newFlow(ctx, t)
+		require.NoError(t, fh.PopulateRegistrationMethodProfile(r, f))
+		toSnapshot(t, f.UI.Nodes)
+	})
+
+	t.Run("method=PopulateRegistrationMethodCredentials", func(t *testing.T) {
+		r, f := newFlow(ctx, t)
+		require.NoError(t, fh.PopulateRegistrationMethodCredentials(r, f))
+		toSnapshot(t, f.UI.Nodes)
+	})
+
+	t.Run("method=idempotency", func(t *testing.T) {
+		r, f := newFlow(ctx, t)
+
+		var snapshots []node.Nodes
+
+		t.Run("case=1", func(t *testing.T) {
+			require.NoError(t, fh.PopulateRegistrationMethodProfile(r, f))
+			snapshots = append(snapshots, f.UI.Nodes)
+			toSnapshot(t, f.UI.Nodes)
+		})
+
+		t.Run("case=2", func(t *testing.T) {
+			require.NoError(t, fh.PopulateRegistrationMethodCredentials(r, f))
+			snapshots = append(snapshots, f.UI.Nodes)
+			toSnapshot(t, f.UI.Nodes)
+		})
+
+		t.Run("case=3", func(t *testing.T) {
+			require.NoError(t, fh.PopulateRegistrationMethodProfile(r, f))
+			snapshots = append(snapshots, f.UI.Nodes)
+			toSnapshot(t, f.UI.Nodes)
+		})
+
+		t.Run("case=4", func(t *testing.T) {
+			require.NoError(t, fh.PopulateRegistrationMethodCredentials(r, f))
+			snapshots = append(snapshots, f.UI.Nodes)
+			toSnapshot(t, f.UI.Nodes)
+		})
+
+		t.Run("case=evaluate", func(t *testing.T) {
+			assertx.EqualAsJSON(t, snapshots[0], snapshots[2])
+			assertx.EqualAsJSON(t, snapshots[1], snapshots[3])
+		})
 	})
 }

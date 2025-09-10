@@ -6,9 +6,8 @@ package identity
 import (
 	"context"
 
-	"github.com/ory/x/crdbx"
-
 	"github.com/ory/kratos/x"
+	"github.com/ory/x/crdbx"
 	"github.com/ory/x/pagination/keysetpagination"
 	"github.com/ory/x/sqlxx"
 
@@ -18,13 +17,17 @@ import (
 type (
 	ListIdentityParameters struct {
 		Expand                       Expandables
-		IdsFilter                    []string
+		IdsFilter                    []uuid.UUID
 		CredentialsIdentifier        string
 		CredentialsIdentifierSimilar string
+		DeclassifyCredentials        []CredentialsType
 		KeySetPagination             []keysetpagination.Option
+		OrganizationID               uuid.UUID
+		ConsistencyLevel             crdbx.ConsistencyLevel
+		StatementTransformer         func(string) string
+
 		// DEPRECATED
-		PagePagination   *x.Page
-		ConsistencyLevel crdbx.ConsistencyLevel
+		PagePagination *x.Page
 	}
 
 	Pool interface {
@@ -43,6 +46,9 @@ type (
 
 		// FindRecoveryAddressByValue returns a matching address or sql.ErrNoRows if no address could be found.
 		FindRecoveryAddressByValue(ctx context.Context, via RecoveryAddressType, address string) (*RecoveryAddress, error)
+
+		// FindAllRecoveryAddressesForIdentityByRecoveryAddressValue finds all recovery addresses for an identity if at least one of its recovery addresses matches the provided value.
+		FindAllRecoveryAddressesForIdentityByRecoveryAddressValue(ctx context.Context, anyRecoveryAddress string) ([]RecoveryAddress, error)
 	}
 
 	PoolProvider interface {
@@ -60,11 +66,15 @@ type (
 		FindByCredentialsIdentifier(ctx context.Context, ct CredentialsType, match string) (*Identity, *Credentials, error)
 
 		// DeleteIdentity removes an identity by its id. Will return an error
-		// if identity exists, backend connectivity is broken, or trait validation fails.
+		// if identity does not exists, or backend connectivity is broken.
 		DeleteIdentity(context.Context, uuid.UUID) error
 
+		// DeleteIdentities removes identities by its id. Will return an error
+		// if any identity does not exists, or backend connectivity is broken.
+		DeleteIdentities(context.Context, []uuid.UUID) error
+
 		// UpdateVerifiableAddress updates an identity's verifiable address.
-		UpdateVerifiableAddress(ctx context.Context, address *VerifiableAddress) error
+		UpdateVerifiableAddress(ctx context.Context, address *VerifiableAddress, updateColumns ...string) error
 
 		// CreateIdentity creates an identity. It is capable of setting credentials without encoding. Will return an error
 		// if identity exists, backend connectivity is broken, or trait validation fails.
@@ -77,7 +87,13 @@ type (
 		// UpdateIdentity updates an identity including its confidential / privileged / protected data.
 		UpdateIdentity(context.Context, *Identity) error
 
-		// GetIdentityConfidential returns the identity including it's raw credentials. This should only be used internally.
+		// UpdateIdentityColumns updates targeted columns of an identity.
+		UpdateIdentityColumns(ctx context.Context, i *Identity, columns ...string) error
+
+		// GetIdentityConfidential returns the identity including it's raw credentials.
+		//
+		// This should only be used internally. Please be aware that this method uses HydrateIdentityAssociations
+		// internally, which must not be executed as part of a transaction.
 		GetIdentityConfidential(context.Context, uuid.UUID) (*Identity, error)
 
 		// ListVerifiableAddresses lists all tracked verifiable addresses, regardless of whether they are already verified
@@ -88,12 +104,28 @@ type (
 		ListRecoveryAddresses(ctx context.Context, page, itemsPerPage int) ([]RecoveryAddress, error)
 
 		// HydrateIdentityAssociations hydrates the associations of an identity.
+		//
+		// Please be aware that this method must not be called within a transaction if more than one element is expanded.
+		// It may error with "conn busy" otherwise.
 		HydrateIdentityAssociations(ctx context.Context, i *Identity, expandables Expandables) error
 
 		// InjectTraitsSchemaURL sets the identity's traits JSON schema URL from the schema's ID.
 		InjectTraitsSchemaURL(ctx context.Context, i *Identity) error
 
-		// FindIdentityByAnyCaseSensitiveCredentialIdentifier returns an identity by matching the identifier to any of the identity's credentials.
+		// FindIdentityByCredentialIdentifier returns an identity by matching the identifier to any of the identity's credentials.
 		FindIdentityByCredentialIdentifier(ctx context.Context, identifier string, caseSensitive bool) (*Identity, error)
+
+		// FindIdentityByWebauthnUserHandle returns an identity matching a webauthn user handle.
+		FindIdentityByWebauthnUserHandle(ctx context.Context, userHandle []byte) (*Identity, error)
+
+		// FindIdentityByCredentialsIdentifier returns an identity by its external ID.
+		FindIdentityByExternalID(ctx context.Context, externalID string, expand sqlxx.Expandables) (*Identity, error)
 	}
 )
+
+func (p ListIdentityParameters) TransformStatement(statement string) string {
+	if p.StatementTransformer != nil {
+		return p.StatementTransformer(statement)
+	}
+	return statement
+}

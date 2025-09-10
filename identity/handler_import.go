@@ -19,7 +19,15 @@ func (h *Handler) importCredentials(ctx context.Context, i *Identity, creds *Ide
 		return nil
 	}
 
+	// This method only support password and OIDC import at the moment.
+	// If other methods are added please ensure that the available AAL is set correctly in the identity.
+	//
+	// It would actually be good if we would validate the identity post-creation to see if the credentials are working.
 	if creds.Password != nil {
+		// This method is somewhat hacky, because it does not set the credential's identifier. It relies on the
+		// identity validation to set the identifier, which is called after this method.
+		//
+		// It would be good to make this explicit.
 		if err := h.importPasswordCredentials(ctx, i, creds.Password); err != nil {
 			return err
 		}
@@ -31,10 +39,20 @@ func (h *Handler) importCredentials(ctx context.Context, i *Identity, creds *Ide
 		}
 	}
 
+	if creds.SAML != nil {
+		if err := h.importSAMLCredentials(ctx, i, creds.SAML); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (h *Handler) importPasswordCredentials(ctx context.Context, i *Identity, creds *AdminIdentityImportCredentialsPassword) (err error) {
+	if creds.Config.UsePasswordMigrationHook {
+		return i.SetCredentialsWithConfig(CredentialsTypePassword, Credentials{}, CredentialsPassword{UsePasswordMigrationHook: true})
+	}
+
 	// In here we deliberately ignore any password policies as the point here is to import passwords, even if they
 	// are not matching the policy, as the user needs to able to sign in with their old password.
 	hashed := []byte(creds.Config.HashedPassword)
@@ -63,10 +81,15 @@ func (h *Handler) importOIDCCredentials(_ context.Context, i *Identity, creds *A
 		var ids []string
 		for _, p := range creds.Config.Providers {
 			ids = append(ids, OIDCUniqueID(p.Provider, p.Subject))
-			providers = append(providers, CredentialsOIDCProvider{
-				Subject:  p.Subject,
-				Provider: p.Provider,
-			})
+			provider := CredentialsOIDCProvider{
+				Subject:     p.Subject,
+				Provider:    p.Provider,
+				UseAutoLink: p.UseAutoLink,
+			}
+			if p.Organization.Valid {
+				provider.Organization = p.Organization.UUID.String()
+			}
+			providers = append(providers, provider)
 		}
 
 		return i.SetCredentialsWithConfig(
@@ -82,10 +105,58 @@ func (h *Handler) importOIDCCredentials(_ context.Context, i *Identity, creds *A
 
 	for _, p := range creds.Config.Providers {
 		c.Identifiers = append(c.Identifiers, OIDCUniqueID(p.Provider, p.Subject))
-		target.Providers = append(target.Providers, CredentialsOIDCProvider{
-			Subject:  p.Subject,
-			Provider: p.Provider,
-		})
+		provider := CredentialsOIDCProvider{
+			Subject:     p.Subject,
+			Provider:    p.Provider,
+			UseAutoLink: p.UseAutoLink,
+		}
+		if p.Organization.Valid {
+			provider.Organization = p.Organization.UUID.String()
+		}
+		target.Providers = append(target.Providers, provider)
 	}
 	return i.SetCredentialsWithConfig(CredentialsTypeOIDC, *c, &target)
+}
+
+func (h *Handler) importSAMLCredentials(_ context.Context, i *Identity, creds *AdminIdentityImportCredentialsSAML) error {
+	var target CredentialsOIDC
+	c, ok := i.GetCredentials(CredentialsTypeSAML)
+	if !ok {
+		var providers []CredentialsOIDCProvider
+		var ids []string
+		for _, p := range creds.Config.Providers {
+			ids = append(ids, OIDCUniqueID(p.Provider, p.Subject))
+			provider := CredentialsOIDCProvider{
+				Subject:  p.Subject,
+				Provider: p.Provider,
+			}
+			if p.Organization.Valid {
+				provider.Organization = p.Organization.UUID.String()
+			}
+			providers = append(providers, provider)
+		}
+
+		return i.SetCredentialsWithConfig(
+			CredentialsTypeSAML,
+			Credentials{Identifiers: ids},
+			CredentialsOIDC{Providers: providers},
+		)
+	}
+
+	if err := json.Unmarshal(c.Config, &target); err != nil {
+		return errors.WithStack(x.PseudoPanic.WithWrap(err))
+	}
+
+	for _, p := range creds.Config.Providers {
+		c.Identifiers = append(c.Identifiers, OIDCUniqueID(p.Provider, p.Subject))
+		provider := CredentialsOIDCProvider{
+			Subject:  p.Subject,
+			Provider: p.Provider,
+		}
+		if p.Organization.Valid {
+			provider.Organization = p.Organization.UUID.String()
+		}
+		target.Providers = append(target.Providers, provider)
+	}
+	return i.SetCredentialsWithConfig(CredentialsTypeSAML, *c, &target)
 }

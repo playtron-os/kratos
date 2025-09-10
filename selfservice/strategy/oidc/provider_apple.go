@@ -25,6 +25,8 @@ type ProviderApple struct {
 	JWKSUrl string
 }
 
+var _ OAuth2Provider = (*ProviderApple)(nil)
+
 func NewProviderApple(
 	config *Configuration,
 	reg Dependencies,
@@ -154,13 +156,13 @@ func (a *ProviderApple) DecodeQuery(query url.Values, claims *Claims) {
 
 var _ IDTokenVerifier = new(ProviderApple)
 
-const issuerUrlApple = "https://appleid.apple.com"
+const issuerURLApple = "https://appleid.apple.com"
 
 func (a *ProviderApple) Verify(ctx context.Context, rawIDToken string) (*Claims, error) {
 	keySet := oidc.NewRemoteKeySet(ctx, a.JWKSUrl)
-
 	ctx = oidc.ClientContext(ctx, a.reg.HTTPClient(ctx).HTTPClient)
-	return verifyToken(ctx, keySet, a.config, rawIDToken, issuerUrlApple)
+
+	return verifyToken(ctx, keySet, a.config, rawIDToken, issuerURLApple)
 }
 
 var _ NonceValidationSkipper = new(ProviderApple)

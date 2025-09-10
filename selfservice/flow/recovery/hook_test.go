@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ory/kratos/session"
+	"github.com/ory/kratos/x/nosurfx"
 
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/strategy/code"
 
 	"github.com/gobuffalo/httptest"
-	"github.com/julienschmidt/httprouter"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -31,28 +31,30 @@ import (
 func TestRecoveryExecutor(t *testing.T) {
 	ctx := context.Background()
 	conf, reg := internal.NewFastRegistryWithMocks(t)
+	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
 	s := code.NewStrategy(reg)
 
 	newServer := func(t *testing.T, i *identity.Identity, ft flow.Type) *httptest.Server {
-		router := httprouter.New()
-		router.GET("/recovery/pre", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			a, err := recovery.NewFlow(conf, time.Minute, x.FakeCSRFToken, r, s, ft)
+		router := http.NewServeMux()
+		router.HandleFunc("GET /recovery/pre", func(w http.ResponseWriter, r *http.Request) {
+			a, err := recovery.NewFlow(conf, time.Minute, nosurfx.FakeCSRFToken, r, s, ft)
 			require.NoError(t, err)
 			if testhelpers.SelfServiceHookErrorHandler(t, w, r, recovery.ErrHookAbortFlow, reg.RecoveryExecutor().PreRecoveryHook(w, r, a)) {
 				_, _ = w.Write([]byte("ok"))
 			}
 		})
 
-		router.GET("/recovery/post", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-			a, err := recovery.NewFlow(conf, time.Minute, x.FakeCSRFToken, r, s, ft)
+		router.HandleFunc("GET /recovery/post", func(w http.ResponseWriter, r *http.Request) {
+			a, err := recovery.NewFlow(conf, time.Minute, nosurfx.FakeCSRFToken, r, s, ft)
 			require.NoError(t, err)
-			s, _ := session.NewActiveSession(r,
+			s, err := testhelpers.NewActiveSession(r,
+				reg,
 				i,
-				conf,
 				time.Now().UTC(),
 				identity.CredentialsTypeRecoveryLink,
 				identity.AuthenticatorAssuranceLevel1,
 			)
+			require.NoError(t, err)
 			a.RequestURL = x.RequestURL(r).String()
 			if testhelpers.SelfServiceHookErrorHandler(t, w, r, recovery.ErrHookAbortFlow, reg.RecoveryExecutor().PostRecoveryHook(w, r, a, s)) {
 				_, _ = w.Write([]byte("ok"))

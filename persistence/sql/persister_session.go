@@ -8,17 +8,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gobuffalo/pop/v6"
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ory/herodot"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/session"
+	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/events"
+	"github.com/ory/pop/v6"
+	"github.com/ory/x/dbal"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/pagination/keysetpagination"
+	"github.com/ory/x/pointerx"
 	"github.com/ory/x/sqlcon"
 	"github.com/ory/x/stringsx"
 )
@@ -64,12 +68,11 @@ func (p *Persister) GetSession(ctx context.Context, sid uuid.UUID, expandables s
 	return &s, nil
 }
 
-func (p *Persister) ListSessions(ctx context.Context, active *bool, paginatorOpts []keysetpagination.Option, expandables session.Expandables) (_ []session.Session, _ int64, _ *keysetpagination.Paginator, err error) {
+func (p *Persister) ListSessions(ctx context.Context, active *bool, paginatorOpts []keysetpagination.Option, expandables session.Expandables) (_ []session.Session, _ *keysetpagination.Paginator, err error) {
 	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.ListSessions")
 	defer otelx.End(span, &err)
 
 	s := make([]session.Session, 0)
-	t := int64(0)
 	nid := p.NetworkID(ctx)
 
 	paginatorOpts = append(paginatorOpts, keysetpagination.WithDefaultSize(paginationDefaultItemsSize))
@@ -77,6 +80,10 @@ func (p *Persister) ListSessions(ctx context.Context, active *bool, paginatorOpt
 	paginatorOpts = append(paginatorOpts, keysetpagination.WithDefaultToken(new(session.Session).DefaultPageToken()))
 	paginatorOpts = append(paginatorOpts, keysetpagination.WithColumn("created_at", "DESC"))
 	paginator := keysetpagination.GetPaginator(paginatorOpts...)
+
+	if _, err := uuid.FromString(paginator.Token().Parse("id")["id"]); err != nil {
+		return nil, nil, errors.WithStack(x.PageTokenInvalid)
+	}
 
 	if err := p.Transaction(ctx, func(ctx context.Context, c *pop.Connection) error {
 		q := c.Where("nid = ?", nid)
@@ -87,13 +94,6 @@ func (p *Persister) ListSessions(ctx context.Context, active *bool, paginatorOpt
 				q.Where("(active = ? OR expires_at < ?)", *active, time.Now().UTC())
 			}
 		}
-
-		// Get the total count of matching items
-		total, err := q.Count(new(session.Session))
-		if err != nil {
-			return sqlcon.HandleError(err)
-		}
-		t = int64(total)
 
 		if len(expandables) > 0 {
 			q = q.EagerPreload(expandables.ToEager()...)
@@ -106,7 +106,7 @@ func (p *Persister) ListSessions(ctx context.Context, active *bool, paginatorOpt
 
 		return nil
 	}); err != nil {
-		return nil, 0, nil, err
+		return nil, nil, err
 	}
 
 	for k := range s {
@@ -114,12 +114,12 @@ func (p *Persister) ListSessions(ctx context.Context, active *bool, paginatorOpt
 			continue
 		}
 		if err := p.InjectTraitsSchemaURL(ctx, s[k].Identity); err != nil {
-			return nil, 0, nil, err
+			return nil, nil, err
 		}
 	}
 
 	s, nextPage := keysetpagination.Result(s, paginator)
-	return s, t, nextPage, nil
+	return s, nextPage, nil
 }
 
 // ListSessionsByIdentity retrieves sessions for an identity from the store.
@@ -162,7 +162,7 @@ func (p *Persister) ListSessionsByIdentity(
 		}
 		t = int64(total)
 
-		q.Order("authenticated_at DESC")
+		q.Order("created_at DESC")
 
 		// Get the paginated list of matching items
 		if err := q.Paginate(page, perPage).All(&s); err != nil {
@@ -176,6 +176,61 @@ func (p *Persister) ListSessionsByIdentity(
 	return s, t, nil
 }
 
+// ExtendSession updates the expiry of a session.
+func (p *Persister) ExtendSession(ctx context.Context, sessionID uuid.UUID) (err error) {
+	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.ExtendSession")
+	defer otelx.End(span, &err)
+
+	nid := p.NetworkID(ctx)
+	s := new(session.Session)
+	var didRefresh bool
+	if err := errors.WithStack(p.Transaction(ctx, func(ctx context.Context, tx *pop.Connection) (err error) {
+		lockBehavior := ""
+		if tx.Dialect.Name() == dbal.DriverCockroachDB {
+			// SKIP LOCKED returns no rows if the row is locked by another transaction.
+			lockBehavior = "FOR UPDATE SKIP LOCKED"
+		}
+
+		if err := tx.
+			Where(
+				// We make use of the fact that CRDB supports FOR UPDATE as part of the WHERE clause.
+				fmt.Sprintf("id = ? AND nid = ? %s", lockBehavior),
+				sessionID, nid,
+			).First(s); err != nil {
+
+			// This is a special case for CockroachDB. If the row is locked, we do not see the session. Therefor we return
+			// a 404 not found error indicating to the user that the session might already be updated by someone else.
+			if errors.Is(err, sqlcon.ErrNoRows) && tx.Dialect.Name() == dbal.DriverCockroachDB {
+				return errors.WithStack(herodot.ErrNotFound.WithReason("The session you are trying to extend is already being extended by another request or does not exist."))
+			}
+
+			return sqlcon.HandleError(err)
+		}
+
+		if !s.CanBeRefreshed(ctx, p.r.Config()) {
+			// This prevents excessive writes to the database.
+			return nil
+		}
+
+		didRefresh = true
+		s = s.Refresh(ctx, p.r.Config())
+
+		if _, err := tx.Where("id = ? AND nid = ?", sessionID, nid).UpdateQuery(s, "expires_at"); err != nil {
+			return sqlcon.HandleError(err)
+		}
+
+		return nil
+	})); err != nil {
+		return err
+	}
+
+	if didRefresh {
+		trace.SpanFromContext(ctx).AddEvent(events.NewSessionLifespanExtended(ctx, s.ID, s.IdentityID, s.ExpiresAt))
+	}
+
+	return nil
+}
+
 // UpsertSession creates a session if not found else updates.
 // This operation also inserts Session device records when a session is being created.
 // The update operation skips updating Session device records since only one record would need to be updated in this case.
@@ -185,10 +240,22 @@ func (p *Persister) UpsertSession(ctx context.Context, s *session.Session) (err 
 
 	s.NID = p.NetworkID(ctx)
 
-	return errors.WithStack(p.Transaction(ctx, func(ctx context.Context, tx *pop.Connection) error {
+	var updated bool
+	defer func() {
+		if err != nil {
+			return
+		}
+		if updated {
+			trace.SpanFromContext(ctx).AddEvent(events.NewSessionChanged(ctx, string(s.AuthenticatorAssuranceLevel), s.ID, s.IdentityID))
+		} else {
+			trace.SpanFromContext(ctx).AddEvent(events.NewSessionIssued(ctx, string(s.AuthenticatorAssuranceLevel), s.ID, s.IdentityID))
+		}
+	}()
+
+	return errors.WithStack(p.Transaction(ctx, func(ctx context.Context, tx *pop.Connection) (err error) {
+		updated = false
 		exists := false
 		if !s.ID.IsNil() {
-			var err error
 			exists, err = tx.Where("id = ? AND nid = ?", s.ID, s.NID).Exists(new(session.Session))
 			if err != nil {
 				return sqlcon.HandleError(err)
@@ -198,10 +265,10 @@ func (p *Persister) UpsertSession(ctx context.Context, s *session.Session) (err 
 		if exists {
 			// This must not be eager or identities will be created / updated
 			// Only update session and not corresponding session device records
-			if err := tx.Update(s); err != nil {
+			if err := tx.Update(s, "issued_at", "identity_id", "nid"); err != nil {
 				return sqlcon.HandleError(err)
 			}
-			trace.SpanFromContext(ctx).AddEvent(events.NewSessionChanged(ctx, string(s.AuthenticatorAssuranceLevel), s.ID, s.IdentityID))
+			updated = true
 			return nil
 		}
 
@@ -216,10 +283,10 @@ func (p *Persister) UpsertSession(ctx context.Context, s *session.Session) (err 
 			device.NID = s.NID
 
 			if device.Location != nil {
-				device.Location = stringsx.GetPointer(stringsx.TruncateByteLen(*device.Location, SessionDeviceLocationMaxLength))
+				device.Location = pointerx.Ptr(stringsx.TruncateByteLen(*device.Location, SessionDeviceLocationMaxLength))
 			}
 			if device.UserAgent != nil {
-				device.UserAgent = stringsx.GetPointer(stringsx.TruncateByteLen(*device.UserAgent, SessionDeviceUserAgentMaxLength))
+				device.UserAgent = pointerx.Ptr(stringsx.TruncateByteLen(*device.UserAgent, SessionDeviceUserAgentMaxLength))
 			}
 
 			if err := p.DevicePersister.CreateDevice(ctx, device); err != nil {
@@ -227,7 +294,6 @@ func (p *Persister) UpsertSession(ctx context.Context, s *session.Session) (err 
 			}
 		}
 
-		trace.SpanFromContext(ctx).AddEvent(events.NewSessionIssued(ctx, string(s.AuthenticatorAssuranceLevel), s.ID, s.IdentityID))
 		return nil
 	}))
 }
@@ -238,7 +304,7 @@ func (p *Persister) DeleteSession(ctx context.Context, sid uuid.UUID) (err error
 
 	nid := p.NetworkID(ctx)
 	//#nosec G201 -- TableName is static
-	count, err := p.GetConnection(ctx).RawQuery(fmt.Sprintf("DELETE FROM %s WHERE id = ? AND nid = ?", new(session.Session).TableName(ctx)),
+	count, err := p.GetConnection(ctx).RawQuery(fmt.Sprintf("DELETE FROM %s WHERE id = ? AND nid = ?", session.Session{}.TableName()),
 		sid,
 		nid,
 	).ExecWithCount()
@@ -258,7 +324,7 @@ func (p *Persister) DeleteSessionsByIdentity(ctx context.Context, identityID uui
 	//#nosec G201 -- TableName is static
 	count, err := p.GetConnection(ctx).RawQuery(fmt.Sprintf(
 		"DELETE FROM %s WHERE identity_id = ? AND nid = ?",
-		new(session.Session).TableName(ctx),
+		session.Session{}.TableName(),
 	),
 		identityID,
 		p.NetworkID(ctx),
@@ -324,7 +390,7 @@ func (p *Persister) DeleteSessionByToken(ctx context.Context, token string) (err
 	//#nosec G201 -- TableName is static
 	count, err := p.GetConnection(ctx).RawQuery(fmt.Sprintf(
 		"DELETE FROM %s WHERE token = ? AND nid = ?",
-		new(session.Session).TableName(ctx),
+		session.Session{}.TableName(),
 	),
 		token,
 		p.NetworkID(ctx),
@@ -345,7 +411,7 @@ func (p *Persister) RevokeSessionByToken(ctx context.Context, token string) (err
 	//#nosec G201 -- TableName is static
 	count, err := p.GetConnection(ctx).RawQuery(fmt.Sprintf(
 		"UPDATE %s SET active = false WHERE token = ? AND nid = ?",
-		new(session.Session).TableName(ctx),
+		session.Session{}.TableName(),
 	),
 		token,
 		p.NetworkID(ctx),
@@ -367,7 +433,7 @@ func (p *Persister) RevokeSessionById(ctx context.Context, sID uuid.UUID) (err e
 	//#nosec G201 -- TableName is static
 	count, err := p.GetConnection(ctx).RawQuery(fmt.Sprintf(
 		"UPDATE %s SET active = false WHERE id = ? AND nid = ?",
-		new(session.Session).TableName(ctx),
+		session.Session{}.TableName(),
 	),
 		sID,
 		p.NetworkID(ctx),
@@ -390,7 +456,7 @@ func (p *Persister) RevokeSession(ctx context.Context, iID, sID uuid.UUID) (err 
 	//#nosec G201 -- TableName is static
 	err = p.GetConnection(ctx).RawQuery(fmt.Sprintf(
 		"UPDATE %s SET active = false WHERE id = ? AND identity_id = ? AND nid = ?",
-		new(session.Session).TableName(ctx),
+		session.Session{}.TableName(),
 	),
 		sID,
 		iID,
@@ -410,7 +476,7 @@ func (p *Persister) RevokeSessionsIdentityExcept(ctx context.Context, iID, sID u
 	//#nosec G201 -- TableName is static
 	count, err := p.GetConnection(ctx).RawQuery(fmt.Sprintf(
 		"UPDATE %s SET active = false WHERE identity_id = ? AND id != ? AND nid = ?",
-		new(session.Session).TableName(ctx),
+		session.Session{}.TableName(),
 	),
 		iID,
 		sID,
@@ -428,16 +494,13 @@ func (p *Persister) DeleteExpiredSessions(ctx context.Context, expiresAt time.Ti
 
 	//#nosec G201 -- TableName is static
 	err = p.GetConnection(ctx).RawQuery(fmt.Sprintf(
-		"DELETE FROM %s WHERE id in (SELECT id FROM (SELECT id FROM %s c WHERE expires_at <= ? and nid = ? ORDER BY expires_at ASC LIMIT %d ) AS s )",
-		new(session.Session).TableName(ctx),
-		new(session.Session).TableName(ctx),
-		limit,
+		"DELETE FROM %[1]s WHERE id in (SELECT id FROM (SELECT id FROM %[1]s c WHERE expires_at <= ? and nid = ? ORDER BY expires_at ASC LIMIT ?) AS s)",
+		session.Session{}.TableName(),
 	),
 		expiresAt,
 		p.NetworkID(ctx),
+		limit,
 	).Exec()
-	if err != nil {
-		return sqlcon.HandleError(err)
-	}
-	return nil
+
+	return sqlcon.HandleError(err)
 }

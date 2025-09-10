@@ -4,7 +4,6 @@
 package continuity
 
 import (
-	"context"
 	"time"
 
 	"github.com/gofrs/uuid"
@@ -43,9 +42,7 @@ func (c *Container) UTC() *Container {
 	return c
 }
 
-func (c Container) TableName(ctx context.Context) string {
-	return "continuity_containers"
-}
+func (_ Container) TableName() string { return "continuity_containers" }
 
 func NewContainer(name string, o managerOptions) *Container {
 	return &Container{
@@ -63,7 +60,7 @@ func (c *Container) Valid(identity uuid.UUID) error {
 	}
 
 	if identity != uuid.Nil && pointerx.Deref(c.IdentityID) != identity {
-		return errors.WithStack(herodot.ErrBadRequest.WithReasonf("You must restart the flow because the resumable session was initiated by another person."))
+		return errors.WithStack(herodot.ErrForbidden.WithReasonf("The flow has been blocked for security reasons because it was initiated by another person.."))
 	}
 
 	return nil

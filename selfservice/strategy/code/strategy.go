@@ -5,8 +5,14 @@ package code
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
+
+	"github.com/ory/kratos/x/nosurfx"
+
+	"github.com/samber/lo"
 
 	"github.com/pkg/errors"
 	"github.com/tidwall/gjson"
@@ -36,20 +42,21 @@ import (
 )
 
 var (
-	_ recovery.Strategy      = new(Strategy)
-	_ recovery.AdminHandler  = new(Strategy)
-	_ recovery.PublicHandler = new(Strategy)
+	_ recovery.Strategy      = (*Strategy)(nil)
+	_ recovery.AdminHandler  = (*Strategy)(nil)
+	_ recovery.PublicHandler = (*Strategy)(nil)
 )
 
 var (
-	_ verification.Strategy      = new(Strategy)
-	_ verification.AdminHandler  = new(Strategy)
-	_ verification.PublicHandler = new(Strategy)
+	_ verification.Strategy      = (*Strategy)(nil)
+	_ verification.AdminHandler  = (*Strategy)(nil)
+	_ verification.PublicHandler = (*Strategy)(nil)
 )
 
 var (
-	_ login.Strategy        = new(Strategy)
-	_ registration.Strategy = new(Strategy)
+	_ login.Strategy                    = (*Strategy)(nil)
+	_ registration.Strategy             = (*Strategy)(nil)
+	_ identity.ActiveCredentialsCounter = (*Strategy)(nil)
 )
 
 type (
@@ -59,11 +66,12 @@ type (
 	}
 
 	strategyDependencies interface {
-		x.CSRFProvider
-		x.CSRFTokenGeneratorProvider
+		nosurfx.CSRFProvider
+		nosurfx.CSRFTokenGeneratorProvider
 		x.WriterProvider
 		x.LoggingProvider
 		x.TracingProvider
+		x.TransactionPersistenceProvider
 
 		config.Provider
 
@@ -103,7 +111,7 @@ type (
 		RegistrationCodePersistenceProvider
 		LoginCodePersistenceProvider
 
-		schema.IdentityTraitsProvider
+		schema.IdentitySchemaProvider
 		session.PersistenceProvider
 
 		sessiontokenexchange.PersistenceProvider
@@ -121,8 +129,65 @@ type (
 	}
 )
 
-func NewStrategy(deps any) *Strategy {
-	return &Strategy{deps: deps.(strategyDependencies), dx: decoderx.NewHTTP()}
+func (s *Strategy) CountActiveFirstFactorCredentials(ctx context.Context, cc map[identity.CredentialsType]identity.Credentials) (int, error) {
+	codeConfig := s.deps.Config().SelfServiceCodeStrategy(ctx)
+	if codeConfig.PasswordlessEnabled {
+		// Login with code for passwordless is enabled
+		return 1, nil
+	}
+
+	return 0, nil
+}
+
+func (s *Strategy) CountActiveMultiFactorCredentials(ctx context.Context, cc map[identity.CredentialsType]identity.Credentials) (int, error) {
+	codeConfig := s.deps.Config().SelfServiceCodeStrategy(ctx)
+	if !codeConfig.MFAEnabled {
+		return 0, nil
+	}
+
+	// Get code credentials if they exist
+	creds, ok := cc[identity.CredentialsTypeCodeAuth]
+	if !ok {
+		return 0, nil
+	}
+
+	// Check if the credentials config is valid JSON
+	if !gjson.Valid(string(creds.Config)) {
+		return 0, nil
+	}
+
+	// Check for v0 format with address_type field
+	if gjson.GetBytes(creds.Config, "address_type").Exists() {
+		addressType := gjson.GetBytes(creds.Config, "address_type").String()
+		if addressType != "" {
+			return 1, nil
+		}
+		return 0, nil
+	}
+
+	var conf identity.CredentialsCode
+	if err := json.Unmarshal(creds.Config, &conf); err != nil {
+		return 0, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to unmarshal credentials config: %s", err))
+	}
+
+	// If no addresses configured, return 0
+	if len(conf.Addresses) == 0 {
+		return 0, nil
+	}
+
+	// Count valid addresses configured for MFA
+	validAddresses := 0
+	for _, addr := range conf.Addresses {
+		if addr.Address != "" {
+			validAddresses++
+		}
+	}
+
+	return validAddresses, nil
+}
+
+func NewStrategy(deps strategyDependencies) *Strategy {
+	return &Strategy{deps: deps, dx: decoderx.NewHTTP()}
 }
 
 func (s *Strategy) ID() identity.CredentialsType {
@@ -180,89 +245,102 @@ func (s *Strategy) PopulateMethod(r *http.Request, f flow.Flow) error {
 	if f.GetType() == flow.TypeBrowser {
 		f.GetUI().SetCSRF(s.deps.GenerateCSRFToken(r))
 	}
+
 	return nil
 }
 
 func (s *Strategy) populateChooseMethodFlow(r *http.Request, f flow.Flow) error {
 	ctx := r.Context()
-	var codeMetaLabel *text.Message
 	switch f := f.(type) {
 	case *recovery.Flow, *verification.Flow:
 		f.GetUI().Nodes.Append(
 			node.NewInputField("email", nil, node.CodeGroup, node.InputAttributeTypeEmail, node.WithRequiredInputAttribute).
 				WithMetaLabel(text.NewInfoNodeInputEmail()),
 		)
-		codeMetaLabel = text.NewInfoNodeLabelSubmit()
+		f.GetUI().Nodes.Append(
+			node.NewInputField("method", s.ID(), node.CodeGroup, node.InputAttributeTypeSubmit).
+				WithMetaLabel(text.NewInfoNodeLabelContinue()),
+		)
 	case *login.Flow:
-		ds, err := s.deps.Config().DefaultIdentityTraitsSchemaURL(ctx)
+		ds, err := f.IdentitySchema.URL(ctx, s.deps.Config())
 		if err != nil {
 			return err
 		}
 		if f.RequestedAAL == identity.AuthenticatorAssuranceLevel2 {
 			via := r.URL.Query().Get("via")
-			if via == "" {
-				return errors.WithStack(herodot.ErrBadRequest.WithReason("AAL2 login via code requires the `via` query parameter"))
-			}
 
 			sess, err := s.deps.SessionManager().FetchFromRequest(r.Context(), r)
 			if err != nil {
 				return err
 			}
 
-			allSchemas, err := s.deps.IdentityTraitsSchemas(ctx)
-			if err != nil {
-				return err
-			}
-			iSchema, err := allSchemas.GetByID(sess.Identity.SchemaID)
-			if err != nil {
-				return err
-			}
-			identifierLabel, err := login.GetIdentifierLabelFromSchemaWithField(ctx, iSchema.RawURL, via)
-			if err != nil {
-				return err
+			// We need to load the identity's credentials.
+			if len(sess.Identity.Credentials) == 0 {
+				if err := s.deps.PrivilegedIdentityPool().HydrateIdentityAssociations(ctx, sess.Identity, identity.ExpandCredentials); err != nil {
+					return err
+				}
 			}
 
-			value := gjson.GetBytes(sess.Identity.Traits, via).String()
-			if value == "" {
-				return errors.WithStack(herodot.ErrBadRequest.WithReasonf("No value found for trait %s in the current identity", via))
-			}
+			// The via parameter lets us hint at the OTP address to use for 2fa.
+			if via == "" {
+				addresses, found, err := FindCodeAddressCandidates(sess.Identity, s.deps.Config().SelfServiceCodeMethodMissingCredentialFallbackEnabled(ctx))
+				if err != nil {
+					return err
+				} else if !found {
+					return nil
+				}
 
-			codeMetaLabel = text.NewInfoSelfServiceLoginCodeMFA()
-			idNode := node.NewInputField("identifier", "", node.DefaultGroup, node.InputAttributeTypeText, node.WithRequiredInputAttribute).WithMetaLabel(identifierLabel)
-			idNode.Messages.Add(text.NewInfoSelfServiceLoginCodeMFAHint(MaskAddress(value)))
-			f.GetUI().Nodes.Upsert(idNode)
+				sort.SliceStable(addresses, func(i, j int) bool {
+					return addresses[i].To < addresses[j].To && addresses[i].Via < addresses[j].Via
+				})
+
+				for _, address := range addresses {
+					f.GetUI().Nodes.Append(node.NewInputField("address", address.To, node.CodeGroup, node.InputAttributeTypeSubmit).
+						WithMetaLabel(text.NewInfoSelfServiceLoginAAL2CodeAddress(string(address.Via), address.To)))
+				}
+			} else {
+				value := gjson.GetBytes(sess.Identity.Traits, via).String()
+				if value == "" {
+					return errors.WithStack(herodot.ErrBadRequest.WithReasonf("No value found for trait %s in the current identity.", via))
+				}
+
+				// TODO Remove this normalization once the via parameter is deprecated.
+				//
+				// Here we need to normalize the via parameter to the actual address. This is necessary because otherwise
+				// we won't find the address in the list of addresses.
+				//
+				// Since we don't know if the via parameter is an email address or a phone number, we need to normalize for both.
+				value = x.GracefulNormalization(value)
+
+				addresses, found, err := FindCodeAddressCandidates(sess.Identity, s.deps.Config().SelfServiceCodeMethodMissingCredentialFallbackEnabled(ctx))
+				if err != nil {
+					return err
+				} else if !found {
+					return nil
+				}
+
+				address, found := lo.Find(addresses, func(item Address) bool {
+					return item.To == value
+				})
+				if !found {
+					return errors.WithStack(herodot.ErrBadRequest.WithReasonf("You can only reference a trait that matches a verification email address in the via parameter, or a registered credential."))
+				}
+
+				f.GetUI().Nodes.Append(node.NewInputField("address", address.To, node.CodeGroup, node.InputAttributeTypeSubmit).
+					WithMetaLabel(text.NewInfoSelfServiceLoginAAL2CodeAddress(string(address.Via), address.To)))
+			}
 		} else {
-			codeMetaLabel = text.NewInfoSelfServiceLoginCode()
 			identifierLabel, err := login.GetIdentifierLabelFromSchema(ctx, ds.String())
 			if err != nil {
 				return err
 			}
 
 			f.GetUI().Nodes.Upsert(node.NewInputField("identifier", "", node.DefaultGroup, node.InputAttributeTypeText, node.WithRequiredInputAttribute).WithMetaLabel(identifierLabel))
-		}
-	case *registration.Flow:
-		codeMetaLabel = text.NewInfoSelfServiceRegistrationRegisterCode()
-		ds, err := s.deps.Config().DefaultIdentityTraitsSchemaURL(ctx)
-		if err != nil {
-			return err
-		}
-
-		// set the traits on the default group so that the ui can render them
-		// this prevents having multiple of the same ui fields on the same ui form
-		traitNodes, err := container.NodesFromJSONSchema(ctx, node.DefaultGroup, ds.String(), "", nil)
-		if err != nil {
-			return err
-		}
-
-		for _, n := range traitNodes {
-			f.GetUI().Nodes.Upsert(n)
+			f.GetUI().Nodes.Append(
+				node.NewInputField("method", s.ID(), node.CodeGroup, node.InputAttributeTypeSubmit).WithMetaLabel(text.NewInfoSelfServiceLoginCode()),
+			)
 		}
 	}
-
-	methodButton := node.NewInputField("method", s.ID(), node.CodeGroup, node.InputAttributeTypeSubmit).
-		WithMetaLabel(codeMetaLabel)
-
-	f.GetUI().Nodes.Append(methodButton)
 
 	return nil
 }
@@ -275,6 +353,7 @@ func (s *Strategy) populateEmailSentFlow(ctx context.Context, f flow.Flow) error
 	var message *text.Message
 
 	var resendNode *node.Node
+	var backNode *node.Node
 
 	switch f.GetFlowName() {
 	case flow.RecoveryFlow:
@@ -284,6 +363,7 @@ func (s *Strategy) populateEmailSentFlow(ctx context.Context, f flow.Flow) error
 
 		resendNode = node.NewInputField("email", nil, node.CodeGroup, node.InputAttributeTypeEmail, node.WithRequiredInputAttribute).
 			WithMetaLabel(text.NewInfoNodeResendOTP())
+
 	case flow.VerificationFlow:
 		route = verification.RouteSubmitFlow
 		codeMetaLabel = text.NewInfoNodeLabelVerificationCode()
@@ -292,20 +372,16 @@ func (s *Strategy) populateEmailSentFlow(ctx context.Context, f flow.Flow) error
 	case flow.LoginFlow:
 		route = login.RouteSubmitFlow
 		codeMetaLabel = text.NewInfoNodeLabelLoginCode()
-		message = text.NewLoginEmailWithCodeSent()
+		message = text.NewLoginCodeSent()
 
 		// preserve the login identifier that was submitted
 		// so we can retry the code flow with the same data
 		for _, n := range f.GetUI().Nodes {
-			if n.Group == node.DefaultGroup {
-				// we don't need the user to change the values here
-				// for better UX let's make them disabled
-				// when there are errors we won't hide the fields
-				if len(n.Messages) == 0 {
-					if input, ok := n.Attributes.(*node.InputAttributes); ok {
-						input.Type = "hidden"
-						n.Attributes = input
-					}
+			if n.ID() == "identifier" || n.ID() == "address" {
+				if input, ok := n.Attributes.(*node.InputAttributes); ok {
+					input.Type = "hidden"
+					n.Attributes = input
+					input.Name = "identifier"
 				}
 				freshNodes = append(freshNodes, n)
 			}
@@ -340,29 +416,33 @@ func (s *Strategy) populateEmailSentFlow(ctx context.Context, f flow.Flow) error
 			}
 		}
 
-		resendNode = node.NewInputField("resend", "code", node.CodeGroup, node.InputAttributeTypeSubmit).
-			WithMetaLabel(text.NewInfoNodeResendOTP())
+		resendNode = nodeRegistrationResendNode()
+
+		// Insert a back button if we have a two-step registration screen, so that the
+		// user can navigate back to the credential selection screen.
+		if s.deps.Config().SelfServiceFlowRegistrationTwoSteps(ctx) {
+			backNode = nodeRegistrationSelectCredentialsNode()
+		}
 	default:
 		return errors.WithStack(herodot.ErrBadRequest.WithReason("received an unexpected flow type"))
 	}
 
 	// Hidden field Required for the re-send code button
 	// !!important!!: this field must be appended before the code submit button since upsert will replace the first node with the same name
-	freshNodes.Upsert(
-		node.NewInputField("method", s.NodeGroup(), node.CodeGroup, node.InputAttributeTypeHidden),
-	)
+	freshNodes.Upsert(nodeCodeInputFieldHidden())
 
 	// code input field
-	freshNodes.Upsert(node.NewInputField("code", nil, node.CodeGroup, node.InputAttributeTypeText, node.WithRequiredInputAttribute).
-		WithMetaLabel(codeMetaLabel))
+	freshNodes.Upsert(nodeCodeInputField().WithMetaLabel(codeMetaLabel))
 
 	// code submit button
-	freshNodes.
-		Append(node.NewInputField("method", s.ID(), node.CodeGroup, node.InputAttributeTypeSubmit).
-			WithMetaLabel(text.NewInfoNodeLabelSubmit()))
+	freshNodes.Append(nodeContinueButton())
 
 	if resendNode != nil {
 		freshNodes.Append(resendNode)
+	}
+
+	if backNode != nil {
+		freshNodes.Append(backNode)
 	}
 
 	f.GetUI().Nodes = freshNodes

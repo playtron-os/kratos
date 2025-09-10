@@ -19,6 +19,8 @@ import (
 	"github.com/ory/x/stringsx"
 )
 
+var _ OAuth2Provider = (*ProviderDiscord)(nil)
+
 type ProviderDiscord struct {
 	config *Configuration
 	reg    Dependencies
@@ -93,7 +95,7 @@ func (d *ProviderDiscord) Claims(ctx context.Context, exchange *oauth2.Token, qu
 		Picture:           user.AvatarURL(""),
 		Email:             user.Email,
 		EmailVerified:     x.ConvertibleBoolean(user.Verified),
-		Locale:            user.Locale,
+		Locale:            Locale(user.Locale),
 	}
 
 	return claims, nil

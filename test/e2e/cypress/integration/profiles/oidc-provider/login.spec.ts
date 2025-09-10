@@ -127,14 +127,18 @@ context("OpenID Provider", () => {
     })
 
     odicLogin()
-    console.log(cy.getCookies())
-    cy.getCookie("ory_hydra_session_dev").should("not.be.null")
-    cy.getCookie("ory_hydra_session_dev").then((cookie) => {
-      let expected = Date.now() / 1000 + 1234
-      let precision = 10
-      expect(cookie.expiry).to.be.lessThan(expected + precision)
-      expect(cookie.expiry).to.be.greaterThan(expected - precision)
-    })
+    cy.getCookies({ domain: "localhost" })
+    cy.getCookie("ory_hydra_session_dev", { domain: "localhost" }).should(
+      "not.be.null",
+    )
+    cy.getCookie("ory_hydra_session_dev", { domain: "localhost" }).then(
+      (cookie: Cypress.Cookie) => {
+        let expected = Date.now() / 1000 + 1234
+        let precision = 10
+        expect(cookie.expiry).to.be.lessThan(expected + precision)
+        expect(cookie.expiry).to.be.greaterThan(expected - precision)
+      },
+    )
 
     cy.clearAllCookies()
     cy.updateConfigFile((config) => {
@@ -144,7 +148,9 @@ context("OpenID Provider", () => {
     })
 
     odicLogin()
-    cy.getCookie("ory_hydra_session_dev").should("be.null")
+    cy.getCookie("ory_hydra_session_dev", { domain: "localhost" }).should(
+      "be.null",
+    )
   })
 })
 
@@ -218,14 +224,20 @@ context("OpenID Provider - change between flows", () => {
   })
 
   it("switch to recovery flow with password reset", () => {
+    cy.updateConfigFile((config) => {
+      config.selfservice.flows.recovery.lifespan = "1m"
+      config.selfservice.methods.link.config.lifespan = "1m"
+      config.selfservice.flows.verification.enabled = false
+      if (!config.selfservice.flows.recovery) {
+        config.selfservice.flows.recovery = {}
+      }
+      config.selfservice.flows.recovery.enabled = true
+      config.selfservice.flows.settings.privileged_session_max_age = "5m"
+      return config
+    })
     cy.deleteMail()
-    cy.longRecoveryLifespan()
-    cy.longLinkLifespan()
-    cy.disableVerification()
-    cy.enableRecovery()
     cy.useRecoveryStrategy("code")
     cy.notifyUnknownRecipients("recovery", false)
-    cy.longPrivilegedSessionTime()
 
     const identity = gen.identityWithWebsite()
     cy.registerApi(identity)

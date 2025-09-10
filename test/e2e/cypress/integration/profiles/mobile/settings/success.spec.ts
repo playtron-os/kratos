@@ -24,6 +24,7 @@ context("Mobile Profile", () => {
       })
 
       beforeEach(() => {
+        cy.clearAllCookies()
         cy.loginMobile({ email, password })
         cy.visit(MOBILE_URL + "/Settings")
       })
@@ -67,6 +68,7 @@ context("Mobile Profile", () => {
           fields: { "traits.website": website },
         })
         cy.loginMobile({ email, password })
+        cy.location("pathname").should("not.contain", "/Login")
         cy.visit(MOBILE_URL + "/Settings")
       })
 

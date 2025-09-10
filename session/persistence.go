@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/gobuffalo/pop/v6"
+	"github.com/ory/pop/v6"
 
 	"github.com/ory/kratos/identity"
 
@@ -27,13 +27,16 @@ type Persister interface {
 	GetSession(ctx context.Context, sid uuid.UUID, expandables Expandables) (*Session, error)
 
 	// ListSessions retrieves all sessions.
-	ListSessions(ctx context.Context, active *bool, paginatorOpts []keysetpagination.Option, expandables Expandables) ([]Session, int64, *keysetpagination.Paginator, error)
+	ListSessions(ctx context.Context, active *bool, paginatorOpts []keysetpagination.Option, expandables Expandables) ([]Session, *keysetpagination.Paginator, error)
 
 	// ListSessionsByIdentity retrieves sessions for an identity from the store.
 	ListSessionsByIdentity(ctx context.Context, iID uuid.UUID, active *bool, page, perPage int, except uuid.UUID, expandables Expandables) ([]Session, int64, error)
 
 	// UpsertSession inserts or updates a session into / in the store.
 	UpsertSession(ctx context.Context, s *Session) error
+
+	// ExtendSession updates the expiry of a session.
+	ExtendSession(ctx context.Context, sessionID uuid.UUID) error
 
 	// DeleteSession removes a session from the store.
 	DeleteSession(ctx context.Context, id uuid.UUID) error

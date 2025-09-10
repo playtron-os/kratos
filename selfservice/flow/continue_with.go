@@ -14,7 +14,10 @@ import (
 )
 
 // swagger:model continueWith
-type ContinueWith any
+type ContinueWith interface {
+	//swagger:ignore
+	GetAction() string
+}
 
 // swagger:enum ContinueWithActionSetOrySessionToken
 type ContinueWithActionSetOrySessionToken string
@@ -51,6 +54,10 @@ func NewContinueWithSetToken(t string) *ContinueWithSetOrySessionToken {
 	}
 }
 
+func (c ContinueWithSetOrySessionToken) GetAction() string {
+	return string(c.Action)
+}
+
 // swagger:enum ContinueWithActionShowVerificationUI
 type ContinueWithActionShowVerificationUI string
 
@@ -75,6 +82,10 @@ type ContinueWithVerificationUI struct {
 	Flow ContinueWithVerificationUIFlow `json:"flow"`
 }
 
+func (c ContinueWithVerificationUI) GetAction() string {
+	return string(c.Action)
+}
+
 // swagger:model continueWithVerificationUiFlow
 type ContinueWithVerificationUIFlow struct {
 	// The ID of the verification flow
@@ -89,15 +100,17 @@ type ContinueWithVerificationUIFlow struct {
 
 	// The URL of the verification flow
 	//
+	// If this value is set, redirect the user's browser to this URL. This value is typically unset for native clients / API flows.
+	//
 	// required: false
 	URL string `json:"url,omitempty"`
 }
 
-func NewContinueWithVerificationUI(f Flow, address, url string) *ContinueWithVerificationUI {
+func NewContinueWithVerificationUI(id uuid.UUID, address, url string) *ContinueWithVerificationUI {
 	return &ContinueWithVerificationUI{
 		Action: ContinueWithActionShowVerificationUIString,
 		Flow: ContinueWithVerificationUIFlow{
-			ID:                f.GetID(),
+			ID:                id,
 			VerifiableAddress: address,
 			URL:               url,
 		},
@@ -134,10 +147,15 @@ type ContinueWithSettingsUI struct {
 	//
 	// required: true
 	Action ContinueWithActionShowSettingsUI `json:"action"`
-	// Flow contains the ID of the verification flow
+
+	// Flow contains the ID of the settings flow
 	//
 	// required: true
 	Flow ContinueWithSettingsUIFlow `json:"flow"`
+}
+
+func (c ContinueWithSettingsUI) GetAction() string {
+	return string(c.Action)
 }
 
 // swagger:model continueWithSettingsUiFlow
@@ -146,13 +164,21 @@ type ContinueWithSettingsUIFlow struct {
 	//
 	// required: true
 	ID uuid.UUID `json:"id"`
+
+	// The URL of the settings flow
+	//
+	// If this value is set, redirect the user's browser to this URL. This value is typically unset for native clients / API flows.
+	//
+	// required: false
+	URL string `json:"url,omitempty"`
 }
 
-func NewContinueWithSettingsUI(f Flow) *ContinueWithSettingsUI {
+func NewContinueWithSettingsUI(f Flow, redirectTo string) *ContinueWithSettingsUI {
 	return &ContinueWithSettingsUI{
 		Action: ContinueWithActionShowSettingsUIString,
 		Flow: ContinueWithSettingsUIFlow{
-			ID: f.GetID(),
+			ID:  f.GetID(),
+			URL: redirectTo,
 		},
 	}
 }
@@ -188,6 +214,8 @@ type ContinueWithRecoveryUIFlow struct {
 
 	// The URL of the recovery flow
 	//
+	// If this value is set, redirect the user's browser to this URL. This value is typically unset for native clients / API flows.
+	//
 	// required: false
 	URL string `json:"url,omitempty"`
 }
@@ -199,6 +227,44 @@ func NewContinueWithRecoveryUI(f Flow) *ContinueWithRecoveryUI {
 			ID: f.GetID(),
 		},
 	}
+}
+
+func (c ContinueWithRecoveryUI) GetAction() string {
+	return string(c.Action)
+}
+
+// swagger:enum ContinueWithActionRedirectBrowserTo
+type ContinueWithActionRedirectBrowserTo string
+
+// #nosec G101 -- only a key constant
+const (
+	ContinueWithActionRedirectBrowserToString ContinueWithActionRedirectBrowserTo = "redirect_browser_to"
+)
+
+// Indicates, that the UI flow could be continued by showing a recovery ui
+//
+// swagger:model continueWithRedirectBrowserTo
+type ContinueWithRedirectBrowserTo struct {
+	// Action will always be `redirect_browser_to`
+	//
+	// required: true
+	Action ContinueWithActionRedirectBrowserTo `json:"action"`
+
+	// The URL to redirect the browser to
+	//
+	// required: true
+	RedirectTo string `json:"redirect_browser_to"`
+}
+
+func NewContinueWithRedirectBrowserTo(redirectTo string) *ContinueWithRedirectBrowserTo {
+	return &ContinueWithRedirectBrowserTo{
+		Action:     ContinueWithActionRedirectBrowserToString,
+		RedirectTo: redirectTo,
+	}
+}
+
+func (c ContinueWithRedirectBrowserTo) GetAction() string {
+	return string(c.Action)
 }
 
 func ErrorWithContinueWith(err *herodot.DefaultError, continueWith ...ContinueWith) *herodot.DefaultError {

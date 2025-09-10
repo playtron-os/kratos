@@ -14,22 +14,25 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
+	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	"golang.org/x/exp/slices"
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/request"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/login"
@@ -42,21 +45,56 @@ import (
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/events"
 	"github.com/ory/x/jsonnetsecure"
 	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx"
+	"github.com/ory/x/otelx/semconv"
+	"github.com/ory/x/pointerx"
 	"github.com/ory/x/snapshotx"
 )
 
+var transientPayload = json.RawMessage(`{
+	"stuff": {
+		"name": "fubar",
+		"numbers": [42, 12345, 3.1415]
+	}
+}`)
+
 func TestWebHooks(t *testing.T) {
-	_, reg := internal.NewFastRegistryWithMocks(t)
+	ctx := context.Background()
+	conf, reg := internal.NewFastRegistryWithMocks(t)
 	logger := logrusx.New("kratos", "test")
+
+	conf.Set(ctx, config.ViperKeyWebhookHeaderAllowlist, []string{
+		"Accept",
+		"Accept-Encoding",
+		"Accept-Language",
+		"Content-Length",
+		"Content-Type",
+		"Origin",
+		"Priority",
+		"Referer",
+		"Sec-Ch-Ua",
+		"Sec-Ch-Ua-Mobile",
+		"Sec-Ch-Ua-Platform",
+		"Sec-Fetch-Dest",
+		"Sec-Fetch-Mode",
+		"Sec-Fetch-Site",
+		"Sec-Fetch-User",
+		"True-Client-Ip",
+		"User-Agent",
+		"Valid-Header",
+	})
+
 	whDeps := struct {
 		x.SimpleLoggerWithClient
 		*jsonnetsecure.TestProvider
+		config.Provider
 	}{
-		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
+		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(ctx), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
 		jsonnetsecure.NewTestProvider(t),
+		reg,
 	}
 	type WebHookRequest struct {
 		Body    string
@@ -64,8 +102,8 @@ func TestWebHooks(t *testing.T) {
 		Method  string
 	}
 
-	webHookEndPoint := func(whr *WebHookRequest) httprouter.Handle {
-		return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	webHookEndPoint := func(whr *WebHookRequest) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -77,14 +115,14 @@ func TestWebHooks(t *testing.T) {
 		}
 	}
 
-	webHookHttpCodeEndPoint := func(code int) httprouter.Handle {
-		return func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+	webHookHttpCodeEndPoint := func(code int) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(code)
 		}
 	}
 
-	webHookHttpCodeWithBodyEndPoint := func(t *testing.T, code int, body []byte) httprouter.Handle {
-		return func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+	webHookHttpCodeWithBodyEndPoint := func(t *testing.T, code int, body []byte) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(code)
 			_, err := w.Write(body)
 			assert.NoError(t, err, "error while returning response from webHookHttpCodeWithBodyEndPoint")
@@ -92,17 +130,17 @@ func TestWebHooks(t *testing.T) {
 	}
 
 	path := "/web_hook"
-	newServer := func(f httprouter.Handle) *httptest.Server {
-		r := httprouter.New()
+	newServer := func(f http.HandlerFunc) *httptest.Server {
+		r := http.NewServeMux()
 
-		r.Handle("CONNECT", path, f)
-		r.DELETE(path, f)
-		r.GET(path, f)
-		r.OPTIONS(path, f)
-		r.PATCH(path, f)
-		r.POST(path, f)
-		r.PUT(path, f)
-		r.Handle("TRACE", path, f)
+		r.HandleFunc("CONNECT "+path, f)
+		r.HandleFunc("DELETE "+path, f)
+		r.HandleFunc("GET "+path, f)
+		r.HandleFunc("OPTIONS "+path, f)
+		r.HandleFunc("PATCH "+path, f)
+		r.HandleFunc("POST "+path, f)
+		r.HandleFunc("PUT "+path, f)
+		r.HandleFunc("TRACE "+path, f)
 
 		ts := httptest.NewServer(r)
 		t.Cleanup(ts.Close)
@@ -110,10 +148,8 @@ func TestWebHooks(t *testing.T) {
 	}
 
 	bodyWithFlowOnly := func(req *http.Request, f flow.Flow) string {
-		h, _ := json.Marshal(req.Header)
-		return fmt.Sprintf(`{
-   					"flow_id": "%s",
-   					"headers": %s,
+		body := fmt.Sprintf(`{
+					"flow_id": "%s",
 					"method": "%s",
 					"url": "%s",
 					"cookies": {
@@ -121,31 +157,20 @@ func TestWebHooks(t *testing.T) {
 						"Some-Cookie-2": "Some-other-Cookie-Value",
 						"Some-Cookie-3": "Third-Cookie-Value"
 					}
-				}`, f.GetID(), string(h), req.Method, "http://www.ory.sh/some_end_point")
-	}
+				}`, f.GetID(), req.Method, "http://www.ory.sh/some_end_point")
+		if len(req.Header) != 0 {
+			if ua := req.Header.Get("User-Agent"); ua != "" {
+				body, _ = sjson.Set(body, "headers.User-Agent", []string{ua})
+			}
+		}
 
-	bodyWithFlowAndIdentity := func(req *http.Request, f flow.Flow, s *session.Session) string {
-		h, _ := json.Marshal(req.Header)
-		return fmt.Sprintf(`{
-   					"flow_id": "%s",
-					"identity_id": "%s",
-   					"headers": %s,
-					"method": "%s",
-					"url": "%s",
-					"cookies": {
-						"Some-Cookie-1": "Some-Cookie-Value",
-						"Some-Cookie-2": "Some-other-Cookie-Value",
-						"Some-Cookie-3": "Third-Cookie-Value"
-					}
-				}`, f.GetID(), s.Identity.ID, string(h), req.Method, "http://www.ory.sh/some_end_point")
+		return body
 	}
 
 	bodyWithFlowAndIdentityAndTransientPayload := func(req *http.Request, f flow.Flow, s *session.Session, tp json.RawMessage) string {
-		h, _ := json.Marshal(req.Header)
-		return fmt.Sprintf(`{
-   					"flow_id": "%s",
+		body := fmt.Sprintf(`{
+					"flow_id": "%s",
 					"identity_id": "%s",
-   					"headers": %s,
 					"method": "%s",
 					"url": "%s",
 					"cookies": {
@@ -154,7 +179,37 @@ func TestWebHooks(t *testing.T) {
 						"Some-Cookie-3": "Third-Cookie-Value"
 					},
 					"transient_payload": %s
-				}`, f.GetID(), s.Identity.ID, string(h), req.Method, "http://www.ory.sh/some_end_point", string(tp))
+				}`, f.GetID(), s.Identity.ID, req.Method, "http://www.ory.sh/some_end_point", string(tp))
+		if len(req.Header) != 0 {
+			if ua := req.Header.Get("User-Agent"); ua != "" {
+				body, _ = sjson.Set(body, "headers.User-Agent", []string{ua})
+			}
+		}
+
+		return body
+	}
+
+	bodyWithFlowAndIdentityAndSessionAndTransientPayload := func(req *http.Request, f flow.Flow, s *session.Session, tp json.RawMessage) string {
+		body := fmt.Sprintf(`{
+					"flow_id": "%s",
+					"identity_id": "%s",
+					"session_id": "%s",
+					"method": "%s",
+					"url": "%s",
+					"cookies": {
+						"Some-Cookie-1": "Some-Cookie-Value",
+						"Some-Cookie-2": "Some-other-Cookie-Value",
+						"Some-Cookie-3": "Third-Cookie-Value"
+					},
+					"transient_payload": %s
+				}`, f.GetID(), s.Identity.ID, s.ID, req.Method, "http://www.ory.sh/some_end_point", string(tp))
+		if len(req.Header) != 0 {
+			if ua := req.Header.Get("User-Agent"); ua != "" {
+				body, _ = sjson.Set(body, "headers.User-Agent", []string{ua})
+			}
+		}
+
+		return body
 	}
 
 	for _, tc := range []struct {
@@ -175,12 +230,12 @@ func TestWebHooks(t *testing.T) {
 		},
 		{
 			uc:         "Post Login Hook",
-			createFlow: func() flow.Flow { return &login.Flow{ID: x.NewUUID()} },
+			createFlow: func() flow.Flow { return &login.Flow{ID: x.NewUUID(), TransientPayload: transientPayload} },
 			callWebHook: func(wh *hook.WebHook, req *http.Request, f flow.Flow, s *session.Session) error {
 				return wh.ExecuteLoginPostHook(nil, req, node.PasswordGroup, f.(*login.Flow), s)
 			},
 			expectedBody: func(req *http.Request, f flow.Flow, s *session.Session) string {
-				return bodyWithFlowAndIdentity(req, f, s)
+				return bodyWithFlowAndIdentityAndSessionAndTransientPayload(req, f, s, transientPayload)
 			},
 		},
 		{
@@ -197,55 +252,45 @@ func TestWebHooks(t *testing.T) {
 			uc: "Post Registration Hook",
 			createFlow: func() flow.Flow {
 				return &registration.Flow{
-					ID: x.NewUUID(),
-					TransientPayload: json.RawMessage(`{
-					"stuff": {
-						"name": "fubar",
-						"numbers": [42, 12345, 3.1415]
-					}
-				}`),
+					ID:               x.NewUUID(),
+					TransientPayload: transientPayload,
 				}
 			},
 			callWebHook: func(wh *hook.WebHook, req *http.Request, f flow.Flow, s *session.Session) error {
 				return wh.ExecutePostRegistrationPostPersistHook(nil, req, f.(*registration.Flow), s)
 			},
 			expectedBody: func(req *http.Request, f flow.Flow, s *session.Session) string {
-				return bodyWithFlowAndIdentityAndTransientPayload(req, f, s, json.RawMessage(`{
-					"stuff": {
-						"name": "fubar",
-						"numbers": [42, 12345, 3.1415]
-					}
-				}`))
+				return bodyWithFlowAndIdentityAndTransientPayload(req, f, s, transientPayload)
 			},
 		},
 		{
 			uc:         "Post Recovery Hook",
-			createFlow: func() flow.Flow { return &recovery.Flow{ID: x.NewUUID()} },
+			createFlow: func() flow.Flow { return &recovery.Flow{ID: x.NewUUID(), TransientPayload: transientPayload} },
 			callWebHook: func(wh *hook.WebHook, req *http.Request, f flow.Flow, s *session.Session) error {
 				return wh.ExecutePostRecoveryHook(nil, req, f.(*recovery.Flow), s)
 			},
 			expectedBody: func(req *http.Request, f flow.Flow, s *session.Session) string {
-				return bodyWithFlowAndIdentity(req, f, s)
+				return bodyWithFlowAndIdentityAndTransientPayload(req, f, s, transientPayload)
 			},
 		},
 		{
 			uc:         "Post Verification Hook",
-			createFlow: func() flow.Flow { return &verification.Flow{ID: x.NewUUID()} },
+			createFlow: func() flow.Flow { return &verification.Flow{ID: x.NewUUID(), TransientPayload: transientPayload} },
 			callWebHook: func(wh *hook.WebHook, req *http.Request, f flow.Flow, s *session.Session) error {
 				return wh.ExecutePostVerificationHook(nil, req, f.(*verification.Flow), s.Identity)
 			},
 			expectedBody: func(req *http.Request, f flow.Flow, s *session.Session) string {
-				return bodyWithFlowAndIdentity(req, f, s)
+				return bodyWithFlowAndIdentityAndTransientPayload(req, f, s, transientPayload)
 			},
 		},
 		{
 			uc:         "Post Settings Hook",
-			createFlow: func() flow.Flow { return &settings.Flow{ID: x.NewUUID()} },
+			createFlow: func() flow.Flow { return &settings.Flow{ID: x.NewUUID(), TransientPayload: transientPayload} },
 			callWebHook: func(wh *hook.WebHook, req *http.Request, f flow.Flow, s *session.Session) error {
 				return wh.ExecuteSettingsPostPersistHook(nil, req, f.(*settings.Flow), s.Identity, s)
 			},
 			expectedBody: func(req *http.Request, f flow.Flow, s *session.Session) string {
-				return bodyWithFlowAndIdentity(req, f, s)
+				return bodyWithFlowAndIdentityAndTransientPayload(req, f, s, transientPayload)
 			},
 		},
 	} {
@@ -253,58 +298,43 @@ func TestWebHooks(t *testing.T) {
 		t.Run("uc="+tc.uc, func(t *testing.T) {
 			t.Parallel()
 			for _, auth := range []struct {
-				uc               string
-				createAuthConfig func() string
-				expectedHeader   func(header http.Header)
+				uc             string
+				authConfig     request.AuthConfig
+				expectedHeader func(header http.Header)
 			}{
 				{
-					uc:               "no auth",
-					createAuthConfig: func() string { return "{}" },
-					expectedHeader:   func(header http.Header) {},
+					uc:             "no auth",
+					authConfig:     request.AuthConfig{},
+					expectedHeader: func(header http.Header) {},
 				},
 				{
 					uc: "api key in header",
-					createAuthConfig: func() string {
-						return `{
-							"type": "api_key",
-							"config": {
-								"name": "My-Key",
-								"value": "My-Key-Value",
-								"in": "header"
-							}
-						}`
-					},
+					authConfig: request.AuthConfig{Type: "api_key", Config: map[string]any{
+						"name":  "My-Key",
+						"value": "My-Key-Value",
+						"in":    "header",
+					}},
 					expectedHeader: func(header http.Header) {
 						header.Set("My-Key", "My-Key-Value")
 					},
 				},
 				{
 					uc: "api key in cookie",
-					createAuthConfig: func() string {
-						return `{
-							"type": "api_key",
-							"config": {
-								"name": "My-Key",
-								"value": "My-Key-Value",
-								"in": "cookie"
-							}
-						}`
-					},
+					authConfig: request.AuthConfig{Type: "api_key", Config: map[string]any{
+						"name":  "My-Key",
+						"value": "My-Key-Value",
+						"in":    "cookie",
+					}},
 					expectedHeader: func(header http.Header) {
 						header.Set("Cookie", "My-Key=My-Key-Value")
 					},
 				},
 				{
 					uc: "basic auth",
-					createAuthConfig: func() string {
-						return `{
-							"type": "basic_auth",
-							"config": {
-								"user": "My-User",
-								"password": "Super-Secret"
-							}
-						}`
-					},
+					authConfig: request.AuthConfig{Type: "basic_auth", Config: map[string]any{
+						"user":     "My-User",
+						"password": "Super-Secret",
+					}},
 					expectedHeader: func(header http.Header) {
 						header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("My-User:Super-Secret")))
 					},
@@ -314,16 +344,19 @@ func TestWebHooks(t *testing.T) {
 					for _, method := range []string{"CONNECT", "DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT", "TRACE", "GARBAGE"} {
 						t.Run("method="+method, func(t *testing.T) {
 							f := tc.createFlow()
-							req := &http.Request{
+							req := (&http.Request{
 								Host: "www.ory.sh",
 								Header: map[string][]string{
-									"Some-Header": {"Some-Value"},
-									"Cookie":      {"Some-Cookie-1=Some-Cookie-Value; Some-Cookie-2=Some-other-Cookie-Value", "Some-Cookie-3=Third-Cookie-Value"},
+									"Some-Header":    {"Some-Value"},
+									"User-Agent":     {"Foo-Bar-Browser"},
+									"Invalid-Header": {"should be ignored"},
+									"Valid-Header":   {"should not be ignored"},
+									"Cookie":         {"Some-Cookie-1=Some-Cookie-Value; Some-Cookie-2=Some-other-Cookie-Value", "Some-Cookie-3=Third-Cookie-Value"},
 								},
 								RequestURI: "/some_end_point",
 								Method:     http.MethodPost,
 								URL:        &url.URL{Path: "/some_end_point"},
-							}
+							}).WithContext(ctx)
 							cookie, err := req.Cookie("Some-Cookie-1")
 							require.NoError(t, err)
 							require.Equal(t, cookie.Name, "Some-Cookie-1")
@@ -340,14 +373,13 @@ func TestWebHooks(t *testing.T) {
 							s := &session.Session{ID: x.NewUUID(), Identity: &identity.Identity{ID: x.NewUUID()}}
 							whr := &WebHookRequest{}
 							ts := newServer(webHookEndPoint(whr))
-							conf := json.RawMessage(fmt.Sprintf(`{
-								"url": "%s",
-								"method": "%s",
-								"body": "%s",
-								"auth": %s
-							}`, ts.URL+path, method, "file://./stub/test_body.jsonnet", auth.createAuthConfig()))
 
-							wh := hook.NewWebHook(&whDeps, conf)
+							wh := hook.NewWebHook(&whDeps, &request.Config{
+								Method:      method,
+								URL:         ts.URL + path,
+								TemplateURI: "file://./stub/test_body.jsonnet",
+								Auth:        auth.authConfig,
+							})
 
 							err = tc.callWebHook(wh, req, f, s)
 							if method == "GARBAGE" {
@@ -366,11 +398,18 @@ func TestWebHooks(t *testing.T) {
 								vals := whr.Headers.Values(k)
 								assert.Equal(t, v, vals)
 							}
+							assert.NotZero(t, whr.Headers.Get("Ory-Webhook-Request-ID"))
+							assert.NotZero(t, whr.Headers.Get("Ory-Webhook-Trigger-ID"))
 
 							if method != "TRACE" {
 								// According to the HTTP spec any request method, but TRACE is allowed to
 								// have a body. Even this is a really bad practice for some of them, like for
 								// GET
+								assert.Zero(t, gjson.Get(whr.Body, "headers.Invalid-Header"))
+								assert.NotZero(t, gjson.Get(whr.Body, "headers.Valid-Header"))
+								whr.Body, err = sjson.Delete(whr.Body, "headers.Valid-Header")
+								assert.NoError(t, err)
+
 								assert.JSONEq(t, tc.expectedBody(req, f, s), whr.Body)
 							} else {
 								assert.Emptyf(t, whr.Body, "HTTP %s is not allowed to have a body", method)
@@ -614,14 +653,13 @@ func TestWebHooks(t *testing.T) {
 					s := &session.Session{ID: x.NewUUID(), Identity: &identity.Identity{ID: x.NewUUID()}}
 					code, res := tc.webHookResponse()
 					ts := newServer(webHookHttpCodeWithBodyEndPoint(t, code, res))
-					conf := json.RawMessage(fmt.Sprintf(`{
-								"url": "%s",
-								"method": "%s",
-								"body": "%s",
-								"can_interrupt": true
-							}`, ts.URL+path, method, "file://./stub/test_body.jsonnet"))
 
-					wh := hook.NewWebHook(&whDeps, conf)
+					wh := hook.NewWebHook(&whDeps, &request.Config{
+						Method:       method,
+						URL:          ts.URL + path,
+						TemplateURI:  "file://./stub/test_body.jsonnet",
+						CanInterrupt: true,
+					})
 
 					err := tc.callWebHook(wh, req, f, s)
 					if tc.expectedError == nil {
@@ -651,8 +689,14 @@ func TestWebHooks(t *testing.T) {
 				URL:        &url.URL{Path: "some_end_point"},
 			}
 			ts := newServer(webHookHttpCodeWithBodyEndPoint(t, responseCode, response))
-			conf := json.RawMessage(fmt.Sprintf(`{"url": "%s", "method": "POST", "body": "%s", "response": {"parse":true}}`, ts.URL+path, "file://./stub/test_body.jsonnet"))
-			wh := hook.NewWebHook(&whDeps, conf)
+			wh := hook.NewWebHook(&whDeps, &request.Config{
+				Method:      "POST",
+				URL:         ts.URL + path,
+				TemplateURI: "file://./stub/test_body.jsonnet",
+				Response: request.ResponseConfig{
+					Parse: true,
+				},
+			})
 			in := &id
 			err := wh.ExecutePostRegistrationPrePersistHook(nil, req, f, in)
 			require.NoError(t, err)
@@ -662,11 +706,17 @@ func TestWebHooks(t *testing.T) {
 
 		t.Run("case=update identity fields", func(t *testing.T) {
 			expected := identity.Identity{
-				Credentials: map[identity.CredentialsType]identity.Credentials{identity.CredentialsTypePassword: {Type: "password", Identifiers: []string{"test"}, Config: []byte(`{"hashed_password":"$argon2id$v=19$m=65536,t=1,p=1$Z3JlZW5hbmRlcnNlY3JldA$Z3JlZW5hbmRlcnNlY3JldA"}`)}},
-				SchemaID:    "default",
-				SchemaURL:   "file://stub/default.schema.json",
-				State:       identity.StateActive,
-				Traits:      []byte(`{"email":"some@example.org"}`),
+				Credentials: map[identity.CredentialsType]identity.Credentials{
+					identity.CredentialsTypePassword: {
+						Type:        "password",
+						Identifiers: []string{"test"},
+						Config:      []byte(`{"hashed_password":"$argon2id$v=19$m=65536,t=1,p=1$Z3JlZW5hbmRlcnNlY3JldA$Z3JlZW5hbmRlcnNlY3JldA"}`),
+					}},
+				ExternalID: "original-external-id",
+				SchemaID:   "default",
+				SchemaURL:  "file://stub/default.schema.json",
+				State:      identity.StateActive,
+				Traits:     []byte(`{"email":"some@example.org"}`),
 				VerifiableAddresses: []identity.VerifiableAddress{{
 					Value:    "some@example.org",
 					Verified: false,
@@ -720,25 +770,17 @@ func TestWebHooks(t *testing.T) {
 				actual := run(t, expected, http.StatusOK, []byte(`{"identity":{"traits":{"email":"some@other-example.org"},"recovery_addresses":[{"value":"some@other-example.org","via":"email"}]}}`))
 				snapshotx.SnapshotT(t, &actual)
 			})
+
+			t.Run("case=identity has updated external_id", func(t *testing.T) {
+				actual := run(t, expected, http.StatusOK, []byte(`{"identity":{"external_id":"updated-external-id"}}`))
+				snapshotx.SnapshotT(t, &actual)
+			})
+
+			t.Run("case=unset external_id", func(t *testing.T) {
+				actual := run(t, expected, http.StatusOK, []byte(`{"identity":{"external_id":""}}`))
+				snapshotx.SnapshotT(t, &actual)
+			})
 		})
-	})
-
-	t.Run("must error when config is erroneous", func(t *testing.T) {
-		t.Parallel()
-		req := &http.Request{
-			Header: map[string][]string{"Some-Header": {"Some-Value"}},
-			Host:   "www.ory.sh",
-			TLS:    new(tls.ConnectionState),
-			URL:    &url.URL{Path: "/some_end_point"},
-
-			Method: http.MethodPost,
-		}
-		f := &login.Flow{ID: x.NewUUID()}
-		conf := json.RawMessage("not valid json")
-		wh := hook.NewWebHook(&whDeps, conf)
-
-		err := wh.ExecuteLoginPreHook(nil, req, f)
-		assert.Error(t, err)
 	})
 
 	t.Run("cannot have parse and ignore both set", func(t *testing.T) {
@@ -753,8 +795,15 @@ func TestWebHooks(t *testing.T) {
 			Method: http.MethodPost,
 		}
 		f := &login.Flow{ID: x.NewUUID()}
-		conf := json.RawMessage(fmt.Sprintf(`{"url": "%s", "method": "GET", "body": "./stub/test_body.jsonnet", "response": {"ignore": true, "parse": true}}`, ts.URL+path))
-		wh := hook.NewWebHook(&whDeps, conf)
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			Method:      "GET",
+			URL:         ts.URL + path,
+			TemplateURI: "./stub/test_body.jsonnet",
+			Response: request.ResponseConfig{
+				Ignore: true,
+				Parse:  true,
+			},
+		})
 
 		err := wh.ExecuteLoginPreHook(nil, req, f)
 		assert.Error(t, err)
@@ -767,7 +816,6 @@ func TestWebHooks(t *testing.T) {
 		{uc: "Post Settings Hook - parse true", parse: true},
 		{uc: "Post Settings Hook - parse false", parse: false},
 	} {
-		tc := tc
 		t.Run("uc="+tc.uc, func(t *testing.T) {
 			t.Parallel()
 			ts := newServer(webHookHttpCodeWithBodyEndPoint(t, 200, []byte(`{"identity":{"traits":{"email":"some@other-example.org"}}}`)))
@@ -780,8 +828,14 @@ func TestWebHooks(t *testing.T) {
 				Method: http.MethodPost,
 			}
 			f := &settings.Flow{ID: x.NewUUID()}
-			conf := json.RawMessage(fmt.Sprintf(`{"url": "%s", "method": "POST", "body": "%s", "response": {"parse":%t}}`, ts.URL+path, "file://./stub/test_body.jsonnet", tc.parse))
-			wh := hook.NewWebHook(&whDeps, conf)
+			wh := hook.NewWebHook(&whDeps, &request.Config{
+				Method:      "POST",
+				URL:         ts.URL + path,
+				TemplateURI: "file://./stub/test_body.jsonnet",
+				Response: request.ResponseConfig{
+					Parse: tc.parse,
+				},
+			})
 			uuid := x.NewUUID()
 			in := &identity.Identity{ID: uuid}
 			s := &session.Session{ID: x.NewUUID(), Identity: in}
@@ -811,12 +865,11 @@ func TestWebHooks(t *testing.T) {
 			Method: http.MethodPost,
 		}
 		f := &login.Flow{ID: x.NewUUID()}
-		conf := json.RawMessage(fmt.Sprintf(`{
-					"url": "%s",
-					"method": "%s",
-					"body": "%s"
-				}`, ts.URL+path, "POST", "file://./stub/bad_template.jsonnet"))
-		wh := hook.NewWebHook(&whDeps, conf)
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			Method:      "POST",
+			URL:         ts.URL + path,
+			TemplateURI: "file://./stub/bad_template.jsonnet",
+		})
 
 		err := wh.ExecuteLoginPreHook(nil, req, f)
 		assert.Error(t, err)
@@ -832,8 +885,14 @@ func TestWebHooks(t *testing.T) {
 			Method: http.MethodPost,
 		}
 		f := &login.Flow{ID: x.NewUUID()}
-		conf := json.RawMessage(fmt.Sprintf(`{"url": "%s", "method": "GET", "body": "file://./stub/bad_template.jsonnet", "response": {"ignore": true}}`, ts.URL+path))
-		wh := hook.NewWebHook(&whDeps, conf)
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			Method:      "GET",
+			URL:         ts.URL + path,
+			TemplateURI: "file://./stub/bad_template.jsonnet",
+			Response: request.ResponseConfig{
+				Ignore: true,
+			},
+		})
 
 		err := wh.ExecuteLoginPreHook(nil, req, f)
 		assert.NoError(t, err)
@@ -850,12 +909,11 @@ func TestWebHooks(t *testing.T) {
 			Method: http.MethodPost,
 		}
 		f := &login.Flow{ID: x.NewUUID()}
-		conf := json.RawMessage(`{
-	"url": "https://i-do-not-exist/",
-	"method": "POST",
-	"body": "./stub/cancel_template.jsonnet"
-}`)
-		wh := hook.NewWebHook(&whDeps, conf)
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			Method:      "POST",
+			URL:         "https://i-do-not-exist/",
+			TemplateURI: "file://./stub/cancel_template.jsonnet",
+		})
 
 		err := wh.ExecuteLoginPreHook(nil, req, f)
 		assert.NoError(t, err)
@@ -874,7 +932,7 @@ func TestWebHooks(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		waitTime := time.Millisecond * 100
-		ts := newServer(func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+		ts := newServer(func(w http.ResponseWriter, _ *http.Request) {
 			defer wg.Done()
 			time.Sleep(waitTime)
 			w.WriteHeader(http.StatusBadRequest)
@@ -888,8 +946,14 @@ func TestWebHooks(t *testing.T) {
 			Method: http.MethodPost,
 		}
 		f := &login.Flow{ID: x.NewUUID()}
-		conf := json.RawMessage(fmt.Sprintf(`{"url": "%s", "method": "GET", "body": "./stub/test_body.jsonnet", "response": {"ignore": true}}`, ts.URL+path))
-		wh := hook.NewWebHook(&whDeps, conf)
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			Method:      "GET",
+			URL:         ts.URL + path,
+			TemplateURI: "file://./stub/test_body.jsonnet",
+			Response: request.ResponseConfig{
+				Ignore: true,
+			},
+		})
 
 		start := time.Now()
 		err := wh.ExecuteLoginPreHook(nil, req, f)
@@ -907,7 +971,7 @@ func TestWebHooks(t *testing.T) {
 
 		var wg sync.WaitGroup
 		wg.Add(3) // HTTP client does 3 attempts
-		ts := newServer(func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		ts := newServer(func(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			w.WriteHeader(500)
 			_, _ = w.Write([]byte(`{"error":"some error"}`))
@@ -921,8 +985,11 @@ func TestWebHooks(t *testing.T) {
 			Method: http.MethodPost,
 		}
 		f := &login.Flow{ID: x.NewUUID()}
-		conf := json.RawMessage(fmt.Sprintf(`{"url": "%s", "method": "GET", "body": "./stub/test_body.jsonnet"}`, ts.URL+path))
-		wh := hook.NewWebHook(&whDeps, conf)
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			Method:      "GET",
+			URL:         ts.URL + path,
+			TemplateURI: "file://./stub/test_body.jsonnet",
+		})
 
 		err := wh.ExecuteLoginPreHook(nil, req, f)
 		require.Error(t, err)
@@ -956,12 +1023,11 @@ func TestWebHooks(t *testing.T) {
 				Method: http.MethodPost,
 			}
 			f := &login.Flow{ID: x.NewUUID()}
-			conf := json.RawMessage(fmt.Sprintf(`{
-					"url": "%s",
-					"method": "%s",
-					"body": "%s"
-				}`, ts.URL+path, "POST", "file://./stub/test_body.jsonnet"))
-			wh := hook.NewWebHook(&whDeps, conf)
+			wh := hook.NewWebHook(&whDeps, &request.Config{
+				Method:      "POST",
+				URL:         ts.URL + path,
+				TemplateURI: "file://./stub/test_body.jsonnet",
+			})
 
 			err := wh.ExecuteLoginPreHook(nil, req, f)
 			if tc.mustSuccess {
@@ -983,9 +1049,11 @@ func TestDisallowPrivateIPRanges(t *testing.T) {
 	whDeps := struct {
 		x.SimpleLoggerWithClient
 		*jsonnetsecure.TestProvider
+		config.Provider
 	}{
 		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
 		jsonnetsecure.NewTestProvider(t),
+		reg,
 	}
 
 	req := &http.Request{
@@ -1000,11 +1068,11 @@ func TestDisallowPrivateIPRanges(t *testing.T) {
 
 	t.Run("not allowed to call url", func(t *testing.T) {
 		t.Parallel()
-		wh := hook.NewWebHook(&whDeps, json.RawMessage(`{
-  "url": "https://localhost:1234/",
-  "method": "GET",
-  "body": "file://stub/test_body.jsonnet"
-}`))
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			URL:         "https://localhost:1234/",
+			Method:      "GET",
+			TemplateURI: "file://stub/test_body.jsonnet",
+		})
 		err := wh.ExecuteLoginPostHook(nil, req, node.DefaultGroup, f, s)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "is not a permitted destination")
@@ -1012,11 +1080,11 @@ func TestDisallowPrivateIPRanges(t *testing.T) {
 
 	t.Run("allowed to call exempt url", func(t *testing.T) {
 		t.Parallel()
-		wh := hook.NewWebHook(&whDeps, json.RawMessage(`{
-  "url": "http://localhost/exception",
-  "method": "GET",
-  "body": "file://stub/test_body.jsonnet"
-}`))
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			URL:         "http://localhost/exception",
+			Method:      "GET",
+			TemplateURI: "file://stub/test_body.jsonnet",
+		})
 		err := wh.ExecuteLoginPostHook(nil, req, node.DefaultGroup, f, s)
 		require.Error(t, err, "the target does not exist and we still receive an error")
 		require.NotContains(t, err.Error(), "is not a permitted destination", "but the error is not related to the IP range.")
@@ -1033,11 +1101,11 @@ func TestDisallowPrivateIPRanges(t *testing.T) {
 		}
 		s := &session.Session{ID: x.NewUUID(), Identity: &identity.Identity{ID: x.NewUUID()}}
 		f := &login.Flow{ID: x.NewUUID()}
-		wh := hook.NewWebHook(&whDeps, json.RawMessage(`{
-  "url": "https://www.google.com/",
-  "method": "GET",
-  "body": "http://192.168.178.0/test_body.jsonnet"
-}`))
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			URL:         "https://www.google.com/",
+			Method:      "GET",
+			TemplateURI: "http://192.168.178.0/test_body.jsonnet",
+		})
 		err := wh.ExecuteLoginPostHook(nil, req, node.DefaultGroup, f, s)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "is not a permitted destination")
@@ -1053,9 +1121,11 @@ func TestAsyncWebhook(t *testing.T) {
 	whDeps := struct {
 		x.SimpleLoggerWithClient
 		*jsonnetsecure.TestProvider
+		config.Provider
 	}{
 		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
 		jsonnetsecure.NewTestProvider(t),
+		reg,
 	}
 
 	req := &http.Request{
@@ -1086,19 +1156,18 @@ func TestAsyncWebhook(t *testing.T) {
 	}))
 	t.Cleanup(webhookReceiver.Close)
 
-	wh := hook.NewWebHook(&whDeps, json.RawMessage(fmt.Sprintf(`
-		{
-			"url": %q,
-			"method": "GET",
-			"body": "file://stub/test_body.jsonnet",
-			"response": {
-				"ignore": true
-			}
-		}`, webhookReceiver.URL)))
+	wh := hook.NewWebHook(&whDeps, &request.Config{
+		URL:         webhookReceiver.URL,
+		Method:      "GET",
+		TemplateURI: "file://stub/test_body.jsonnet",
+		Response: request.ResponseConfig{
+			Ignore: true,
+		},
+	})
 	err := wh.ExecuteLoginPostHook(nil, req, node.DefaultGroup, f, s)
 	require.NoError(t, err) // execution returns immediately for async webhook
 	select {
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for webhook request to reach test handler")
 	case <-handlerEntered:
 		// ok
@@ -1133,9 +1202,11 @@ func TestWebhookEvents(t *testing.T) {
 	whDeps := struct {
 		x.SimpleLoggerWithClient
 		*jsonnetsecure.TestProvider
+		config.Provider
 	}{
 		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
 		jsonnetsecure.NewTestProvider(t),
+		reg,
 	}
 
 	req := &http.Request{
@@ -1145,8 +1216,6 @@ func TestWebhookEvents(t *testing.T) {
 		URL:    &url.URL{Path: "/some_end_point"},
 		Method: http.MethodPost,
 	}
-	s := &session.Session{ID: x.NewUUID(), Identity: &identity.Identity{ID: x.NewUUID()}}
-	_ = s
 	f := &login.Flow{ID: x.NewUUID()}
 
 	webhookReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1154,23 +1223,34 @@ func TestWebhookEvents(t *testing.T) {
 			w.WriteHeader(200)
 			w.Write([]byte("ok"))
 		} else {
-			w.WriteHeader(400)
+			w.WriteHeader(500)
 			w.Write([]byte("fail"))
 		}
 	}))
 	t.Cleanup(webhookReceiver.Close)
 
-	t.Run("success", func(t *testing.T) {
-		wh := hook.NewWebHook(&whDeps, json.RawMessage(fmt.Sprintf(`
-		{
-			"url": %q,
-			"method": "GET",
-			"body": "file://stub/test_body.jsonnet",
-			"response": {
-				"ignore": false,
-				"parse": false
+	getAttributes := func(attrs []attribute.KeyValue) (webhookID, triggerID, requestID string) {
+		for _, kv := range attrs {
+			switch semconv.AttributeKey(kv.Key) {
+			case events.AttributeKeyWebhookID:
+				webhookID = kv.Value.Emit()
+			case events.AttributeKeyWebhookTriggerID:
+				triggerID = kv.Value.Emit()
+			case events.AttributeKeyWebhookRequestID:
+				requestID = kv.Value.Emit()
 			}
-		}`, webhookReceiver.URL+"/ok")))
+		}
+		return
+	}
+
+	t.Run("success", func(t *testing.T) {
+		whID := x.NewUUID()
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			ID:          whID.String(),
+			URL:         webhookReceiver.URL + "/ok",
+			Method:      "GET",
+			TemplateURI: "file://stub/test_body.jsonnet",
+		})
 
 		recorder := tracetest.NewSpanRecorder()
 		tracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)).Tracer("test")
@@ -1184,39 +1264,40 @@ func TestWebhookEvents(t *testing.T) {
 		ended := recorder.Ended()
 		require.NotEmpty(t, ended)
 
-		i := slices.IndexFunc(ended, func(sp sdktrace.ReadOnlySpan) bool {
-			return sp.Name() == "selfservice.webhook"
-		})
+		i := slices.IndexFunc(ended, func(sp sdktrace.ReadOnlySpan) bool { return sp.Name() == "selfservice.webhook" })
 		require.GreaterOrEqual(t, i, 0)
 
-		events := ended[i].Events()
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
-			return ev.Name == "WebhookDelivered"
-		})
+		evs := ended[i].Events()
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool { return ev.Name == events.WebhookDelivered.String() })
 		require.GreaterOrEqual(t, i, 0)
 
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
-			return ev.Name == "WebhookSucceeded"
-		})
+		actualWhID, deliveredTriggerID, deliveredRequestID := getAttributes(evs[i].Attributes)
+		require.Equal(t, whID.String(), actualWhID)
+		require.NotEmpty(t, deliveredTriggerID)
+		require.NotEmpty(t, deliveredRequestID)
+		assert.NotEqual(t, deliveredTriggerID, deliveredRequestID)
+
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool { return ev.Name == events.WebhookSucceeded.String() })
 		require.GreaterOrEqual(t, i, 0)
 
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
-			return ev.Name == "WebhookFailed"
-		})
+		actualWhID, succeededTriggerID, _ := getAttributes(evs[i].Attributes)
+		require.Equal(t, whID.String(), actualWhID)
+		require.NotEmpty(t, succeededTriggerID)
+
+		assert.Equal(t, deliveredTriggerID, succeededTriggerID)
+
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool { return ev.Name == events.WebhookFailed.String() })
 		require.Equal(t, -1, i)
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		wh := hook.NewWebHook(&whDeps, json.RawMessage(fmt.Sprintf(`
-		{
-			"url": %q,
-			"method": "GET",
-			"body": "file://stub/test_body.jsonnet",
-			"response": {
-				"ignore": false,
-				"parse": false
-			}
-		}`, webhookReceiver.URL+"/fail")))
+		whID := x.NewUUID()
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			ID:          whID.String(),
+			URL:         webhookReceiver.URL + "/fail",
+			Method:      "GET",
+			TemplateURI: "file://stub/test_body.jsonnet",
+		})
 
 		recorder := tracetest.NewSpanRecorder()
 		tracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)).Tracer("test")
@@ -1229,40 +1310,50 @@ func TestWebhookEvents(t *testing.T) {
 		ended := recorder.Ended()
 		require.NotEmpty(t, ended)
 
-		i := slices.IndexFunc(ended, func(sp sdktrace.ReadOnlySpan) bool {
-			return sp.Name() == "selfservice.webhook"
-		})
+		i := slices.IndexFunc(ended, func(sp sdktrace.ReadOnlySpan) bool { return sp.Name() == "selfservice.webhook" })
 		require.GreaterOrEqual(t, i, 0)
 
-		events := ended[i].Events()
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
-			return ev.Name == "WebhookDelivered"
-		})
+		evs := ended[i].Events()
+
+		var deliveredEvents []sdktrace.Event
+		deliveredTriggerIDs := map[string]struct{}{}
+		deliveredRequestIDs := map[string]struct{}{}
+		for _, ev := range evs {
+			if ev.Name == events.WebhookDelivered.String() {
+				deliveredEvents = append(deliveredEvents, ev)
+				actualWhID, triggerID, requestID := getAttributes(ev.Attributes)
+				require.Equal(t, whID.String(), actualWhID)
+				require.NotEmpty(t, triggerID)
+				require.NotEmpty(t, requestID)
+				deliveredTriggerIDs[triggerID] = struct{}{}
+				deliveredRequestIDs[requestID] = struct{}{}
+			}
+		}
+
+		assert.Len(t, deliveredEvents, 3)
+		assert.Len(t, deliveredTriggerIDs, 1)
+		assert.Len(t, deliveredRequestIDs, 3)
+
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool { return ev.Name == "WebhookFailed" })
 		require.GreaterOrEqual(t, i, 0)
 
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
-			return ev.Name == "WebhookFailed"
-		})
-		require.GreaterOrEqual(t, i, 0)
+		actualWhID, failedTriggerID, _ := getAttributes(evs[i].Attributes)
+		require.Equal(t, whID.String(), actualWhID)
+		require.NotEmpty(t, failedTriggerID)
 
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
-			return ev.Name == "WebhookSucceeded"
-		})
+		assert.Contains(t, deliveredTriggerIDs, failedTriggerID)
+
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool { return ev.Name == "WebhookSucceeded" })
 		require.Equal(t, i, -1)
 	})
 
 	t.Run("event disabled", func(t *testing.T) {
-		wh := hook.NewWebHook(&whDeps, json.RawMessage(fmt.Sprintf(`
-		{
-			"url": %q,
-			"method": "GET",
-			"body": "file://stub/test_body.jsonnet",
-			"response": {
-				"ignore": false,
-				"parse": false
-			},
-			"emit_analytics_event": false
-		}`, webhookReceiver.URL+"/fail")))
+		wh := hook.NewWebHook(&whDeps, &request.Config{
+			URL:                webhookReceiver.URL + "/fail",
+			Method:             "GET",
+			TemplateURI:        "file://stub/test_body.jsonnet",
+			EmitAnalyticsEvent: pointerx.Ptr(false),
+		})
 
 		recorder := tracetest.NewSpanRecorder()
 		tracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)).Tracer("test")
@@ -1280,20 +1371,56 @@ func TestWebhookEvents(t *testing.T) {
 		})
 		require.GreaterOrEqual(t, i, 0)
 
-		events := ended[i].Events()
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
+		evs := ended[i].Events()
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool {
 			return ev.Name == "WebhookDelivered"
 		})
 		require.Equal(t, -1, i)
 
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool {
 			return ev.Name == "WebhookFailed"
 		})
 		require.Equal(t, -1, i)
 
-		i = slices.IndexFunc(events, func(ev sdktrace.Event) bool {
+		i = slices.IndexFunc(evs, func(ev sdktrace.Event) bool {
 			return ev.Name == "WebhookSucceeded"
 		})
 		require.Equal(t, i, -1)
+	})
+}
+
+func TestRemoveDisallowedHeaders(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty http headers", func(t *testing.T) {
+		headers := http.Header{}
+		allowList := []string{"Content-Type", "Host"}
+		newHeaders := hook.RemoveDisallowedHeaders(headers, allowList)
+
+		require.Len(t, newHeaders, 0)
+	})
+	t.Run("empty allow list", func(t *testing.T) {
+		headers := http.Header{"Accept": {"application/json"}, "Content-Type": {"text/html"}}
+		allowList := []string{}
+		newHeaders := hook.RemoveDisallowedHeaders(headers, allowList)
+
+		require.Len(t, newHeaders, 0)
+	})
+	t.Run("all forbidden", func(t *testing.T) {
+		headers := http.Header{"Accept": {"application/json"}, "Authorization": {"Bearer foo"}}
+		allowList := []string{"Content-Type", "Host"}
+		newHeaders := hook.RemoveDisallowedHeaders(headers, allowList)
+
+		require.Len(t, newHeaders, 0)
+	})
+	t.Run("general case", func(t *testing.T) {
+		headers := http.Header{"Accept": {"application/json"}, "Content-Type": {"text/html"}}
+		allowList := []string{"Content-Type", "Host"}
+		newHeaders := hook.RemoveDisallowedHeaders(headers, allowList)
+
+		require.Len(t, newHeaders, 1)
+		h, present := newHeaders["Content-Type"]
+		require.True(t, present)
+		require.Equal(t, []string{"text/html"}, h)
 	})
 }

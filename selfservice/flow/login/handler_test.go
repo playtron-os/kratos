@@ -14,42 +14,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
-	"github.com/pkg/errors"
-
-	"github.com/ory/x/urlx"
-
-	"github.com/ory/x/sqlxx"
-
-	"github.com/ory/kratos/hydra"
-	"github.com/ory/kratos/selfservice/flow"
-	"github.com/ory/kratos/selfservice/strategy/totp"
-	"github.com/ory/kratos/session"
-
-	stdtotp "github.com/pquerna/otp/totp"
-
-	"github.com/ory/kratos/ui/container"
-
-	"github.com/ory/kratos/text"
-
 	"github.com/gobuffalo/httptest"
 	"github.com/gofrs/uuid"
-
-	"github.com/ory/kratos/corpx"
-
+	"github.com/pkg/errors"
+	stdtotp "github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
-	"github.com/ory/x/assertx"
-
+	"github.com/ory/kratos/corpx"
 	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/hydra"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/internal"
 	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/login"
 	"github.com/ory/kratos/selfservice/flow/settings"
+	"github.com/ory/kratos/selfservice/strategy/totp"
+	"github.com/ory/kratos/text"
+	"github.com/ory/kratos/ui/container"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/x/assertx"
+	"github.com/ory/x/sqlxx"
+	"github.com/ory/x/urlx"
 )
 
 func init() {
@@ -59,15 +48,21 @@ func init() {
 func TestFlowLifecycle(t *testing.T) {
 	ctx := context.Background()
 	conf, reg := internal.NewFastRegistryWithMocks(t)
-	reg.WithHydra(hydra.NewFake())
-	router := x.NewRouterPublic()
-	ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin())
+	reg.SetHydra(hydra.NewFake())
+	router := x.NewRouterPublic(reg)
+	ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
 	loginTS := testhelpers.NewLoginUIFlowEchoServer(t, reg)
 
 	errorTS := testhelpers.NewErrorTestServer(t, reg)
 	conf.MustSet(ctx, config.ViperKeySelfServiceBrowserDefaultReturnTo, "https://www.ory.sh")
 
-	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/password.schema.json")
+	conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
+		{ID: "default", URL: "file://./stub/password.schema.json"},
+		{ID: "email", URL: "file://./stub/email.schema.json", SelfserviceSelectable: true},
+		{ID: "phone", URL: "file://./stub/phone.schema.json", SelfserviceSelectable: true},
+		{ID: "not-allowed", URL: "file://./stub/password.schema.json"},
+	})
+	conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "default")
 
 	assertion := func(body []byte, isForced, isApi bool) {
 		r := gjson.GetBytes(body, "refresh")
@@ -87,7 +82,7 @@ func TestFlowLifecycle(t *testing.T) {
 		}
 		req := testhelpers.NewTestHTTPRequest(t, "GET", ts.URL+route, nil)
 		req.URL.RawQuery = extQuery.Encode()
-		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router.Router, req)
+		body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router, req)
 		if isAPI {
 			assert.Len(t, res.Header.Get("Set-Cookie"), 0)
 		}
@@ -222,7 +217,7 @@ func TestFlowLifecycle(t *testing.T) {
 					require.NoError(t, reg.LoginFlowPersister().CreateLoginFlow(context.Background(), &f))
 
 					hc := testhelpers.NewClientWithCookies(t)
-					res, err := hc.PostForm(ts.URL+login.RouteSubmitFlow+"?flow="+f.ID.String(), url.Values{"method": {"password"}, "password_identifier": {id1mail}, "password": {"foobar"}, "csrf_token": {x.FakeCSRFToken}})
+					res, err := hc.PostForm(ts.URL+login.RouteSubmitFlow+"?flow="+f.ID.String(), url.Values{"method": {"password"}, "password_identifier": {id1mail}, "password": {"foobar"}, "csrf_token": {nosurfx.FakeCSRFToken}})
 					require.NoError(t, err)
 					firstSession := x.MustReadAll(res.Body)
 					require.NoError(t, res.Body.Close())
@@ -230,7 +225,7 @@ func TestFlowLifecycle(t *testing.T) {
 					f = login.Flow{Type: tt, ExpiresAt: time.Now().Add(time.Minute), IssuedAt: time.Now(), UI: container.New(""), Refresh: true, RequestedAAL: "aal1"}
 					require.NoError(t, reg.LoginFlowPersister().CreateLoginFlow(context.Background(), &f))
 
-					vv := testhelpers.EncodeFormAsJSON(t, tt == flow.TypeAPI, url.Values{"method": {"password"}, "password_identifier": {id2mail}, "password": {"foobar"}, "csrf_token": {x.FakeCSRFToken}})
+					vv := testhelpers.EncodeFormAsJSON(t, tt == flow.TypeAPI, url.Values{"method": {"password"}, "password_identifier": {id2mail}, "password": {"foobar"}, "csrf_token": {nosurfx.FakeCSRFToken}})
 
 					req, err := http.NewRequest("POST", ts.URL+login.RouteSubmitFlow+"?flow="+f.ID.String(), strings.NewReader(vv))
 					require.NoError(t, err)
@@ -285,7 +280,7 @@ func TestFlowLifecycle(t *testing.T) {
 
 					// Submit Login
 					hc := testhelpers.NewClientWithCookies(t)
-					res, err := hc.PostForm(ts.URL+login.RouteSubmitFlow+"?flow="+f.ID.String(), url.Values{"method": {"password"}, "password_identifier": {id1mail}, "password": {"foobar"}, "csrf_token": {x.FakeCSRFToken}})
+					res, err := hc.PostForm(ts.URL+login.RouteSubmitFlow+"?flow="+f.ID.String(), url.Values{"method": {"password"}, "password_identifier": {id1mail}, "password": {"foobar"}, "csrf_token": {nosurfx.FakeCSRFToken}})
 					require.NoError(t, err)
 
 					// Check response and session cookie presence
@@ -307,7 +302,7 @@ func TestFlowLifecycle(t *testing.T) {
 					f = login.Flow{Type: flow.TypeBrowser, ExpiresAt: time.Now().Add(time.Minute), IssuedAt: time.Now(), UI: container.New(""), Refresh: true, RequestedAAL: "aal1"}
 					require.NoError(t, reg.LoginFlowPersister().CreateLoginFlow(context.Background(), &f))
 
-					vv := testhelpers.EncodeFormAsJSON(t, false, url.Values{"method": {"password"}, "password_identifier": {id1mail}, "password": {"foobar"}, "csrf_token": {x.FakeCSRFToken}})
+					vv := testhelpers.EncodeFormAsJSON(t, false, url.Values{"method": {"password"}, "password_identifier": {id1mail}, "password": {"foobar"}, "csrf_token": {nosurfx.FakeCSRFToken}})
 
 					req, err = http.NewRequest("POST", ts.URL+login.RouteSubmitFlow+"?flow="+f.ID.String(), strings.NewReader(vv))
 					require.NoError(t, err)
@@ -353,7 +348,7 @@ func TestFlowLifecycle(t *testing.T) {
 				require.NoError(t, err)
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-				body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router.Router, req)
+				body, res := testhelpers.MockMakeAuthenticatedRequest(t, reg, conf, router, req)
 				return string(body), res
 			}
 
@@ -457,8 +452,8 @@ func TestFlowLifecycle(t *testing.T) {
 			})
 			require.NoError(t, reg.IdentityManager().Update(context.Background(), id, identity.ManagerAllowWriteProtectedTraits))
 
-			h := func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-				sess, err := session.NewActiveSession(r, id, reg.Config(), time.Now().UTC(), identity.CredentialsTypePassword, identity.AuthenticatorAssuranceLevel1)
+			h := func(w http.ResponseWriter, r *http.Request) {
+				sess, err := testhelpers.NewActiveSession(r, reg, id, time.Now().UTC(), identity.CredentialsTypePassword, identity.AuthenticatorAssuranceLevel1)
 				require.NoError(t, err)
 				sess.AuthenticatorAssuranceLevel = identity.AuthenticatorAssuranceLevel1
 				require.NoError(t, reg.SessionPersister().UpsertSession(context.Background(), sess))
@@ -538,6 +533,56 @@ func TestFlowLifecycle(t *testing.T) {
 	})
 
 	t.Run("lifecycle=init", func(t *testing.T) {
+		t.Run("suite=identity schema in query", func(t *testing.T) {
+			for _, tc := range []struct {
+				name           string
+				query          url.Values
+				wantErr        bool
+				wantIdentifier string
+			}{{
+				name:    "not-allowed",
+				query:   url.Values{"identity_schema": {"not-allowed"}},
+				wantErr: true,
+			}, {
+				name:    "not-found",
+				query:   url.Values{"identity_schema": {"not-found"}},
+				wantErr: true,
+			}, {
+				name:           "phone",
+				query:          url.Values{"identity_schema": {"phone"}},
+				wantIdentifier: "Phone Number",
+			}, {
+				name:           "email",
+				query:          url.Values{"identity_schema": {"email"}},
+				wantIdentifier: "E-Mail Address",
+			}, {
+				name:           "default",
+				query:          url.Values{"identity_schema": {"default"}},
+				wantIdentifier: "Username",
+			}} {
+				t.Run("case="+tc.name, func(t *testing.T) {
+					t.Run("flow=api", func(t *testing.T) {
+						res, body := initFlow(t, tc.query, true)
+						if tc.wantErr {
+							assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+							return
+						}
+						assert.Equalf(t, tc.wantIdentifier, gjson.GetBytes(body, "ui.nodes.#(attributes.name==identifier).meta.label.text").String(), "%s", body)
+					})
+
+					t.Run("flow=browser", func(t *testing.T) {
+						res, body := initFlow(t, tc.query, false)
+						if tc.wantErr {
+							require.Contains(t, res.Request.URL.String(), errorTS.URL, "%s", body)
+							assert.EqualValues(t, "Bad Request", gjson.GetBytes(body, "status").String(), "%s", body)
+							return
+						}
+						assert.Equalf(t, tc.wantIdentifier, gjson.GetBytes(body, "ui.nodes.#(attributes.name==identifier).meta.label.context.title").String(), "%s", body)
+					})
+				})
+			}
+		})
+
 		t.Run("flow=api", func(t *testing.T) {
 			t.Run("case=does not set forced flag on unauthenticated request", func(t *testing.T) {
 				res, body := initFlow(t, url.Values{}, true)
@@ -546,10 +591,21 @@ func TestFlowLifecycle(t *testing.T) {
 				assert.Empty(t, gjson.GetBytes(body, "session_token_exchange_code").String())
 			})
 
-			t.Run("case=returns session exchange code", func(t *testing.T) {
-				res, body := initFlow(t, urlx.ParseOrPanic("/?return_session_token_exchange_code=true").Query(), true)
-				assert.Contains(t, res.Request.URL.String(), login.RouteInitAPIFlow)
-				assert.NotEmpty(t, gjson.GetBytes(body, "session_token_exchange_code").String())
+			t.Run("case=returns session exchange code with any truthy value", func(t *testing.T) {
+				conf.MustSet(ctx, config.ViperKeyURLsAllowedReturnToDomains, []string{"https://www.ory.sh", "https://example.com"})
+				parameters := []string{"true", "True", "1"}
+
+				for _, param := range parameters {
+					t.Run("return_session_token_exchange_code="+param, func(t *testing.T) {
+						res, body := initFlow(t, url.Values{
+							"return_session_token_exchange_code": {param},
+							"return_to":                          {"https://example.com/redirect"},
+						}, true)
+						assert.Contains(t, res.Request.URL.String(), login.RouteInitAPIFlow)
+						assert.NotEmpty(t, gjson.GetBytes(body, "session_token_exchange_code").String())
+						assert.Equal(t, "https://example.com/redirect", gjson.GetBytes(body, "return_to").String())
+					})
+				}
 			})
 
 			t.Run("case=can not request refresh and aal at the same time on unauthenticated request", func(t *testing.T) {
@@ -787,6 +843,7 @@ func TestFlowLifecycle(t *testing.T) {
 				testhelpers.GetSelfServiceRedirectLocation(t, ts.URL+login.RouteInitBrowserFlow),
 			)
 		})
+
 	})
 }
 
@@ -798,6 +855,12 @@ func TestGetFlow(t *testing.T) {
 	_ = testhelpers.NewRedirTS(t, "", conf)
 
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/password.schema.json")
+	conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
+		{ID: "default", URL: "file://./stub/password.schema.json"},
+		{ID: "email", URL: "file://./stub/email.schema.json", SelfserviceSelectable: true},
+		{ID: "phone", URL: "file://./stub/phone.schema.json", SelfserviceSelectable: true},
+		{ID: "not-allowed", URL: "file://./stub/password.schema.json"},
+	})
 
 	setupLoginUI := func(t *testing.T, c *http.Client) *httptest.Server {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -833,7 +896,7 @@ func TestGetFlow(t *testing.T) {
 		setupLoginUI(t, client)
 		body := testhelpers.EasyGetBody(t, client, public.URL+login.RouteInitBrowserFlow)
 
-		assert.EqualValues(t, x.ErrInvalidCSRFToken.ReasonField, gjson.GetBytes(body, "error.reason").String(), "%s", body)
+		assert.EqualValues(t, nosurfx.ErrInvalidCSRFToken.ReasonField, gjson.GetBytes(body, "error.reason").String(), "%s", body)
 	})
 
 	t.Run("case=expired", func(t *testing.T) {
@@ -853,13 +916,13 @@ func TestGetFlow(t *testing.T) {
 		assert.Equal(t, public.URL+login.RouteInitBrowserFlow, gjson.GetBytes(body, "error.details.redirect_to").String(), "%s", body)
 	})
 
-	t.Run("case=expired with return_to", func(t *testing.T) {
+	t.Run("case=expired with return_to and schema_id", func(t *testing.T) {
 		returnTo := "https://www.ory.sh"
 		conf.MustSet(ctx, config.ViperKeyURLsAllowedReturnToDomains, []string{returnTo})
 
 		client := testhelpers.NewClientWithCookies(t)
 		setupLoginUI(t, client)
-		body := testhelpers.EasyGetBody(t, client, public.URL+login.RouteInitBrowserFlow+"?return_to="+returnTo)
+		body := testhelpers.EasyGetBody(t, client, public.URL+login.RouteInitBrowserFlow+"?return_to="+returnTo+"&identity_schema=email")
 
 		// Expire the flow
 		f, err := reg.LoginFlowPersister().GetLoginFlow(context.Background(), uuid.FromStringOrNil(gjson.GetBytes(body, "id").String()))
@@ -882,7 +945,7 @@ func TestGetFlow(t *testing.T) {
 
 		f, err = reg.LoginFlowPersister().GetLoginFlow(context.Background(), uuid.FromStringOrNil(gjson.GetBytes(resBody, "id").String()))
 		require.NoError(t, err)
-		assert.Equal(t, public.URL+login.RouteInitBrowserFlow+"?return_to="+returnTo, f.RequestURL)
+		assert.Equal(t, public.URL+login.RouteInitBrowserFlow+"?return_to="+returnTo+"&identity_schema=email", f.RequestURL)
 	})
 
 	t.Run("case=not found", func(t *testing.T) {

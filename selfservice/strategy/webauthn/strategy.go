@@ -6,6 +6,9 @@ package webauthn
 import (
 	"context"
 	"encoding/json"
+	"strings"
+
+	"github.com/ory/kratos/x/nosurfx"
 
 	"github.com/pkg/errors"
 
@@ -32,8 +35,9 @@ var (
 type webauthnStrategyDependencies interface {
 	x.LoggingProvider
 	x.WriterProvider
-	x.CSRFTokenGeneratorProvider
-	x.CSRFProvider
+	nosurfx.CSRFTokenGeneratorProvider
+	nosurfx.CSRFProvider
+	x.TracingProvider
 
 	config.Provider
 
@@ -73,33 +77,44 @@ type Strategy struct {
 	hd *decoderx.HTTP
 }
 
-func NewStrategy(d any) *Strategy {
+func NewStrategy(d webauthnStrategyDependencies) *Strategy {
 	return &Strategy{
-		d:  d.(webauthnStrategyDependencies),
+		d:  d,
 		hd: decoderx.NewHTTP(),
 	}
 }
 
-func (s *Strategy) CountActiveMultiFactorCredentials(cc map[identity.CredentialsType]identity.Credentials) (count int, err error) {
+func (s *Strategy) CountActiveMultiFactorCredentials(_ context.Context, cc map[identity.CredentialsType]identity.Credentials) (count int, err error) {
 	return s.countCredentials(cc, false)
 }
 
-func (s *Strategy) CountActiveFirstFactorCredentials(cc map[identity.CredentialsType]identity.Credentials) (count int, err error) {
+func (s *Strategy) CountActiveFirstFactorCredentials(_ context.Context, cc map[identity.CredentialsType]identity.Credentials) (count int, err error) {
 	return s.countCredentials(cc, true)
 }
 
-func (s *Strategy) countCredentials(cc map[identity.CredentialsType]identity.Credentials, passwordless bool) (count int, err error) {
+func (s *Strategy) countCredentials(cc map[identity.CredentialsType]identity.Credentials, onlyPasswordlessCredentials bool) (count int, err error) {
 	for _, c := range cc {
-		if c.Type == s.ID() && len(c.Config) > 0 && len(c.Identifiers) > 0 {
+		if c.Type == s.ID() && len(c.Config) > 0 {
 			var conf identity.CredentialsWebAuthnConfig
 			if err = json.Unmarshal(c.Config, &conf); err != nil {
 				return 0, errors.WithStack(err)
 			}
 
-			for _, c := range conf.Credentials {
-				if c.IsPasswordless == passwordless {
-					count++
+			for _, cred := range conf.Credentials {
+				if cred.IsPasswordless && len(strings.Join(c.Identifiers, "")) == 0 {
+					// If this is a passwordless credential, it will only work if the identifier is set, as
+					// we use the identifier to look up the identity. If the identifier is not set, we can
+					// assume that the user can't sign in using this method.
+					continue
 				}
+
+				if cred.IsPasswordless != onlyPasswordlessCredentials {
+					continue
+				}
+
+				// If the credential is passwordless and we require passwordless credentials, or if the credential is not
+				// passwordless and we require non-passwordless credentials, we count it.
+				count++
 			}
 		}
 	}
@@ -114,7 +129,7 @@ func (s *Strategy) NodeGroup() node.UiNodeGroup {
 	return node.WebAuthnGroup
 }
 
-func (s *Strategy) CompletedAuthenticationMethod(ctx context.Context, _ session.AuthenticationMethods) session.AuthenticationMethod {
+func (s *Strategy) CompletedAuthenticationMethod(ctx context.Context) session.AuthenticationMethod {
 	aal := identity.AuthenticatorAssuranceLevel1
 	if !s.d.Config().WebAuthnForPasswordless(ctx) {
 		aal = identity.AuthenticatorAssuranceLevel2

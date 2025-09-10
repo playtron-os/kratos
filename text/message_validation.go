@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ory/x/stringslice"
+
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
-
-	"golang.org/x/exp/maps"
 )
 
 func NewValidationErrorGeneric(reason string) *Message {
@@ -240,6 +240,14 @@ func NewErrorValidationPasswordMaxLength(maxLength, actualLength int) *Message {
 	}
 }
 
+func NewErrorValidationPasswordNewSameAsOld() *Message {
+	return &Message{
+		ID:   ErrorValidationPasswordNewSameAsOld,
+		Text: "The new password must be different from the old password.",
+		Type: Error,
+	}
+}
+
 func NewErrorValidationPasswordTooManyBreaches(breaches int64) *Message {
 	return &Message{
 		ID:   ErrorValidationPasswordTooManyBreaches,
@@ -255,6 +263,14 @@ func NewErrorValidationInvalidCredentials() *Message {
 	return &Message{
 		ID:   ErrorValidationInvalidCredentials,
 		Text: "The provided credentials are invalid, check for spelling mistakes in your password or username, email address, or phone number.",
+		Type: Error,
+	}
+}
+
+func NewErrorValidationAccountNotFound() *Message {
+	return &Message{
+		ID:   ErrorValidationAccountNotFound,
+		Text: "This account does not exist or has no login method configured.",
 		Type: Error,
 	}
 }
@@ -279,25 +295,34 @@ func NewErrorValidationDuplicateCredentialsWithHints(availableCredentialTypes []
 
 	reason := fmt.Sprintf("You tried signing in with %s which is already in use by another account.", identifier)
 	if len(availableCredentialTypes) > 0 {
-		humanReadable := make(map[string]struct{}, len(availableCredentialTypes))
+		humanReadable := make([]string, 0, len(availableCredentialTypes))
 		for _, cred := range availableCredentialTypes {
 			switch cred {
 			case "password":
-				humanReadable["your password"] = struct{}{}
-			case "oidc":
-				humanReadable["social sign in"] = struct{}{}
+				humanReadable = append(humanReadable, "your password")
+			case "oidc", "saml":
+				humanReadable = append(humanReadable, "social sign in")
 			case "webauthn":
-				humanReadable["your PassKey or a security key"] = struct{}{}
+				humanReadable = append(humanReadable, "your passkey or a security key")
+			case "passkey":
+				humanReadable = append(humanReadable, "your passkey")
 			}
 		}
 		if len(humanReadable) == 0 {
 			// show at least some hint
 			// also our example message generation tool runs into this case
-			for _, cred := range availableCredentialTypes {
-				humanReadable[cred] = struct{}{}
-			}
+			humanReadable = append(humanReadable, availableCredentialTypes...)
 		}
-		reason += fmt.Sprintf(" You can sign in using %s.", strings.Join(maps.Keys(humanReadable), ", "))
+
+		humanReadable = stringslice.Unique(humanReadable)
+
+		// Final format: "You can sign in using foo, bar, or baz."
+		if len(humanReadable) > 1 {
+			humanReadable[len(humanReadable)-1] = "or " + humanReadable[len(humanReadable)-1]
+		}
+		if len(humanReadable) > 0 {
+			reason += fmt.Sprintf(" You can sign in using %s.", strings.Join(humanReadable, ", "))
+		}
 	}
 	if len(oidcProviders) > 0 {
 		reason += fmt.Sprintf(" You can sign in using one of the following social sign in providers: %s.", strings.Join(oidcProviders, ", "))
@@ -408,6 +433,14 @@ func NewErrorValidationTraitsMismatch() *Message {
 	return &Message{
 		ID:   ErrorValidationTraitsMismatch,
 		Text: "The provided traits do not match the traits previously associated with this flow.",
+		Type: Error,
+	}
+}
+
+func NewErrorCaptchaFailed() *Message {
+	return &Message{
+		ID:   ErrorValidationCaptchaError,
+		Text: "Captcha verification failed, please try again.",
 		Type: Error,
 	}
 }

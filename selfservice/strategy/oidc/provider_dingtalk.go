@@ -25,6 +25,8 @@ type ProviderDingTalk struct {
 	reg    Dependencies
 }
 
+var _ OAuth2Provider = (*ProviderDingTalk)(nil)
+
 func NewProviderDingTalk(
 	config *Configuration,
 	reg Dependencies,
@@ -65,7 +67,7 @@ func (g *ProviderDingTalk) OAuth2(ctx context.Context) (*oauth2.Config, error) {
 	return g.oauth2(ctx), nil
 }
 
-func (g *ProviderDingTalk) Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+func (g *ProviderDingTalk) ExchangeOAuth2Token(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
 	conf, err := g.OAuth2(ctx)
 	if err != nil {
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))

@@ -5,9 +5,11 @@ package code
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strings"
+
+	"github.com/tidwall/gjson"
 
 	"github.com/ory/herodot"
 	"github.com/ory/x/otelx"
@@ -25,6 +27,7 @@ import (
 )
 
 var _ registration.Strategy = new(Strategy)
+var _ registration.FormHydrator = new(Strategy)
 
 // Update Registration Flow with Code Method
 //
@@ -50,15 +53,15 @@ type updateRegistrationFlowWithCodeMethod struct {
 	// required: true
 	Method string `json:"method" form:"method"`
 
-	// Transient data to pass along to any webhooks
-	//
-	// required: false
-	TransientPayload json.RawMessage `json:"transient_payload,omitempty" form:"transient_payload"`
-
 	// Resend restarts the flow with a new code
 	//
 	// required: false
 	Resend string `json:"resend" form:"resend"`
+
+	// Transient data to pass along to any webhooks
+	//
+	// required: false
+	TransientPayload json.RawMessage `json:"transient_payload,omitempty" form:"transient_payload"`
 }
 
 func (p *updateRegistrationFlowWithCodeMethod) GetResend() string {
@@ -75,7 +78,7 @@ func (s *Strategy) HandleRegistrationError(ctx context.Context, r *http.Request,
 	if f != nil {
 		if body != nil {
 			action := f.AppendTo(urlx.AppendPaths(s.deps.Config().SelfPublicURL(ctx), registration.RouteSubmitFlow)).String()
-			for _, n := range container.NewFromJSON(action, node.CodeGroup, body.Traits, "traits").Nodes {
+			for _, n := range container.NewFromJSON(action, node.DefaultGroup, body.Traits, "traits").Nodes {
 				// we only set the value and not the whole field because we want to keep types from the initial form generation
 				f.UI.Nodes.SetValueAttribute(n.ID(), n.Attributes.GetValue())
 			}
@@ -87,34 +90,54 @@ func (s *Strategy) HandleRegistrationError(ctx context.Context, r *http.Request,
 	return err
 }
 
-func (s *Strategy) PopulateRegistrationMethod(r *http.Request, rf *registration.Flow) error {
-	return s.PopulateMethod(r, rf)
+func (s *Strategy) PopulateRegistrationMethod(r *http.Request, f *registration.Flow) error {
+	if !s.deps.Config().SelfServiceCodeStrategy(r.Context()).PasswordlessEnabled {
+		return nil
+	}
+
+	f.GetUI().Nodes.Append(nodeSubmitRegistration())
+
+	f.UI.SetCSRF(s.deps.GenerateCSRFToken(r))
+	return nil
 }
 
-type options func(*identity.Identity) error
-
-func WithCredentials(via identity.CodeAddressType, usedAt sql.NullTime) options {
-	return func(i *identity.Identity) error {
-		return i.SetCredentialsWithConfig(identity.CredentialsTypeCodeAuth, identity.Credentials{Type: identity.CredentialsTypePassword, Identifiers: []string{}}, &identity.CredentialsCode{AddressType: via, UsedAt: usedAt})
+func (s *Strategy) PopulateRegistrationMethodCredentials(r *http.Request, f *registration.Flow, options ...registration.FormHydratorModifier) error {
+	if !s.deps.Config().SelfServiceCodeStrategy(r.Context()).PasswordlessEnabled {
+		return nil
 	}
+
+	f.GetUI().Nodes.RemoveMatching(nodeRegistrationResendNode())
+	f.GetUI().Nodes.RemoveMatching(nodeRegistrationSelectCredentialsNode())
+	f.GetUI().Nodes.RemoveMatching(nodeContinueButton())
+	f.GetUI().Nodes.RemoveMatching(nodeCodeInputFieldHidden())
+	f.GetUI().Nodes.RemoveMatching(nodeCodeInputField())
+
+	f.GetUI().Nodes.Append(nodeSubmitRegistration())
+
+	f.UI.SetCSRF(s.deps.GenerateCSRFToken(r))
+	return nil
 }
 
-func (s *Strategy) handleIdentityTraits(ctx context.Context, f *registration.Flow, traits json.RawMessage, transientPayload json.RawMessage, i *identity.Identity, opts ...options) error {
-	f.TransientPayload = transientPayload
-	if len(traits) == 0 {
-		traits = json.RawMessage("{}")
+func (s *Strategy) PopulateRegistrationMethodProfile(r *http.Request, f *registration.Flow, options ...registration.FormHydratorModifier) error {
+	if !s.deps.Config().SelfServiceCodeStrategy(r.Context()).PasswordlessEnabled {
+		return nil
 	}
 
-	// we explicitly set the Code credentials type
-	i.Traits = identity.Traits(traits)
-	if err := i.SetCredentialsWithConfig(s.ID(), identity.Credentials{Type: s.ID(), Identifiers: []string{}}, &identity.CredentialsCode{UsedAt: sql.NullTime{}}); err != nil {
-		return err
-	}
+	f.GetUI().Nodes.RemoveMatching(nodeSubmitRegistration())
+	f.GetUI().Nodes.RemoveMatching(nodeRegistrationResendNode())
+	f.GetUI().Nodes.RemoveMatching(nodeRegistrationSelectCredentialsNode())
+	f.GetUI().Nodes.RemoveMatching(nodeContinueButton())
+	f.GetUI().Nodes.RemoveMatching(nodeCodeInputFieldHidden())
+	f.GetUI().Nodes.RemoveMatching(nodeCodeInputField())
 
-	for _, opt := range opts {
-		if err := opt(i); err != nil {
-			return err
-		}
+	f.UI.SetCSRF(s.deps.GenerateCSRFToken(r))
+	return nil
+}
+
+func (s *Strategy) validateTraits(ctx context.Context, traits json.RawMessage, i *identity.Identity) error {
+	i.Traits = []byte("{}")
+	if gjson.ValidBytes(traits) {
+		i.Traits = identity.Traits(traits)
 	}
 
 	// Validate the identity
@@ -125,32 +148,47 @@ func (s *Strategy) handleIdentityTraits(ctx context.Context, f *registration.Flo
 	return nil
 }
 
-func (s *Strategy) getCredentialsFromTraits(ctx context.Context, f *registration.Flow, i *identity.Identity, traits, transientPayload json.RawMessage) (*identity.Credentials, error) {
-	if err := s.handleIdentityTraits(ctx, f, traits, transientPayload, i); err != nil {
-		return nil, errors.WithStack(err)
+func (s *Strategy) validateAndGetCredentialsFromTraits(ctx context.Context, i *identity.Identity, traits json.RawMessage) (*identity.Credentials, *identity.CredentialsCode, error) {
+	if err := s.validateTraits(ctx, traits, i); err != nil {
+		return nil, nil, errors.WithStack(err)
 	}
 
 	cred, ok := i.GetCredentials(identity.CredentialsTypeCodeAuth)
 	if !ok {
-		return nil, errors.WithStack(schema.NewMissingIdentifierError())
-	} else if len(cred.Identifiers) == 0 {
-		return nil, errors.WithStack(schema.NewMissingIdentifierError())
+		return nil, nil, errors.WithStack(schema.NewMissingIdentifierError())
+	} else if len(strings.Join(cred.Identifiers, "")) == 0 {
+		return nil, nil, errors.WithStack(schema.NewMissingIdentifierError())
 	}
-	return cred, nil
+
+	var conf identity.CredentialsCode
+	if len(cred.Config) > 0 {
+		if err := json.Unmarshal(cred.Config, &conf); err != nil {
+			return nil, nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to unmarshal credentials config: %s", err))
+		}
+	}
+
+	return cred, &conf, nil
 }
 
 func (s *Strategy) Register(w http.ResponseWriter, r *http.Request, f *registration.Flow, i *identity.Identity) (err error) {
-	ctx, span := s.deps.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.strategy.code.strategy.Register")
+	ctx, span := s.deps.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.strategy.code.Strategy.Register")
 	defer otelx.End(span, &err)
 
 	if err := flow.MethodEnabledAndAllowedFromRequest(r, f.GetFlowName(), s.ID().String(), s.deps); err != nil {
 		return err
 	}
 
+	ds, err := f.IdentitySchema.URL(ctx, s.deps.Config())
+	if err != nil {
+		return err
+	}
+
 	var p updateRegistrationFlowWithCodeMethod
-	if err := registration.DecodeBody(&p, r, s.dx, s.deps.Config(), registrationSchema); err != nil {
+	if err := registration.DecodeBody(&p, r, s.dx, s.deps.Config(), registrationSchema, ds); err != nil {
 		return s.HandleRegistrationError(ctx, r, f, &p, err)
 	}
+
+	f.TransientPayload = p.TransientPayload
 
 	if err := flow.EnsureCSRF(s.deps, r, f.Type, s.deps.Config().DisableAPIFlowEnforcement(ctx), s.deps.GenerateCSRFToken, p.CSRFToken); err != nil {
 		return s.HandleRegistrationError(ctx, r, f, &p, err)
@@ -172,7 +210,7 @@ func (s *Strategy) Register(w http.ResponseWriter, r *http.Request, f *registrat
 }
 
 func (s *Strategy) registrationSendEmail(ctx context.Context, w http.ResponseWriter, r *http.Request, f *registration.Flow, p *updateRegistrationFlowWithCodeMethod, i *identity.Identity) (err error) {
-	ctx, span := s.deps.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.code.strategy.registrationSendEmail")
+	ctx, span := s.deps.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.code.Strategy.registrationSendEmail")
 	defer otelx.End(span, &err)
 
 	if len(p.Traits) == 0 {
@@ -182,7 +220,7 @@ func (s *Strategy) registrationSendEmail(ctx context.Context, w http.ResponseWri
 	// Create the Registration code
 
 	// Step 1: validate the identity's traits
-	cred, err := s.getCredentialsFromTraits(ctx, f, i, p.Traits, p.TransientPayload)
+	_, conf, err := s.validateAndGetCredentialsFromTraits(ctx, i, p.Traits)
 	if err != nil {
 		return err
 	}
@@ -194,9 +232,10 @@ func (s *Strategy) registrationSendEmail(ctx context.Context, w http.ResponseWri
 
 	// Step 3: Get the identity email and send the code
 	var addresses []Address
-	for _, identifier := range cred.Identifiers {
-		addresses = append(addresses, Address{To: identifier, Via: identity.AddressTypeEmail})
+	for _, address := range conf.Addresses {
+		addresses = append(addresses, Address{To: address.Address, Via: address.Channel})
 	}
+
 	// kratos only supports `email` identifiers at the moment with the code method
 	// this is validated in the identity validation step above
 	if err := s.deps.CodeSender().SendCode(ctx, f, i, addresses...); err != nil {
@@ -230,7 +269,7 @@ func (s *Strategy) registrationSendEmail(ctx context.Context, w http.ResponseWri
 }
 
 func (s *Strategy) registrationVerifyCode(ctx context.Context, f *registration.Flow, p *updateRegistrationFlowWithCodeMethod, i *identity.Identity) (err error) {
-	ctx, span := s.deps.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.code.strategy.registrationVerifyCode")
+	ctx, span := s.deps.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.code.Strategy.registrationVerifyCode")
 	defer otelx.End(span, &err)
 
 	if len(p.Code) == 0 {
@@ -244,14 +283,39 @@ func (s *Strategy) registrationVerifyCode(ctx context.Context, f *registration.F
 	// Step 1: Re-validate the identity's traits
 	// this is important since the client could have switched out the identity's traits
 	// this method also returns the credentials for a temporary identity
-	cred, err := s.getCredentialsFromTraits(ctx, f, i, p.Traits, p.TransientPayload)
+	cred, _, err := s.validateAndGetCredentialsFromTraits(ctx, i, p.Traits)
 	if err != nil {
 		return err
 	}
 
 	// Step 2: Check if the flow traits match the identity traits
 	for _, n := range container.NewFromJSON("", node.DefaultGroup, p.Traits, "traits").Nodes {
-		if f.GetUI().GetNodes().Find(n.ID()).Attributes.GetValue() != n.Attributes.GetValue() {
+		ui := f.GetUI()
+		if ui == nil {
+			continue
+		}
+
+		nodes := ui.GetNodes()
+		if nodes == nil {
+			continue
+		}
+
+		node := nodes.Find(n.ID())
+		if node == nil {
+			continue
+		}
+
+		nodeAttrs := node.Attributes
+		if nodeAttrs == nil {
+			continue
+		}
+
+		nAttrs := n.Attributes
+		if nAttrs == nil {
+			continue
+		}
+
+		if nodeAttrs.GetValue() != nAttrs.GetValue() {
 			return errors.WithStack(schema.NewTraitsMismatch())
 		}
 	}
@@ -265,9 +329,12 @@ func (s *Strategy) registrationVerifyCode(ctx context.Context, f *registration.F
 		return errors.WithStack(err)
 	}
 
-	// Step 4: The code was correct, populate the Identity credentials and traits
-	if err := s.handleIdentityTraits(ctx, f, p.Traits, p.TransientPayload, i, WithCredentials(registrationCode.AddressType, registrationCode.UsedAt)); err != nil {
-		return errors.WithStack(err)
+	// Step 4: Verify the address
+	if err := s.verifyAddress(ctx, i, Address{
+		To:  registrationCode.Address,
+		Via: registrationCode.AddressType,
+	}, false); err != nil {
+		return err
 	}
 
 	// since nothing has errored yet, we can assume that the code is correct

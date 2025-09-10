@@ -5,8 +5,13 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
+
+	"github.com/ory/x/sqlxx"
+
+	"github.com/ory/kratos/x/redir"
 
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
@@ -39,8 +44,19 @@ type Flow interface {
 	GetState() State
 	SetState(State)
 	GetFlowName() FlowName
+	GetTransientPayload() json.RawMessage
 }
 
 type FlowWithRedirect interface {
-	SecureRedirectToOpts(ctx context.Context, cfg config.Provider) (opts []x.SecureRedirectOption)
+	SecureRedirectToOpts(ctx context.Context, cfg config.Provider) (opts []redir.SecureRedirectOption)
+}
+
+type InternalContexter interface {
+	EnsureInternalContext()
+	GetInternalContext() sqlxx.JSONRawMessage
+	SetInternalContext(sqlxx.JSONRawMessage)
+}
+
+type OAuth2ChallengeProvider interface {
+	GetOAuth2LoginChallenge() sqlxx.NullString
 }

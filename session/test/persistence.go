@@ -8,24 +8,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gobuffalo/pop/v6"
-
-	"github.com/ory/x/pagination/keysetpagination"
-
-	"github.com/ory/x/pointerx"
-
-	"github.com/ory/kratos/identity"
-
 	"github.com/go-faker/faker/v4"
 	"github.com/gofrs/uuid"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/internal/testhelpers"
 	"github.com/ory/kratos/persistence"
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/x"
+	"github.com/ory/pop/v6"
+	"github.com/ory/x/contextx"
+	"github.com/ory/x/dbal"
+	"github.com/ory/x/pagination/keysetpagination"
+	"github.com/ory/x/pointerx"
 	"github.com/ory/x/randx"
 	"github.com/ory/x/sqlcon"
 )
@@ -36,8 +36,6 @@ func TestPersister(ctx context.Context, conf *config.Config, p interface {
 ) func(t *testing.T) {
 	return func(t *testing.T) {
 		_, p := testhelpers.NewNetworkUnlessExisting(t, ctx, p)
-
-		testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
 
 		t.Run("case=not found", func(t *testing.T) {
 			_, err := p.GetSession(ctx, x.NewUUID(), session.ExpandNothing)
@@ -290,11 +288,10 @@ func TestPersister(ctx context.Context, conf *config.Config, p interface {
 			} {
 				t.Run("case=all "+tc.desc, func(t *testing.T) {
 					paginatorOpts := make([]keysetpagination.Option, 0)
-					actual, total, nextPage, err := l.ListSessions(ctx, tc.active, paginatorOpts, session.ExpandEverything)
+					actual, nextPage, err := l.ListSessions(ctx, tc.active, paginatorOpts, session.ExpandEverything)
 					require.NoError(t, err, "%+v", err)
 
 					require.Equal(t, len(tc.expected), len(actual))
-					require.Equal(t, int64(len(tc.expected)), total)
 					assert.Equal(t, true, nextPage.IsLast())
 
 					mapPageToken := nextPage.Token().Parse("")
@@ -317,11 +314,10 @@ func TestPersister(ctx context.Context, conf *config.Config, p interface {
 
 			t.Run("case=all sessions pagination only one page", func(t *testing.T) {
 				paginatorOpts := make([]keysetpagination.Option, 0)
-				actual, total, page, err := l.ListSessions(ctx, nil, paginatorOpts, session.ExpandEverything)
+				actual, page, err := l.ListSessions(ctx, nil, paginatorOpts, session.ExpandEverything)
 				require.NoError(t, err)
 
 				require.Equal(t, 6, len(actual))
-				require.Equal(t, int64(6), total)
 				assert.Equal(t, true, page.IsLast())
 				mapPageToken := page.Token().Parse("")
 				assert.Equal(t, uuid.Nil.String(), mapPageToken["id"])
@@ -331,9 +327,8 @@ func TestPersister(ctx context.Context, conf *config.Config, p interface {
 			t.Run("case=all sessions pagination multiple pages", func(t *testing.T) {
 				paginatorOpts := make([]keysetpagination.Option, 0)
 				paginatorOpts = append(paginatorOpts, keysetpagination.WithSize(3))
-				firstPageItems, total, page1, err := l.ListSessions(ctx, nil, paginatorOpts, session.ExpandEverything)
+				firstPageItems, page1, err := l.ListSessions(ctx, nil, paginatorOpts, session.ExpandEverything)
 				require.NoError(t, err)
-				require.Equal(t, int64(6), total)
 				assert.Len(t, firstPageItems, 3)
 
 				assert.Equal(t, false, page1.IsLast())
@@ -342,9 +337,8 @@ func TestPersister(ctx context.Context, conf *config.Config, p interface {
 				assert.Equal(t, 3, page1.Size())
 
 				// Validate secondPageItems page
-				secondPageItems, total, page2, err := l.ListSessions(ctx, nil, page1.ToOptions(), session.ExpandEverything)
+				secondPageItems, page2, err := l.ListSessions(ctx, nil, page1.ToOptions(), session.ExpandEverything)
 				require.NoError(t, err)
-				require.Equal(t, int64(6), total)
 				assert.Len(t, secondPageItems, 3)
 
 				acutalIDs := make([]uuid.UUID, 0)
@@ -603,6 +597,72 @@ func TestPersister(ctx context.Context, conf *config.Config, p interface {
 			require.NoError(t, err)
 			_, err = p.GetSessionByToken(ctx, t2, session.ExpandNothing, identity.ExpandDefault)
 			require.ErrorIs(t, err, sqlcon.ErrNoRows)
+		})
+
+		t.Run("extend session lifespan but min time is not yet reached", func(t *testing.T) {
+			ctx := contextx.WithConfigValues(ctx, map[string]any{config.ViperKeySessionRefreshMinTimeLeft: 2 * time.Hour})
+
+			var expected session.Session
+			require.NoError(t, faker.FakeData(&expected))
+			expected.ExpiresAt = time.Now().Add(time.Hour * 10).Round(time.Second).UTC()
+			require.NoError(t, p.CreateIdentity(ctx, expected.Identity))
+			require.NoError(t, p.UpsertSession(ctx, &expected))
+
+			require.NoError(t, p.ExtendSession(ctx, expected.ID))
+			actual, err := p.GetSession(ctx, expected.ID, session.ExpandNothing)
+			require.NoError(t, err)
+			assert.Equal(t, expected.ExpiresAt, actual.ExpiresAt)
+		})
+
+		t.Run("extend session lifespan", func(t *testing.T) {
+			ctx := contextx.WithConfigValues(ctx, map[string]any{config.ViperKeySessionRefreshMinTimeLeft: 2 * time.Hour})
+
+			var expected session.Session
+			require.NoError(t, faker.FakeData(&expected))
+			expected.ExpiresAt = time.Now().Add(time.Hour).UTC()
+			require.NoError(t, p.CreateIdentity(ctx, expected.Identity))
+			require.NoError(t, p.UpsertSession(ctx, &expected))
+
+			expectedExpiry := expected.Refresh(ctx, conf).ExpiresAt
+			require.NoError(t, p.ExtendSession(ctx, expected.ID))
+			actual, err := p.GetSession(ctx, expected.ID, session.ExpandNothing)
+			require.NoError(t, err)
+			assert.GreaterOrEqual(t, 10*time.Second, expectedExpiry.Sub(actual.ExpiresAt).Abs())
+		})
+
+		t.Run("extend session lifespan on CockroachDB", func(t *testing.T) {
+			if p.GetConnection(ctx).Dialect.Name() != dbal.DriverCockroachDB {
+				t.Skip("Skipping test because driver is not CockroachDB")
+			}
+
+			ctx := contextx.WithConfigValue(ctx, config.ViperKeySessionRefreshMinTimeLeft, 2*time.Hour)
+
+			var expected session.Session
+			require.NoError(t, faker.FakeData(&expected))
+			expected.ExpiresAt = time.Now().Add(time.Hour).UTC()
+			require.NoError(t, p.CreateIdentity(ctx, expected.Identity))
+			require.NoError(t, p.UpsertSession(ctx, &expected))
+
+			expectedExpiry := expected.Refresh(ctx, conf).ExpiresAt
+
+			foundExpectedCockroachError := false
+			g := errgroup.Group{}
+			for range 10 {
+				g.Go(func() error {
+					err := p.ExtendSession(ctx, expected.ID)
+					if errors.Is(err, sqlcon.ErrNoRows) {
+						foundExpectedCockroachError = true
+						return nil
+					}
+					return err
+				})
+			}
+			require.NoError(t, g.Wait())
+
+			actual, err := p.GetSession(ctx, expected.ID, session.ExpandNothing)
+			require.NoError(t, err)
+			assert.LessOrEqual(t, expectedExpiry.Sub(actual.ExpiresAt).Abs(), 10*time.Second)
+			assert.True(t, foundExpectedCockroachError, "We expect to find a not found error caused by ... FOR UPDATE SKIP LOCKED")
 		})
 	}
 }

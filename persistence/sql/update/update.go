@@ -7,22 +7,16 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gobuffalo/pop/v6"
-	"github.com/gobuffalo/pop/v6/columns"
-	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ory/pop/v6"
+	"github.com/ory/pop/v6/columns"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/sqlcon"
 )
 
-type Model interface {
-	GetID() uuid.UUID
-	GetNID() uuid.UUID
-}
-
-func Generic(ctx context.Context, c *pop.Connection, tracer trace.Tracer, v Model, columnNames ...string) (err error) {
+func Generic(ctx context.Context, c *pop.Connection, tracer trace.Tracer, v any, columnNames ...string) (err error) {
 	ctx, span := tracer.Start(ctx, "persistence.sql.update")
 	defer otelx.End(span, &err)
 

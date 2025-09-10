@@ -13,7 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/julienschmidt/httprouter"
+	"github.com/ory/kratos/x/nosurfx"
+
 	"github.com/tidwall/gjson"
 	"github.com/urfave/negroni"
 	"golang.org/x/oauth2"
@@ -46,12 +47,12 @@ func TestOAuth2Provider(t *testing.T) {
 	var testRequireLogin atomic.Bool
 	testRequireLogin.Store(true)
 
-	router := x.NewRouterPublic()
-	kratosPublicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin())
+	router := x.NewRouterPublic(reg)
+	kratosPublicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
 	errTS := testhelpers.NewErrorTestServer(t, reg)
 	redirTS := testhelpers.NewRedirSessionEchoTS(t, reg)
 
-	router.GET("/login-ts", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	router.HandleFunc("GET /login-ts", func(w http.ResponseWriter, r *http.Request) {
 		t.Log("[loginTS] navigated to the login ui")
 		c := r.Context().Value(TestUIConfig).(*testConfig)
 		*c.callTrace = append(*c.callTrace, LoginUI)
@@ -100,7 +101,7 @@ func TestOAuth2Provider(t *testing.T) {
 			lf := testhelpers.GetLoginFlow(t, c.browserClient, c.kratosPublicTS, flowID)
 			require.NotNil(t, lf)
 
-			values := url.Values{"method": {"password"}, "identifier": {c.identifier}, "password": {c.password}, "csrf_token": {x.FakeCSRFToken}}.Encode()
+			values := url.Values{"method": {"password"}, "identifier": {c.identifier}, "password": {c.password}, "csrf_token": {nosurfx.FakeCSRFToken}}.Encode()
 			_, res := testhelpers.LoginMakeRequest(t, false, false, lf, c.browserClient, values)
 			assert.EqualValues(t, http.StatusOK, res.StatusCode)
 			return
@@ -113,7 +114,7 @@ func TestOAuth2Provider(t *testing.T) {
 		}
 	})
 
-	router.GET("/consent", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.HandleFunc("GET /consent", func(w http.ResponseWriter, r *http.Request) {
 		t.Log("[consentTS] navigated to the consent ui")
 		c := r.Context().Value(TestUIConfig).(*testConfig)
 		*c.callTrace = append(*c.callTrace, Consent)
@@ -211,7 +212,7 @@ func TestOAuth2Provider(t *testing.T) {
 	loginToAccount := func(t *testing.T, browserClient *http.Client, identifier, pwd string) {
 		f := testhelpers.InitializeLoginFlowViaBrowser(t, browserClient, kratosPublicTS, false, false, false, false)
 
-		values := url.Values{"method": {"password"}, "identifier": {identifier}, "password": {pwd}, "csrf_token": {x.FakeCSRFToken}}.Encode()
+		values := url.Values{"method": {"password"}, "identifier": {identifier}, "password": {pwd}, "csrf_token": {nosurfx.FakeCSRFToken}}.Encode()
 
 		body, res := testhelpers.LoginMakeRequest(t, false, false, f, browserClient, values)
 
@@ -227,7 +228,7 @@ func TestOAuth2Provider(t *testing.T) {
 		t.Cleanup(func() {
 			conf.MustSet(ctx, config.ViperKeySessionPersistentCookie, true)
 		})
-		browserClient := testhelpers.NewClientWithCookieJar(t, nil, false)
+		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
 		createIdentity(ctx, reg, t, identifier, pwd)
@@ -298,7 +299,7 @@ func TestOAuth2Provider(t *testing.T) {
 		// to SessionPersistentCookie=false, the user is not
 		// remembered from the previous OAuth2 flow.
 		// The user must then re-authenticate and re-consent.
-		browserClient := testhelpers.NewClientWithCookieJar(t, nil, false)
+		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
 		createIdentity(ctx, reg, t, identifier, pwd)
@@ -398,7 +399,7 @@ func TestOAuth2Provider(t *testing.T) {
 		// The user must then only re-consent.
 		conf.MustSet(ctx, config.ViperKeySessionPersistentCookie, true)
 
-		browserClient := testhelpers.NewClientWithCookieJar(t, nil, false)
+		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
 
@@ -488,7 +489,7 @@ func TestOAuth2Provider(t *testing.T) {
 	})
 
 	t.Run("should prompt login even with session with OAuth flow", func(t *testing.T) {
-		browserClient := testhelpers.NewClientWithCookieJar(t, nil, false)
+		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
 		createIdentity(ctx, reg, t, identifier, pwd)
@@ -559,7 +560,7 @@ func TestOAuth2Provider(t *testing.T) {
 	})
 
 	t.Run("first party clients can skip consent", func(t *testing.T) {
-		browserClient := testhelpers.NewClientWithCookieJar(t, nil, false)
+		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
 		createIdentity(ctx, reg, t, identifier, pwd)
@@ -628,7 +629,7 @@ func TestOAuth2Provider(t *testing.T) {
 	})
 
 	t.Run("oauth flow with consent remember, skips consent", func(t *testing.T) {
-		browserClient := testhelpers.NewClientWithCookieJar(t, nil, false)
+		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
 		createIdentity(ctx, reg, t, identifier, pwd)
@@ -719,7 +720,7 @@ func TestOAuth2Provider(t *testing.T) {
 	})
 
 	t.Run("should fail when Hydra session subject doesn't match the subject authenticated by Kratos", func(t *testing.T) {
-		browserClient := testhelpers.NewClientWithCookieJar(t, nil, false)
+		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
 		createIdentity(ctx, reg, t, identifier, pwd)
@@ -791,7 +792,7 @@ func TestOAuth2Provider(t *testing.T) {
 			tokens: 0,
 		}
 
-		reg.WithHydra(&AcceptWrongSubject{h: reg.Hydra().(*hydra.DefaultHydra)})
+		reg.SetHydra(&AcceptWrongSubject{h: reg.Hydra().(*hydra.DefaultHydra)})
 
 		doOAuthFlow(t, ctx, oauthClient, browserClient)
 

@@ -7,53 +7,97 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ory/kratos/x/events"
+	"github.com/ory/x/otelx"
 )
 
-func (c *courier) DispatchMessage(ctx context.Context, msg Message) error {
-	if err := c.deps.CourierPersister().IncrementMessageSendCount(ctx, msg.ID); err != nil {
-		c.deps.Logger().
-			WithError(err).
-			WithField("message_id", msg.ID).
-			WithField("message_nid", msg.NID).
-			Error(`Unable to increment the message's "send_count" field`)
-		return err
+func (c *courier) channels(ctx context.Context, id string) (Channel, error) {
+	cs, err := c.deps.CourierConfig().CourierChannels(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	channel, ok := c.courierChannels[msg.Channel.String()]
-	if !ok {
-		return errors.Errorf("message %s has unknown channel %q", msg.ID.String(), msg.Channel)
+	for _, channel := range cs {
+		if channel.ID != id {
+			continue
+		}
+		switch channel.Type {
+		case "smtp":
+			courierChannel, err := NewSMTPChannelWithCustomTemplates(c.deps, channel.SMTPConfig, c.newEmailTemplateFromMessage)
+			if err != nil {
+				return nil, err
+			}
+			return courierChannel, nil
+		case "http":
+			return newHttpChannel(channel.ID, &channel.RequestConfig, c.deps), nil
+		default:
+			return nil, errors.Errorf("unknown courier channel type: %s", channel.Type)
+		}
 	}
 
-	if err := channel.Dispatch(ctx, msg); err != nil {
-		return err
-	}
+	return nil, errors.Errorf("no courier channels configured")
+}
 
-	if err := c.deps.CourierPersister().SetMessageStatus(ctx, msg.ID, MessageStatusSent); err != nil {
-		c.deps.Logger().
-			WithError(err).
-			WithField("message_id", msg.ID).
-			WithField("message_nid", msg.NID).
-			WithField("channel", channel.ID()).
-			Error(`Unable to set the message status to "sent".`)
-		return err
-	}
+func (c *courier) DispatchMessage(ctx context.Context, msg Message) (err error) {
+	ctx, span := c.deps.Tracer(ctx).Tracer().Start(ctx, "courier.DispatchMessage", trace.WithAttributes(
+		attribute.Stringer("message.id", msg.ID),
+		attribute.Stringer("message.nid", msg.NID),
+		attribute.Stringer("message.type", msg.Type),
+		attribute.String("message.template_type", string(msg.TemplateType)),
+		attribute.Int("message.send_count", msg.SendCount),
+	))
+	defer otelx.End(span, &err)
 
-	c.deps.Logger().
+	logger := c.deps.Logger().
 		WithField("message_id", msg.ID).
 		WithField("message_nid", msg.NID).
 		WithField("message_type", msg.Type).
 		WithField("message_template_type", msg.TemplateType).
-		WithField("message_subject", msg.Subject).
-		WithField("channel", channel.ID()).
-		Debug("Courier sent out message.")
+		WithField("message_subject", msg.Subject)
+
+	if err := c.deps.CourierPersister().IncrementMessageSendCount(ctx, msg.ID); err != nil {
+		logger.
+			WithError(err).
+			Error(`Unable to increment the message's "send_count" field`)
+		return err
+	}
+
+	channel, err := c.channels(ctx, msg.Channel.String())
+	if err != nil {
+		return err
+	}
+
+	span.SetAttributes(attribute.String("channel.id", channel.ID()))
+	logger = logger.
+		WithField("channel", channel.ID())
+
+	if err := channel.Dispatch(ctx, msg); err != nil {
+		return err
+	}
+	span.AddEvent(events.NewCourierMessageDispatched(ctx, msg.ID, msg.Channel.String(), string(msg.TemplateType)))
+
+	if err := c.deps.CourierPersister().SetMessageStatus(ctx, msg.ID, MessageStatusSent); err != nil {
+		logger.
+			WithError(err).
+			Error(`Unable to set the message status to "sent".`)
+		return err
+	}
+
+	logger.Debug("Courier sent out message.")
 
 	return nil
 }
 
-func (c *courier) DispatchQueue(ctx context.Context) error {
+func (c *courier) DispatchQueue(ctx context.Context) (err error) {
+	ctx, span := c.deps.Tracer(ctx).Tracer().Start(ctx, "courier.DispatchQueue")
+	defer otelx.End(span, &err)
 	maxRetries := c.deps.CourierConfig().CourierMessageRetries(ctx)
 	pullCount := c.deps.CourierConfig().CourierWorkerPullCount(ctx)
 
+	//nolint:gosec // disable G115
 	messages, err := c.deps.CourierPersister().NextMessages(ctx, uint8(pullCount))
 	if err != nil {
 		if errors.Is(err, ErrQueueEmpty) {
@@ -61,29 +105,36 @@ func (c *courier) DispatchQueue(ctx context.Context) error {
 		}
 		return err
 	}
+	span.SetAttributes(attribute.Int("messages_count", len(messages)))
 
 	for k, msg := range messages {
+		logger := c.deps.Logger().
+			WithField("message_id", msg.ID).
+			WithField("message_nid", msg.NID).
+			WithField("message_type", msg.Type).
+			WithField("message_template_type", msg.TemplateType).
+			WithField("message_subject", msg.Subject)
+
 		if msg.SendCount > maxRetries {
 			if err := c.deps.CourierPersister().SetMessageStatus(ctx, msg.ID, MessageStatusAbandoned); err != nil {
-				c.deps.Logger().
+				logger.
 					WithError(err).
-					WithField("message_id", msg.ID).
-					WithField("message_nid", msg.NID).
 					Error(`Unable to set the retried message's status to "abandoned".`)
 				return err
 			}
 
+			span.AddEvent(events.NewCourierMessageAbandoned(ctx, msg.ID, msg.Channel.String(), string(msg.TemplateType)))
+
 			// Skip the message
-			c.deps.Logger().
-				WithField("message_id", msg.ID).
-				WithField("message_nid", msg.NID).
+			logger.
 				Warnf(`Message was abandoned because it did not deliver after %d attempts`, msg.SendCount)
 		} else if err := c.DispatchMessage(ctx, msg); err != nil {
+			logger.
+				WithError(err).
+				Warn(`Unable to dispatch message.`)
 			if err := c.deps.CourierPersister().RecordDispatch(ctx, msg.ID, CourierMessageDispatchStatusFailed, err); err != nil {
-				c.deps.Logger().
+				logger.
 					WithError(err).
-					WithField("message_id", msg.ID).
-					WithField("message_nid", msg.NID).
 					Error(`Unable to record failure log entry.`)
 				if c.failOnDispatchError {
 					return err
@@ -92,10 +143,8 @@ func (c *courier) DispatchQueue(ctx context.Context) error {
 
 			for _, replace := range messages[k:] {
 				if err := c.deps.CourierPersister().SetMessageStatus(ctx, replace.ID, MessageStatusQueued); err != nil {
-					c.deps.Logger().
+					logger.
 						WithError(err).
-						WithField("message_id", replace.ID).
-						WithField("message_nid", replace.NID).
 						Error(`Unable to reset the failed message's status to "queued".`)
 					if c.failOnDispatchError {
 						return err
@@ -107,10 +156,8 @@ func (c *courier) DispatchQueue(ctx context.Context) error {
 				return err
 			}
 		} else if err := c.deps.CourierPersister().RecordDispatch(ctx, msg.ID, CourierMessageDispatchStatusSuccess, nil); err != nil {
-			c.deps.Logger().
+			logger.
 				WithError(err).
-				WithField("message_id", msg.ID).
-				WithField("message_nid", msg.NID).
 				Error(`Unable to record success log entry.`)
 			// continue with execution, as the message was successfully dispatched
 		}

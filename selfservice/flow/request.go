@@ -9,6 +9,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ory/kratos/x/nosurfx"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/selfservice/strategy"
 	"github.com/ory/x/decoderx"
@@ -16,7 +21,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
-	"github.com/ory/kratos/x"
 	"github.com/ory/nosurf"
 )
 
@@ -67,7 +71,7 @@ func EnsureCSRF(
 		return nil
 	default:
 		if !nosurf.VerifyToken(generator(r), actual) {
-			return errors.WithStack(x.CSRFErrorReason(r, reg))
+			return errors.WithStack(nosurfx.CSRFErrorReason(r, reg))
 		}
 	}
 
@@ -100,8 +104,9 @@ func MethodEnabledAndAllowedFromRequest(r *http.Request, flow FlowName, expected
 	return MethodEnabledAndAllowed(r.Context(), flow, expected, method.Method, d)
 }
 
-func MethodEnabledAndAllowed(ctx context.Context, flowName FlowName, expected, actual string, d config.Provider) error {
+func MethodEnabledAndAllowed(ctx context.Context, _ FlowName, expected, actual string, d config.Provider) error {
 	if actual != expected {
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("not_responsible_reason", "method mismatch"))
 		return errors.WithStack(ErrStrategyNotResponsible)
 	}
 

@@ -13,8 +13,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/ory/kratos/x/nosurfx"
 
 	"github.com/gofrs/uuid"
 
@@ -274,7 +277,7 @@ func TestVerification(t *testing.T) {
 	})
 
 	t.Run("description=should not be able to submit code in expired flow", func(t *testing.T) {
-		conf.MustSet(ctx, config.ViperKeySelfServiceVerificationRequestLifespan, time.Millisecond*10)
+		conf.MustSet(ctx, config.ViperKeySelfServiceVerificationRequestLifespan, time.Millisecond*100)
 		t.Cleanup(func() {
 			conf.MustSet(ctx, config.ViperKeySelfServiceVerificationRequestLifespan, time.Minute)
 		})
@@ -284,12 +287,12 @@ func TestVerification(t *testing.T) {
 			v.Set("email", verificationEmail)
 		})
 
-		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
-		assert.Contains(t, message.Body, "please verify your account by entering the following code")
+		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
+		assert.Contains(t, message.Body, "Verify your account with the following code")
 
 		code := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
-		time.Sleep(time.Millisecond * 11)
+		time.Sleep(time.Millisecond * 101)
 
 		f, _ := submitVerificationCode(t, body, c, code)
 
@@ -297,13 +300,20 @@ func TestVerification(t *testing.T) {
 	})
 
 	t.Run("description=should verify an email address", func(t *testing.T) {
+		var wg sync.WaitGroup
+		testhelpers.NewVerifyAfterHookWebHookTarget(ctx, t, conf, func(t *testing.T, msg []byte) {
+			defer wg.Done()
+			assert.EqualValues(t, true, gjson.GetBytes(msg, "identity.verifiable_addresses.0.verified").Bool(), string(msg))
+			assert.EqualValues(t, "completed", gjson.GetBytes(msg, "identity.verifiable_addresses.0.status").String(), string(msg))
+		})
+
 		check := func(t *testing.T, actual string) {
 			assert.EqualValues(t, string(node.CodeGroup), gjson.Get(actual, "active").String(), "%s", actual)
 			assert.EqualValues(t, verificationEmail, gjson.Get(actual, "ui.nodes.#(attributes.name==email).attributes.value").String(), "%s", actual)
 			assertx.EqualAsJSON(t, text.NewVerificationEmailWithCodeSent(), json.RawMessage(gjson.Get(actual, "ui.messages.0").Raw))
 
-			message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
-			assert.Contains(t, message.Body, "please verify your account by entering the following code")
+			message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
+			assert.Contains(t, message.Body, "Verify your account with the following code")
 
 			verificationLink := testhelpers.CourierExpectLinkInMessage(t, message, 1)
 
@@ -342,15 +352,21 @@ func TestVerification(t *testing.T) {
 		}
 
 		t.Run("type=browser", func(t *testing.T) {
+			wg.Add(1)
 			check(t, expectSuccess(t, nil, false, false, values))
+			wg.Wait()
 		})
 
 		t.Run("type=spa", func(t *testing.T) {
+			wg.Add(1)
 			check(t, expectSuccess(t, nil, false, true, values))
+			wg.Wait()
 		})
 
 		t.Run("type=api", func(t *testing.T) {
+			wg.Add(1)
 			check(t, expectSuccess(t, nil, true, false, values))
+			wg.Wait()
 		})
 	})
 
@@ -360,7 +376,7 @@ func TestVerification(t *testing.T) {
 		}
 
 		expectSuccess(t, nil, false, false, values)
-		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
+		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
 		verificationLink := testhelpers.CourierExpectLinkInMessage(t, message, 1)
 		code := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
@@ -369,14 +385,14 @@ func TestVerification(t *testing.T) {
 		require.NoError(t, err)
 		body := string(ioutilx.MustReadAll(res.Body))
 		require.Len(t, cl.Jar.Cookies(urlx.ParseOrPanic(public.URL)), 1)
-		assert.Contains(t, cl.Jar.Cookies(urlx.ParseOrPanic(public.URL))[0].Name, x.CSRFTokenName)
+		assert.Contains(t, cl.Jar.Cookies(urlx.ParseOrPanic(public.URL))[0].Name, nosurfx.CSRFTokenName)
 
 		actualBody, _ := submitVerificationCode(t, body, cl, code)
 		assert.EqualValues(t, "passed_challenge", gjson.Get(actualBody, "state").String())
 	})
 
 	newValidFlow := func(t *testing.T, fType flow.Type, requestURL string) (*verification.Flow, *code.VerificationCode, string) {
-		f, err := verification.NewFlow(conf, time.Hour, x.FakeCSRFToken, httptest.NewRequest("GET", requestURL, nil), code.NewStrategy(reg), fType)
+		f, err := verification.NewFlow(conf, time.Hour, nosurfx.FakeCSRFToken, httptest.NewRequest("GET", requestURL, nil), code.NewStrategy(reg), fType)
 		require.NoError(t, err)
 		f.State = flow.StateEmailSent
 		u, err := url.Parse(f.RequestURL)
@@ -415,7 +431,7 @@ func TestVerification(t *testing.T) {
 
 		res, err := client.PostForm(action, url.Values{
 			"code":       {rawCode},
-			"csrf_token": {x.FakeCSRFToken},
+			"csrf_token": {nosurfx.FakeCSRFToken},
 		})
 		require.NoError(t, err)
 		body := ioutilx.MustReadAll(res.Body)
@@ -428,8 +444,8 @@ func TestVerification(t *testing.T) {
 			v.Set("email", verificationEmail)
 		})
 
-		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
-		assert.Contains(t, message.Body, "please verify your account by entering the following code")
+		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
+		assert.Contains(t, message.Body, "Verify your account with the following code")
 
 		verificationLink := testhelpers.CourierExpectLinkInMessage(t, message, 1)
 
@@ -493,7 +509,7 @@ func TestVerification(t *testing.T) {
 			v.Set("email", verificationEmail)
 		})
 
-		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
+		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
 		_ = testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
 		c := testhelpers.NewClientWithCookies(t)
@@ -502,7 +518,7 @@ func TestVerification(t *testing.T) {
 		assert.True(t, gjson.Get(body, "ui.nodes.#(attributes.name==code)").Exists())
 		assert.Equal(t, verificationEmail, gjson.Get(body, "ui.nodes.#(attributes.name==email).attributes.value").String())
 
-		message = testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
+		message = testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
 		verificationCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
 		submitVerificationCode(t, body, c, verificationCode)
@@ -513,7 +529,7 @@ func TestVerification(t *testing.T) {
 			v.Set("email", verificationEmail)
 		})
 
-		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
+		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
 		firstCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
 		c := testhelpers.NewClientWithCookies(t)
@@ -522,7 +538,7 @@ func TestVerification(t *testing.T) {
 		assert.True(t, gjson.Get(body, "ui.nodes.#(attributes.name==code)").Exists())
 		assert.Equal(t, verificationEmail, gjson.Get(body, "ui.nodes.#(attributes.name==email).attributes.value").String())
 
-		message = testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
+		message = testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
 		secondCode := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
 		body, res := submitVerificationCode(t, body, c, firstCode)
@@ -573,7 +589,7 @@ func TestVerification(t *testing.T) {
 		body := expectSuccess(t, nil, true, false, func(v url.Values) {
 			v.Set("email", verificationEmail)
 		})
-		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
+		message := testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
 		code := testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
 		body, res := submitVerificationCode(t, body, c, code)
@@ -583,7 +599,7 @@ func TestVerification(t *testing.T) {
 		body = expectSuccess(t, nil, true, false, func(v url.Values) {
 			v.Set("email", verificationEmail)
 		})
-		message = testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Please verify your email address")
+		message = testhelpers.CourierExpectMessage(ctx, t, reg, verificationEmail, "Use code")
 		code = testhelpers.CourierExpectCodeInMessage(t, message, 1)
 
 		body, res = submitVerificationCode(t, body, c, code)

@@ -5,8 +5,8 @@ package courier
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/pkg/errors"
 
@@ -20,7 +20,7 @@ import (
 type (
 	httpChannel struct {
 		id            string
-		requestConfig json.RawMessage
+		requestConfig *request.Config
 		d             channelDependencies
 	}
 	channelDependencies interface {
@@ -34,7 +34,7 @@ type (
 
 var _ Channel = new(httpChannel)
 
-func newHttpChannel(id string, requestConfig json.RawMessage, d channelDependencies) *httpChannel {
+func newHttpChannel(id string, requestConfig *request.Config, d channelDependencies) *httpChannel {
 	return &httpChannel{
 		id:            id,
 		requestConfig: requestConfig,
@@ -47,9 +47,11 @@ func (c *httpChannel) ID() string {
 }
 
 type httpDataModel struct {
-	Recipient    string                `json:"recipient"`
-	Subject      string                `json:"subject"`
-	Body         string                `json:"body"`
+	Recipient string `json:"recipient"`
+	Subject   string `json:"subject"`
+	Body      string `json:"body"`
+	// Optional HTMLBody contains the HTML version of an email template when available.
+	HTMLBody     string                `json:"html_body,omitempty"`
 	TemplateType template.TemplateType `json:"template_type"`
 	TemplateData Template              `json:"template_data"`
 	MessageType  string                `json:"message_type"`
@@ -59,7 +61,7 @@ func (c *httpChannel) Dispatch(ctx context.Context, msg Message) (err error) {
 	ctx, span := c.d.Tracer(ctx).Tracer().Start(ctx, "courier.httpChannel.Dispatch")
 	defer otelx.End(span, &err)
 
-	builder, err := request.NewBuilder(ctx, c.requestConfig, c.d, nil)
+	builder, err := request.NewBuilder(ctx, c.requestConfig, c.d)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -78,6 +80,8 @@ func (c *httpChannel) Dispatch(ctx context.Context, msg Message) (err error) {
 		MessageType:  msg.Type.String(),
 	}
 
+	c.tryPopulateHTMLBody(ctx, tmpl, &td)
+
 	req, err := builder.BuildRequest(ctx, td)
 	if err != nil {
 		return errors.WithStack(err)
@@ -88,14 +92,19 @@ func (c *httpChannel) Dispatch(ctx context.Context, msg Message) (err error) {
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	defer res.Body.Close()
+	res.Body = io.NopCloser(io.LimitReader(res.Body, 1024))
+
+	logger := c.d.Logger().
+		WithField("http_server", c.requestConfig.URL).
+		WithField("message_id", msg.ID).
+		WithField("message_nid", msg.NID).
+		WithField("message_type", msg.Type).
+		WithField("message_template_type", msg.TemplateType).
+		WithField("message_subject", msg.Subject)
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
-		c.d.Logger().
-			WithField("message_id", msg.ID).
-			WithField("message_type", msg.Type).
-			WithField("message_template_type", msg.TemplateType).
-			WithField("message_subject", msg.Subject).
-			Debug("Courier sent out mailer.")
+		logger.Debug("Courier sent out mailer.")
 		return nil
 	}
 
@@ -103,14 +112,26 @@ func (c *httpChannel) Dispatch(ctx context.Context, msg Message) (err error) {
 		"unable to dispatch mail delivery because upstream server replied with status code %d",
 		res.StatusCode,
 	)
-	c.d.Logger().
-		WithField("message_id", msg.ID).
-		WithField("message_type", msg.Type).
-		WithField("message_template_type", msg.TemplateType).
-		WithField("message_subject", msg.Subject).
+
+	body, _ := io.ReadAll(res.Body)
+	logger.
 		WithError(err).
+		WithField("http_response_body", string(body)).
 		Error("sending mail via HTTP failed.")
+
 	return errors.WithStack(err)
+}
+
+func (c *httpChannel) tryPopulateHTMLBody(ctx context.Context, tmpl Template, td *httpDataModel) {
+	if emailTmpl, ok := tmpl.(EmailTemplate); ok {
+		// Only get the HTML body from the template; plaintext body comes from msg.Body
+		// to maintain backward compatibility with existing behavior
+		if htmlBody, err := emailTmpl.EmailBody(ctx); err != nil {
+			c.d.Logger().WithError(err).Error("Unable to get email HTML body from template.")
+		} else {
+			td.HTMLBody = htmlBody
+		}
+	}
 }
 
 func newTemplate(d template.Dependencies, msg Message) (Template, error) {

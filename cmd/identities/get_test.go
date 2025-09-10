@@ -5,7 +5,6 @@ package identities_test
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"testing"
 
@@ -32,10 +31,10 @@ func TestGetCmd(t *testing.T) {
 
 		stdOut := cmd.ExecNoErr(t, i.ID.String())
 
-		ij, err := json.Marshal(identity.WithCredentialsMetadataAndAdminMetadataInJSON(*i))
+		ij, err := json.Marshal(identity.WithCredentialsNoConfigAndAdminMetadataInJSON(*i))
 		require.NoError(t, err)
 
-		assertx.EqualAsJSONExcept(t, json.RawMessage(ij), json.RawMessage(stdOut), []string{"created_at", "updated_at"})
+		assertx.EqualAsJSONExcept(t, json.RawMessage(ij), json.RawMessage(stdOut), []string{"created_at", "updated_at", "AdditionalProperties"})
 	})
 
 	t.Run("case=gets three identities", func(t *testing.T) {
@@ -46,7 +45,7 @@ func TestGetCmd(t *testing.T) {
 		isj, err := json.Marshal(is)
 		require.NoError(t, err)
 
-		assertx.EqualAsJSONExcept(t, json.RawMessage(isj), json.RawMessage(stdOut), []string{"created_at", "updated_at"})
+		assertx.EqualAsJSONExcept(t, json.RawMessage(isj), json.RawMessage(stdOut), []string{"created_at", "updated_at", "AdditionalProperties"})
 	})
 
 	t.Run("case=fails with unknown ID", func(t *testing.T) {
@@ -63,10 +62,12 @@ func TestGetCmd(t *testing.T) {
 				return out
 			}
 			transform := func(token string) string {
-				if !encrypt {
-					return token
+				if encrypt {
+					s, err := reg.Cipher(context.Background()).Encrypt(context.Background(), []byte(token))
+					require.NoError(t, err)
+					return s
 				}
-				return hex.EncodeToString([]byte(token))
+				return token
 			}
 			return identity.Credentials{
 				Type:        identity.CredentialsTypeOIDC,
@@ -105,7 +106,7 @@ func TestGetCmd(t *testing.T) {
 		ij, err := json.Marshal(identity.WithCredentialsAndAdminMetadataInJSON(*di))
 		require.NoError(t, err)
 
-		ii := []string{"id", "schema_url", "state_changed_at", "created_at", "updated_at", "credentials.oidc.created_at", "credentials.oidc.updated_at", "credentials.oidc.version"}
+		ii := []string{"id", "schema_url", "state_changed_at", "created_at", "updated_at", "credentials.oidc.created_at", "credentials.oidc.updated_at", "credentials.oidc.version", "AdditionalProperties"}
 		assertx.EqualAsJSONExcept(t, json.RawMessage(ij), json.RawMessage(stdOut), ii)
 	})
 }

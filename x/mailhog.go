@@ -11,11 +11,9 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	"github.com/phayes/freeport"
 	"github.com/pkg/errors"
 
 	"github.com/ory/dockertest/v3"
-	"github.com/ory/dockertest/v3/docker"
 )
 
 var (
@@ -32,7 +30,7 @@ func CleanUpTestSMTP() {
 	resources = nil
 }
 
-func RunTestSMTP() (smtp, api string, err error) {
+func RunTestSMTP(options ...string) (smtp, api string, err error) {
 	if smtp, api := os.Getenv("TEST_MAILHOG_SMTP"), os.Getenv("TEST_MAILHOG_API"); smtp != "" && api != "" {
 		return smtp, api, nil
 	} else if len(smtp)+len(api) > 0 {
@@ -47,40 +45,36 @@ func RunTestSMTP() (smtp, api string, err error) {
 		return "", "", err
 	}
 
-	ports, err := freeport.GetFreePorts(2)
-	if err != nil {
-		return "", "", err
+	if len(options) == 0 {
+		options = []string{
+			"-invite-jim",
+			"-jim-linkspeed-affect=0.05",
+			"-jim-reject-auth=0.05",
+			"-jim-reject-recipient=0.05",
+			"-jim-reject-sender=0.05",
+			"-jim-disconnect=0.05",
+			"-jim-linkspeed-min=1250",
+			"-jim-linkspeed-max=12500",
+		}
 	}
-	smtpPort, apiPort := ports[0], ports[1]
 
 	resource, err := pool.
 		RunWithOptions(&dockertest.RunOptions{
 			Repository: "mailhog/mailhog",
 			Tag:        "v1.0.0",
-			Cmd: []string{
-				"-invite-jim",
-				"-jim-linkspeed-affect=0.05",
-				"-jim-reject-auth=0.05",
-				"-jim-reject-recipient=0.05",
-				"-jim-reject-sender=0.05",
-				"-jim-disconnect=0.05",
-				"-jim-linkspeed-min=1250",
-				"-jim-linkspeed-max=12500",
-			},
-			PortBindings: map[docker.Port][]docker.PortBinding{
-				"8025/tcp": {{HostPort: fmt.Sprintf("%d/tcp", apiPort)}},
-				"1025/tcp": {{HostPort: fmt.Sprintf("%d/tcp", smtpPort)}},
-			},
+			Cmd:        options,
 		})
 	if err != nil {
 		return "", "", err
 	}
+	apiPort := resource.GetPort("8025/tcp")
+	smtpPort := resource.GetPort("1025/tcp")
 	resourceMux.Lock()
 	resources = append(resources, resource)
 	resourceMux.Unlock()
 
-	smtp = fmt.Sprintf("smtp://test:test@127.0.0.1:%d/?disable_starttls=true", smtpPort)
-	api = fmt.Sprintf("http://127.0.0.1:%d", apiPort)
+	smtp = fmt.Sprintf("smtp://test:test@127.0.0.1:%s/?disable_starttls=true", smtpPort)
+	api = fmt.Sprintf("http://127.0.0.1:%s", apiPort)
 	if err := backoff.Retry(func() error {
 		res, err := http.Get(api + "/api/v2/messages")
 		if err != nil {

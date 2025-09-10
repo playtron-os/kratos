@@ -47,6 +47,7 @@ func init() {
 		"NewInfoNodeLabelVerificationCode":           text.NewInfoNodeLabelVerificationCode(),
 		"NewInfoNodeLabelRecoveryCode":               text.NewInfoNodeLabelRecoveryCode(),
 		"NewInfoNodeInputPassword":                   text.NewInfoNodeInputPassword(),
+		"NewInfoNodeInputPhoneNumber":                text.NewInfoNodeInputPhoneNumber(),
 		"NewInfoNodeLabelGenerated":                  text.NewInfoNodeLabelGenerated("{title}"),
 		"NewInfoNodeLabelSave":                       text.NewInfoNodeLabelSave(),
 		"NewInfoNodeLabelSubmit":                     text.NewInfoNodeLabelSubmit(),
@@ -72,6 +73,7 @@ func init() {
 		"NewInfoSelfServiceSettingsUpdateUnlinkOIDC":              text.NewInfoSelfServiceSettingsUpdateUnlinkOIDC("{provider}"),
 		"NewInfoSelfServiceRegisterWebAuthnDisplayName":           text.NewInfoSelfServiceRegisterWebAuthnDisplayName(),
 		"NewInfoSelfServiceRemoveWebAuthn":                        text.NewInfoSelfServiceRemoveWebAuthn("{display_name}", aSecondAgo),
+		"NewInfoSelfServiceRemovePasskey":                         text.NewInfoSelfServiceRemovePasskey("{display_name}", aSecondAgo),
 		"NewErrorValidationVerificationFlowExpired":               text.NewErrorValidationVerificationFlowExpired(aSecondAgo),
 		"NewInfoSelfServiceVerificationSuccessful":                text.NewInfoSelfServiceVerificationSuccessful(),
 		"NewVerificationEmailSent":                                text.NewVerificationEmailSent(),
@@ -102,6 +104,7 @@ func init() {
 		"NewErrorValidationPasswordMinLength":                     text.NewErrorValidationPasswordMinLength(6, 5),
 		"NewErrorValidationPasswordMaxLength":                     text.NewErrorValidationPasswordMaxLength(72, 80),
 		"NewErrorValidationPasswordTooManyBreaches":               text.NewErrorValidationPasswordTooManyBreaches(101),
+		"NewErrorValidationPasswordNewSameAsOld":                  text.NewErrorValidationPasswordNewSameAsOld(),
 		"NewErrorValidationInvalidCredentials":                    text.NewErrorValidationInvalidCredentials(),
 		"NewErrorValidationDuplicateCredentials":                  text.NewErrorValidationDuplicateCredentials(),
 		"NewErrorValidationDuplicateCredentialsWithHints":         text.NewErrorValidationDuplicateCredentialsWithHints([]string{"{available_credential_types_list}"}, []string{"{available_oidc_providers_list}"}, "{credential_identifier_hint}"),
@@ -120,11 +123,11 @@ func init() {
 		"NewInfoLoginLookupLabel":                                 text.NewInfoLoginLookupLabel(),
 		"NewInfoLogin":                                            text.NewInfoLogin(),
 		"NewInfoLoginAndLink":                                     text.NewInfoLoginAndLink(),
-		"NewInfoLoginLinkMessage":                                 text.NewInfoLoginLinkMessage("{duplicteIdentifier}", "{provider}", "{newLoginUrl}"),
+		"NewInfoLoginLinkMessage":                                 text.NewInfoLoginLinkMessage("{duplicateIdentifier}", "{provider}", "{newLoginUrl}", []string{"{available_credential_types_list}"}, []string{"{available_oidc_providers_list}"}),
 		"NewInfoLoginTOTP":                                        text.NewInfoLoginTOTP(),
 		"NewInfoLoginLookup":                                      text.NewInfoLoginLookup(),
 		"NewInfoLoginVerify":                                      text.NewInfoLoginVerify(),
-		"NewInfoLoginWith":                                        text.NewInfoLoginWith("{provider}"),
+		"NewInfoLoginWith":                                        text.NewInfoLoginWith("{provider}", "{providerID}"),
 		"NewInfoLoginWithAndLink":                                 text.NewInfoLoginWithAndLink("{provider}"),
 		"NewErrorValidationLoginFlowExpired":                      text.NewErrorValidationLoginFlowExpired(aSecondAgo),
 		"NewErrorValidationLoginNoStrategyFound":                  text.NewErrorValidationLoginNoStrategyFound(),
@@ -134,13 +137,20 @@ func init() {
 		"NewErrorValidationVerificationNoStrategyFound":           text.NewErrorValidationVerificationNoStrategyFound(),
 		"NewInfoSelfServiceLoginWebAuthn":                         text.NewInfoSelfServiceLoginWebAuthn(),
 		"NewInfoRegistration":                                     text.NewInfoRegistration(),
-		"NewInfoRegistrationWith":                                 text.NewInfoRegistrationWith("{provider}"),
+		"NewInfoRegistrationWith":                                 text.NewInfoRegistrationWith("{provider}", "{providerID}"),
 		"NewInfoRegistrationContinue":                             text.NewInfoRegistrationContinue(),
+		"NewInfoRegistrationBack":                                 text.NewInfoRegistrationBack(),
+		"NewInfoSelfServiceChooseCredentials":                     text.NewInfoSelfServiceChooseCredentials(),
 		"NewErrorValidationRegistrationFlowExpired":               text.NewErrorValidationRegistrationFlowExpired(aSecondAgo),
 		"NewErrorValidationRecoveryFlowExpired":                   text.NewErrorValidationRecoveryFlowExpired(aSecondAgo),
 		"NewRecoverySuccessful":                                   text.NewRecoverySuccessful(inAMinute),
 		"NewRecoveryEmailSent":                                    text.NewRecoveryEmailSent(),
 		"NewRecoveryEmailWithCodeSent":                            text.NewRecoveryEmailWithCodeSent(),
+		"NewRecoveryCodeRecoverySelectAddressSent":                text.NewRecoveryCodeRecoverySelectAddressSent("{masked_address}"),
+		"NewRecoveryAskAnyRecoveryAddress":                        text.NewRecoveryAskAnyRecoveryAddress(),
+		"NewRecoveryAskForFullAddress":                            text.NewRecoveryAskForFullAddress(),
+		"NewRecoveryAskToChooseAddress":                           text.NewRecoveryAskToChooseAddress(),
+		"NewRecoveryBack":                                         text.NewRecoveryBack(),
 		"NewErrorValidationRecoveryTokenInvalidOrAlreadyUsed":     text.NewErrorValidationRecoveryTokenInvalidOrAlreadyUsed(),
 		"NewErrorValidationRecoveryCodeInvalidOrAlreadyUsed":      text.NewErrorValidationRecoveryCodeInvalidOrAlreadyUsed(),
 		"NewErrorValidationRecoveryRetrySuccess":                  text.NewErrorValidationRecoveryRetrySuccess(),
@@ -150,13 +160,16 @@ func init() {
 		"NewInfoNodeLoginAndLinkCredential":                       text.NewInfoNodeLoginAndLinkCredential(),
 		"NewInfoNodeLabelContinue":                                text.NewInfoNodeLabelContinue(),
 		"NewInfoSelfServiceSettingsRegisterWebAuthn":              text.NewInfoSelfServiceSettingsRegisterWebAuthn(),
+		"NewInfoSelfServiceSettingsRegisterPasskey":               text.NewInfoSelfServiceSettingsRegisterPasskey(),
 		"NewInfoLoginWebAuthnPasswordless":                        text.NewInfoLoginWebAuthnPasswordless(),
 		"NewInfoSelfServiceRegistrationRegisterWebAuthn":          text.NewInfoSelfServiceRegistrationRegisterWebAuthn(),
 		"NewInfoSelfServiceContinueLoginWebAuthn":                 text.NewInfoSelfServiceContinueLoginWebAuthn(),
+		"NewInfoSelfServiceLoginPasskey":                          text.NewInfoSelfServiceLoginPasskey(),
+		"NewInfoSelfServiceRegistrationRegisterPasskey":           text.NewInfoSelfServiceRegistrationRegisterPasskey(),
 		"NewInfoSelfServiceLoginContinue":                         text.NewInfoSelfServiceLoginContinue(),
 		"NewErrorValidationSuchNoWebAuthnUser":                    text.NewErrorValidationSuchNoWebAuthnUser(),
 		"NewRegistrationEmailWithCodeSent":                        text.NewRegistrationEmailWithCodeSent(),
-		"NewLoginEmailWithCodeSent":                               text.NewLoginEmailWithCodeSent(),
+		"NewLoginCodeSent":                                        text.NewLoginCodeSent(),
 		"NewErrorValidationRegistrationCodeInvalidOrAlreadyUsed":  text.NewErrorValidationRegistrationCodeInvalidOrAlreadyUsed(),
 		"NewErrorValidationLoginCodeInvalidOrAlreadyUsed":         text.NewErrorValidationLoginCodeInvalidOrAlreadyUsed(),
 		"NewErrorValidationNoCodeUser":                            text.NewErrorValidationNoCodeUser(),
@@ -170,12 +183,16 @@ func init() {
 		"NewErrorValidationLoginLinkedCredentialsDoNotMatch":      text.NewErrorValidationLoginLinkedCredentialsDoNotMatch(),
 		"NewErrorValidationAddressUnknown":                        text.NewErrorValidationAddressUnknown(),
 		"NewInfoSelfServiceLoginCodeMFA":                          text.NewInfoSelfServiceLoginCodeMFA(),
-		"NewInfoSelfServiceLoginCodeMFAHint":                      text.NewInfoSelfServiceLoginCodeMFAHint("{maskedIdentifier}"),
+		"NewInfoLoginPassword":                                    text.NewInfoLoginPassword(),
+		"NewErrorValidationAccountNotFound":                       text.NewErrorValidationAccountNotFound(),
+		"NewInfoSelfServiceLoginAAL2CodeAddress":                  text.NewInfoSelfServiceLoginAAL2CodeAddress("{channel}", "{address}"),
+		"NewErrorCaptchaFailed":                                   text.NewErrorCaptchaFailed(),
+		"NewCaptchaContainerMessage":                              text.NewCaptchaContainerMessage(),
 	}
 }
 
 func main() {
-	if err := clidoc.Generate(cmd.NewRootCmd(), []string{filepath.Join(os.Args[2], "cli")}); err != nil {
+	if err := clidoc.Generate(cmd.NewRootCmd(nil, nil), []string{filepath.Join(os.Args[2], "cli")}); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Unable to generate CLI docs: %+v", err)
 		os.Exit(1)
 	}
@@ -193,7 +210,7 @@ func main() {
 		}
 	}
 
-	if err := writeMessages(filepath.Join(os.Args[2], "concepts/ui-user-interface.mdx"), sortedMessages); err != nil {
+	if err := writeMessages(filepath.Join(os.Args[2], "concepts/ui-messages.md"), sortedMessages); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Unable to generate message table: %+v\n", err)
 		os.Exit(1)
 	}
@@ -299,6 +316,8 @@ func validateAllMessages(path string) error {
 	info := &types.Info{
 		Defs: make(map[*ast.Ident]types.Object),
 	}
+
+	//nolint:staticcheck
 	var pack *ast.Package
 	for _, p := range packs {
 		if p.Name == "text" {

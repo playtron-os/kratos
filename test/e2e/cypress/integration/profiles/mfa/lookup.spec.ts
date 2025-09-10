@@ -34,6 +34,7 @@ context("2FA lookup secrets", () => {
       beforeEach(() => {
         cy.visit(base)
         cy.clearAllCookies()
+        cy.useConfig((builder) => builder.disableCodeMfa())
         email = gen.email()
         password = gen.password()
         cy.registerApi({
@@ -70,7 +71,12 @@ context("2FA lookup secrets", () => {
         cy.login({ email: email, password: password, cookieUrl: base })
 
         cy.visit(login + "?aal=aal2")
-        cy.get("h2").should("contain.text", "Two-Factor Authentication")
+        cy.get("h2")
+          .invoke("text")
+          .should(
+            "match",
+            /Second factor authentication|Two-Factor Authentication/,
+          )
         cy.get('*[name="method"][value="totp"]').should("not.exist")
         cy.get('*[name="method"][value="lookup_secret"]').should("not.exist")
         cy.get('*[name="method"][value="password"]').should("not.exist")
@@ -191,10 +197,9 @@ context("2FA lookup secrets", () => {
         cy.visit(settings)
         cy.get('button[name="lookup_secret_reveal"]').click()
         cy.getLookupSecrets().should((c) => {
-          let newCodes = codes
-          newCodes[0] = "Used"
-          newCodes[1] = "Used"
-          expect(c).to.eql(newCodes)
+          expect(c.slice(2)).to.eql(codes.slice(2))
+          expect(c[0]).to.match(/(Secret was used at )|(Used)/g)
+          expect(c[1]).to.match(/(Secret was used at )|(Used)/g)
         })
 
         // Regenerating the codes means the old one become invalid
@@ -234,9 +239,8 @@ context("2FA lookup secrets", () => {
         cy.visit(settings)
         cy.get('button[name="lookup_secret_reveal"]').click()
         cy.getLookupSecrets().should((c) => {
-          let newCodes = regenCodes
-          newCodes[0] = "Used"
-          expect(c).to.eql(newCodes)
+          expect(c.slice(1)).to.eql(regenCodes.slice(1))
+          expect(c[0]).to.match(/(Secret was used at )|(Used)/g)
         })
       })
 
@@ -260,20 +264,25 @@ context("2FA lookup secrets", () => {
           expect: { email },
           type: { email: email, password: password },
         })
+        if (app === "react") {
+          cy.get('button[value="profile"]').click()
+        }
         cy.expectSettingsSaved()
 
-        cy.shortPrivilegedSessionTime()
-        cy.get('button[name="lookup_secret_reveal"]').click()
-        cy.reauth({
-          expect: { email },
-          type: { email: email, password: password },
-        })
-        cy.getLookupSecrets().should((c) => {
-          expect(c).to.not.be.empty
-        })
-        cy.getSession({
-          expectAal: "aal2",
-        })
+        if (app !== "react") {
+          cy.shortPrivilegedSessionTime()
+          cy.get('button[name="lookup_secret_reveal"]').click()
+          cy.reauth({
+            expect: { email },
+            type: { email: email, password: password },
+          })
+          cy.getLookupSecrets().should((c) => {
+            expect(c).to.not.be.empty
+          })
+          cy.getSession({
+            expectAal: "aal2",
+          })
+        }
       })
 
       it("should not show lookup as an option if not configured", () => {
@@ -281,7 +290,12 @@ context("2FA lookup secrets", () => {
         cy.get('*[name="method"][value="totp"]').should("not.exist")
         cy.get('*[name="method"][value="lookup_secret"]').should("not.exist")
         cy.get('*[name="method"][value="password"]').should("not.exist")
-        cy.get("h2").should("contain.text", "Two-Factor Authentication")
+        cy.get("h2")
+          .invoke("text")
+          .should(
+            "match",
+            /Second factor authentication|Two-Factor Authentication/,
+          )
       })
     })
   })

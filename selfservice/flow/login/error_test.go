@@ -18,7 +18,7 @@ import (
 	"github.com/ory/kratos/ui/node"
 
 	"github.com/gobuffalo/httptest"
-	"github.com/julienschmidt/httprouter"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -45,7 +45,7 @@ func TestHandleError(t *testing.T) {
 
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/password.schema.json")
 
-	router := httprouter.New()
+	router := http.NewServeMux()
 	ts := httptest.NewServer(router)
 	t.Cleanup(ts.Close)
 
@@ -58,7 +58,7 @@ func TestHandleError(t *testing.T) {
 	var loginFlow *login.Flow
 	var flowError error
 	var ct node.UiNodeGroup
-	router.GET("/error", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	router.HandleFunc("GET /error", func(w http.ResponseWriter, r *http.Request) {
 		h.WriteFlowError(w, r, loginFlow, ct, flowError)
 	})
 
@@ -74,7 +74,12 @@ func TestHandleError(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, s := range reg.LoginStrategies(context.Background()) {
-			require.NoError(t, s.PopulateLoginMethod(req, identity.AuthenticatorAssuranceLevel1, f))
+			switch s.(type) {
+			case login.UnifiedFormHydrator:
+				require.NoError(t, s.(login.UnifiedFormHydrator).PopulateLoginMethod(req, identity.AuthenticatorAssuranceLevel1, f))
+			case login.FormHydrator:
+				require.NoError(t, s.(login.FormHydrator).PopulateLoginMethodFirstFactor(req, f))
+			}
 		}
 
 		require.NoError(t, reg.LoginFlowPersister().CreateLoginFlow(context.Background(), f))
@@ -87,7 +92,7 @@ func TestHandleError(t *testing.T) {
 		defer res.Body.Close()
 		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
-		sse, _, err := sdk.FrontendApi.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
+		sse, _, err := sdk.FrontendAPI.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
 		require.NoError(t, err)
 
 		return sse.Error, nil

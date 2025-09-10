@@ -7,33 +7,44 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tidwall/sjson"
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/ory/x/otelx/semconv"
+
 	"github.com/gofrs/uuid"
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/selfservice/flow"
+	"github.com/ory/kratos/selfservice/flow/login"
 	"github.com/ory/kratos/selfservice/flow/registration"
 	"github.com/ory/kratos/selfservice/flow/settings"
 	"github.com/ory/kratos/selfservice/flow/verification"
 	"github.com/ory/kratos/session"
+	"github.com/ory/kratos/text"
+	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/x/otelx"
 )
 
 var (
 	_ registration.PostHookPostPersistExecutor = new(Verifier)
 	_ settings.PostHookPostPersistExecutor     = new(Verifier)
+	_ login.PostHookExecutor                   = new(Verifier)
 )
 
 type (
 	verifierDependencies interface {
 		config.Provider
-		x.CSRFTokenGeneratorProvider
-		x.CSRFProvider
+		nosurfx.CSRFTokenGeneratorProvider
+		nosurfx.CSRFProvider
 		verification.StrategyProvider
 		verification.FlowPersistenceProvider
 		identity.PrivilegedPoolProvider
 		x.WriterProvider
+		x.TracingProvider
 	}
 	Verifier struct {
 		r verifierDependencies
@@ -61,16 +72,36 @@ func (e *Verifier) ExecuteSettingsPostPersistHook(w http.ResponseWriter, r *http
 	})
 }
 
+func (e *Verifier) ExecuteLoginPostHook(w http.ResponseWriter, r *http.Request, g node.UiNodeGroup, f *login.Flow, s *session.Session) (err error) {
+	ctx, span := e.r.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.hook.Verifier.ExecuteLoginPostHook")
+	r = r.WithContext(ctx)
+	defer otelx.End(span, &err)
+	if f.RequestedAAL != identity.AuthenticatorAssuranceLevel1 {
+		span.SetAttributes(attribute.String("skip_reason", "skipping verification hook because AAL is not 1"))
+		return nil
+	}
+
+	return e.do(w, r.WithContext(ctx), s.Identity, f, nil)
+}
+
+const InternalContextRegistrationVerificationFlow = "registration_verification_flow_continue_with"
+
 func (e *Verifier) do(
 	w http.ResponseWriter,
 	r *http.Request,
 	i *identity.Identity,
-	f flow.FlowWithContinueWith,
+	f interface {
+		flow.FlowWithContinueWith
+		flow.InternalContexter
+	},
 	flowCallback func(*verification.Flow),
-) error {
+) (err error) {
+	ctx, span := e.r.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.hook.Verifier.do")
+	r = r.WithContext(ctx)
+	defer otelx.End(span, &err)
+
 	// This is called after the identity has been created so we can safely assume that all addresses are available
 	// already.
-	ctx := r.Context()
 
 	strategy, err := e.r.GetActiveVerificationStrategy(ctx)
 	if err != nil {
@@ -78,11 +109,20 @@ func (e *Verifier) do(
 	}
 
 	isBrowserFlow := f.GetType() == flow.TypeBrowser
-	isRegistrationFlow := f.GetFlowName() == flow.RegistrationFlow
+	isRegistrationOrLoginFlow := f.GetFlowName() == flow.RegistrationFlow || f.GetFlowName() == flow.LoginFlow
 
 	for k := range i.VerifiableAddresses {
 		address := &i.VerifiableAddresses[k]
-		if address.Status != identity.VerifiableAddressStatusPending {
+		if isRegistrationOrLoginFlow && address.Verified {
+			continue
+		} else if !isRegistrationOrLoginFlow && address.Status != identity.VerifiableAddressStatusPending {
+			// In case of the settings flow, we only want to create a new verification flow if there is no pending
+			// verification flow for the address. Otherwise, we would create a new verification flow for each setting,
+			// even if the address did not change.
+			continue
+		}
+
+		if address.Value == "" {
 			continue
 		}
 
@@ -90,7 +130,7 @@ func (e *Verifier) do(
 
 		// TODO: this is pretty ugly, we should probably have a better way to handle CSRF tokens here.
 		if isBrowserFlow {
-			if isRegistrationFlow {
+			if isRegistrationOrLoginFlow {
 				// If this hook is executed from a registration flow, we need to regenerate the CSRF token.
 				csrf = e.r.CSRFHandler().RegenerateToken(w, r)
 			} else {
@@ -111,16 +151,20 @@ func (e *Verifier) do(
 		}
 
 		verificationFlow.State = flow.StateEmailSent
-
 		if err := strategy.PopulateVerificationMethod(r, verificationFlow); err != nil {
 			return err
 		}
+
+		verificationFlow.UI.Nodes.Append(
+			node.NewInputField(address.Via, address.Value, node.CodeGroup, node.InputAttributeTypeSubmit).
+				WithMetaLabel(text.NewInfoNodeResendOTP()),
+		)
 
 		if err := e.r.VerificationFlowPersister().CreateVerificationFlow(ctx, verificationFlow); err != nil {
 			return err
 		}
 
-		if err := strategy.SendVerificationEmail(ctx, verificationFlow, i, address); err != nil {
+		if err := strategy.SendVerificationCode(ctx, verificationFlow, i, address); err != nil {
 			return err
 		}
 
@@ -129,7 +173,20 @@ func (e *Verifier) do(
 			flowURL = verificationFlow.AppendTo(e.r.Config().SelfServiceFlowVerificationUI(ctx)).String()
 		}
 
-		f.AddContinueWith(flow.NewContinueWithVerificationUI(verificationFlow, address.Value, flowURL))
+		continueWith := flow.NewContinueWithVerificationUI(verificationFlow.ID, address.Value, flowURL)
+		internalContext, err := sjson.SetBytes(f.GetInternalContext(), InternalContextRegistrationVerificationFlow, continueWith.Flow)
+		if err != nil {
+			return err
+		}
+		f.SetInternalContext(internalContext)
+
+		if e.r.Config().UseLegacyShowVerificationUI(ctx) {
+			span.AddEvent(semconv.NewDeprecatedFeatureUsedEvent(ctx, "legacy_continue_with_verification_ui"))
+			f.AddContinueWith(continueWith)
+			continue // Legacy behavior
+		}
+
+		break // We only do this for the first address we find as we can't redirect to multiple flows at once.
 	}
 	return nil
 }

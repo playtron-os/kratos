@@ -1,27 +1,12 @@
+version: "2"
+
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - staticcheck
-    - typecheck
-    - unused
     - gosec
-#    - golint
-    - goimports
-  disable:
+    - errcheck
     - ineffassign
-    - dupl
-    - godox
-    - bodyclose # too many false negatives
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/ory
-
-run:
-  skip-dirs:
-    - sdk/
-  skip-files:
-    - ".+_test.go"
-    - "corpx/faker.go"
+    - staticcheck
+    - unused
+  exclusions:
+    paths:
+      - "sdk"

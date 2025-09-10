@@ -8,18 +8,18 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/gobuffalo/pop/v6"
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
+	"github.com/ory/kratos/courier"
+	"github.com/ory/kratos/persistence/sql/update"
+	"github.com/ory/kratos/x"
+	"github.com/ory/pop/v6"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/pagination/keysetpagination"
 	"github.com/ory/x/sqlcon"
 	"github.com/ory/x/uuidx"
-
-	"github.com/ory/kratos/courier"
-	"github.com/ory/kratos/persistence/sql/update"
 )
 
 var _ courier.Persister = new(Persister)
@@ -56,6 +56,10 @@ func (p *Persister) ListMessages(ctx context.Context, filter courier.ListCourier
 	opts = append(opts, keysetpagination.WithDefaultSize(10))
 	opts = append(opts, keysetpagination.WithColumn("created_at", "DESC"))
 	paginator := keysetpagination.GetPaginator(opts...)
+
+	if _, err := uuid.FromString(paginator.Token().Parse("id")["id"]); err != nil {
+		return nil, 0, nil, errors.WithStack(x.PageTokenInvalid)
+	}
 
 	messages := make([]courier.Message, paginator.Size())
 	if err := q.Scope(keysetpagination.Paginate[courier.Message](paginator)).
@@ -155,7 +159,7 @@ func (p *Persister) SetMessageStatus(ctx context.Context, id uuid.UUID, ms couri
 }
 
 func (p *Persister) IncrementMessageSendCount(ctx context.Context, id uuid.UUID) (err error) {
-	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.SetMessageStatus")
+	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.IncrementMessageSendCount")
 	defer otelx.End(span, &err)
 
 	count, err := p.GetConnection(ctx).RawQuery(

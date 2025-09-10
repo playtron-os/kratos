@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ory/kratos/x/nosurfx"
+
 	"github.com/ory/x/sqlcon"
 
 	"github.com/gofrs/uuid"
@@ -97,8 +99,8 @@ func TestCompleteSettings(t *testing.T) {
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+"."+string(identity.CredentialsTypeLookup)+".enabled", true)
 	conf.MustSet(ctx, config.ViperKeySelfServiceSettingsRequiredAAL, "aal1")
 
-	router := x.NewRouterPublic()
-	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin())
+	router := x.NewRouterPublic(reg)
+	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
 
 	errTS := testhelpers.NewErrorTestServer(t, reg)
 	uiTS := testhelpers.NewSettingsUIFlowEchoServer(t, reg)
@@ -111,7 +113,7 @@ func TestCompleteSettings(t *testing.T) {
 	conf.MustSet(ctx, config.ViperKeySecretsDefault, []string{"not-a-secure-session-key"})
 
 	doAPIFlow := func(t *testing.T, v func(url.Values), id *identity.Identity) (string, *http.Response) {
-		apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, reg, id)
+		apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
 		f := testhelpers.InitializeSettingsFlowViaAPI(t, apiClient, publicTS)
 		values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
 		v(values)
@@ -120,7 +122,7 @@ func TestCompleteSettings(t *testing.T) {
 	}
 
 	doBrowserFlow := func(t *testing.T, spa bool, v func(url.Values), id *identity.Identity) (string, *http.Response) {
-		browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, reg, id)
+		browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, id)
 		f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, spa, publicTS)
 		values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
 		v(values)
@@ -129,7 +131,7 @@ func TestCompleteSettings(t *testing.T) {
 
 	t.Run("case=hide recovery codes behind reveal button and show disable button", func(t *testing.T) {
 		id, _ := createIdentity(t, reg)
-		browserClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, reg, id)
+		browserClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
 
 		t.Run("case=spa", func(t *testing.T) {
 			f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, true, publicTS)
@@ -142,7 +144,7 @@ func TestCompleteSettings(t *testing.T) {
 		})
 
 		t.Run("case=api", func(t *testing.T) {
-			apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, reg, id)
+			apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
 			f := testhelpers.InitializeSettingsFlowViaAPI(t, apiClient, publicTS)
 			testhelpers.SnapshotTExcept(t, f.Ui.Nodes, []string{"0.attributes.value"})
 		})
@@ -150,7 +152,7 @@ func TestCompleteSettings(t *testing.T) {
 
 	t.Run("case=button for regeneration is displayed when identity has no recovery codes yet", func(t *testing.T) {
 		id := createIdentityWithoutLookup(t, reg)
-		browserClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, reg, id)
+		browserClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
 
 		t.Run("case=spa", func(t *testing.T) {
 			f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, true, publicTS)
@@ -163,7 +165,7 @@ func TestCompleteSettings(t *testing.T) {
 		})
 
 		t.Run("case=api", func(t *testing.T) {
-			apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, reg, id)
+			apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
 			f := testhelpers.InitializeSettingsFlowViaAPI(t, apiClient, publicTS)
 			testhelpers.SnapshotTExcept(t, f.Ui.Nodes, []string{"0.attributes.value"})
 		})
@@ -191,7 +193,7 @@ func TestCompleteSettings(t *testing.T) {
 			}, id)
 
 			assert.Contains(t, res.Request.URL.String(), errTS.URL)
-			assert.Equal(t, x.ErrInvalidCSRFToken.Reason(), gjson.Get(body, "reason").String(), body)
+			assert.Equal(t, nosurfx.ErrInvalidCSRFToken.Reason(), gjson.Get(body, "reason").String(), body)
 		})
 
 		t.Run("type=spa", func(t *testing.T) {
@@ -201,7 +203,7 @@ func TestCompleteSettings(t *testing.T) {
 			}, id)
 
 			assert.Contains(t, res.Request.URL.String(), publicTS.URL+settings.RouteSubmitFlow)
-			assert.Equal(t, x.ErrInvalidCSRFToken.Reason(), gjson.Get(body, "error.reason").String(), body)
+			assert.Equal(t, nosurfx.ErrInvalidCSRFToken.Reason(), gjson.Get(body, "error.reason").String(), body)
 		})
 	})
 
@@ -389,7 +391,7 @@ func TestCompleteSettings(t *testing.T) {
 
 				t.Run("type=api", func(t *testing.T) {
 					id, _ := createIdentity(t, reg)
-					apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, reg, id)
+					apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
 					f := testhelpers.InitializeSettingsFlowViaAPI(t, apiClient, publicTS)
 					values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
 
@@ -398,7 +400,7 @@ func TestCompleteSettings(t *testing.T) {
 
 					payloadConfirm(values)
 					actual, res := testhelpers.SettingsMakeRequest(t, true, false, f, apiClient, testhelpers.EncodeFormAsJSON(t, true, values))
-					assert.Equal(t, http.StatusOK, res.StatusCode)
+					require.Equal(t, http.StatusOK, res.StatusCode)
 
 					assert.Contains(t, res.Request.URL.String(), publicTS.URL+settings.RouteSubmitFlow)
 					assert.EqualValues(t, flow.StateSuccess, json.RawMessage(gjson.Get(actual, "state").String()))
@@ -410,7 +412,7 @@ func TestCompleteSettings(t *testing.T) {
 				runBrowser := func(t *testing.T, spa bool) {
 					id, _ := createIdentity(t, reg)
 
-					browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, reg, id)
+					browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, id)
 					f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, spa, publicTS)
 					values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
 
@@ -423,8 +425,11 @@ func TestCompleteSettings(t *testing.T) {
 
 					if spa {
 						assert.Contains(t, res.Request.URL.String(), publicTS.URL+settings.RouteSubmitFlow)
+						assert.EqualValues(t, flow.ContinueWithActionRedirectBrowserToString, gjson.Get(actual, "continue_with.0.action").String(), "%s", actual)
+						assert.Contains(t, gjson.Get(actual, "continue_with.0.redirect_browser_to").String(), uiTS.URL, "%s", actual)
 					} else {
 						assert.Contains(t, res.Request.URL.String(), uiTS.URL)
+						assert.Empty(t, gjson.Get(actual, "continue_with").Array(), "%s", actual)
 					}
 
 					assert.EqualValues(t, flow.StateSuccess, json.RawMessage(gjson.Get(actual, "state").String()))
@@ -480,7 +485,7 @@ func TestCompleteSettings(t *testing.T) {
 
 				t.Run("type=api", func(t *testing.T) {
 					id, _ := createIdentity(t, reg)
-					apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, reg, id)
+					apiClient := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
 					f := testhelpers.InitializeSettingsFlowViaAPI(t, apiClient, publicTS)
 					values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
 
@@ -498,7 +503,7 @@ func TestCompleteSettings(t *testing.T) {
 				runBrowser := func(t *testing.T, spa bool) {
 					id, _ := createIdentity(t, reg)
 
-					browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, reg, id)
+					browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, id)
 					f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, spa, publicTS)
 					values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
 
@@ -508,8 +513,11 @@ func TestCompleteSettings(t *testing.T) {
 
 					if spa {
 						assert.Contains(t, res.Request.URL.String(), publicTS.URL+settings.RouteSubmitFlow)
+						assert.EqualValues(t, flow.ContinueWithActionRedirectBrowserToString, gjson.Get(actual, "continue_with.0.action").String(), "%s", actual)
+						assert.Contains(t, gjson.Get(actual, "continue_with.0.redirect_browser_to").String(), uiTS.URL, "%s", actual)
 					} else {
 						assert.Contains(t, res.Request.URL.String(), uiTS.URL)
+						assert.Empty(t, gjson.Get(actual, "continue_with").Array(), "%s", actual)
 					}
 
 					assert.EqualValues(t, flow.StateSuccess, json.RawMessage(gjson.Get(actual, "state").String()))
