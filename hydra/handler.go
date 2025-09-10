@@ -7,7 +7,6 @@ import (
 	"github.com/ory/kratos/selfservice/sessiontokenexchange"
 	"github.com/ory/kratos/session"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/errors"
 
 	"github.com/ory/x/decoderx"
@@ -53,7 +52,7 @@ func (h *Handler) RegisterPublicRoutes(router *x.RouterPublic) {
 	router.GET(RouteExchangeToken, h.exchangeToken)
 }
 
-func (h *Handler) exchangeToken(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (h *Handler) exchangeToken(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.r.Tracer(r.Context()).Tracer().Start(r.Context(), "hydra.Handler.exchangeToken")
 	defer span.End()
 
@@ -74,7 +73,7 @@ func (h *Handler) exchangeToken(w http.ResponseWriter, r *http.Request, _ httpro
 	}
 
 	var aalErr *session.ErrAALNotSatisfied
-	if err := h.r.SessionManager().DoesSessionSatisfy(r, s, c.SessionWhoAmIAAL(ctx),
+	if err := h.r.SessionManager().DoesSessionSatisfy(ctx, s, c.SessionWhoAmIAAL(ctx),
 		// For the time being we want to update the AAL in the database if it is unset.
 		session.UpsertAAL,
 	); errors.As(err, &aalErr) {
