@@ -174,6 +174,10 @@ docker:
 	-t playtron/kratos:${IMAGE_TAG} \
 	.
 
+.PHONY: run
+run:
+	docker run --rm -it playtron/kratos:${IMAGE_TAG} $(CMD)
+
 .PHONY: test-e2e
 test-e2e: node_modules test-resetdb kratos-config-e2e
 	source script/test-envs.sh
