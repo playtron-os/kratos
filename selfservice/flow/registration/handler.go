@@ -683,6 +683,7 @@ func (h *Handler) updateRegistrationFlow(w http.ResponseWriter, r *http.Request)
 	}
 
 	i := identity.NewIdentity(f.IdentitySchema.ID(ctx, h.d.Config()))
+	i.MfaRequired = false
 	var s Strategy
 	for _, ss := range h.d.AllRegistrationStrategies() {
 		if err := ss.Register(w, r, f, i); errors.Is(err, flow.ErrStrategyNotResponsible) {

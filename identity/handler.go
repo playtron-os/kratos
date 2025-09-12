@@ -6,6 +6,7 @@ package identity
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -400,6 +401,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emit, err := i.WithDeclassifiedCredentials(r.Context(), h.r, declassify)
+	fmt.Printf("#### get: WithDeclassifiedCredentials returned err=%v, emit=%+v\n", err, emit)
 	if err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
@@ -716,6 +718,7 @@ func (h *Handler) identityFromCreateIdentityBody(ctx context.Context, cr *Create
 		MetadataPublic:      []byte(cr.MetadataPublic),
 		OrganizationID:      cr.OrganizationID,
 		ExternalID:          sqlxx.NullString(cr.ExternalID),
+		MfaRequired:         false,
 	}
 	// Lowercase all emails, because the schema extension will otherwise not find them.
 	for k := range i.VerifiableAddresses {

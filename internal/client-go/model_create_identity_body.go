@@ -36,7 +36,8 @@ type CreateIdentityBody struct {
 	// State is the identity's state. active StateActive inactive StateInactive
 	State *string `json:"state,omitempty"`
 	// Traits represent an identity's traits. The identity is able to create, modify, and delete traits in a self-service manner. The input will always be validated against the JSON Schema defined in `schema_url`.
-	Traits map[string]interface{} `json:"traits"`
+	Traits      map[string]interface{} `json:"traits"`
+	MfaRequired bool                   `json:"mfa_required,omitempty"`
 	// VerifiableAddresses contains all the addresses that can be verified by the user.  Use this structure to import verified addresses for an identity. Please keep in mind that the address needs to be represented in the Identity Schema or this field will be overwritten on the next identity update.
 	VerifiableAddresses  []VerifiableIdentityAddress `json:"verifiable_addresses,omitempty"`
 	AdditionalProperties map[string]interface{}
@@ -417,6 +418,8 @@ func (o CreateIdentityBody) ToMap() (map[string]interface{}, error) {
 		toSerialize["verifiable_addresses"] = o.VerifiableAddresses
 	}
 
+	toSerialize["mfa_required"] = true
+
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
 	}
@@ -436,7 +439,6 @@ func (o *CreateIdentityBody) UnmarshalJSON(data []byte) (err error) {
 	allProperties := make(map[string]interface{})
 
 	err = json.Unmarshal(data, &allProperties)
-
 	if err != nil {
 		return err
 	}
@@ -450,12 +452,12 @@ func (o *CreateIdentityBody) UnmarshalJSON(data []byte) (err error) {
 	varCreateIdentityBody := _CreateIdentityBody{}
 
 	err = json.Unmarshal(data, &varCreateIdentityBody)
-
 	if err != nil {
 		return err
 	}
 
 	*o = CreateIdentityBody(varCreateIdentityBody)
+	o.MfaRequired = false
 
 	additionalProperties := make(map[string]interface{})
 

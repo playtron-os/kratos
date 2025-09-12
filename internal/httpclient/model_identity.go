@@ -45,7 +45,8 @@ type Identity struct {
 	State          *string    `json:"state,omitempty"`
 	StateChangedAt *time.Time `json:"state_changed_at,omitempty"`
 	// Traits represent an identity's traits. The identity is able to create, modify, and delete traits in a self-service manner. The input will always be validated against the JSON Schema defined in `schema_url`.
-	Traits interface{} `json:"traits"`
+	Traits      interface{} `json:"traits"`
+	MfaRequired bool        `json:"mfa_required,omitempty"`
 	// UpdatedAt is a helper struct field for gobuffalo.pop.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	// VerifiableAddresses contains all the addresses that can be verified by the user.
@@ -571,6 +572,7 @@ func (o Identity) ToMap() (map[string]interface{}, error) {
 	if !IsNil(o.RecoveryAddresses) {
 		toSerialize["recovery_addresses"] = o.RecoveryAddresses
 	}
+	toSerialize["mfa_required"] = o.MfaRequired
 	toSerialize["schema_id"] = o.SchemaId
 	toSerialize["schema_url"] = o.SchemaUrl
 	if !IsNil(o.State) {
@@ -610,7 +612,6 @@ func (o *Identity) UnmarshalJSON(data []byte) (err error) {
 	allProperties := make(map[string]interface{})
 
 	err = json.Unmarshal(data, &allProperties)
-
 	if err != nil {
 		return err
 	}
@@ -624,7 +625,6 @@ func (o *Identity) UnmarshalJSON(data []byte) (err error) {
 	varIdentity := _Identity{}
 
 	err = json.Unmarshal(data, &varIdentity)
-
 	if err != nil {
 		return err
 	}
@@ -649,6 +649,7 @@ func (o *Identity) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "traits")
 		delete(additionalProperties, "updated_at")
 		delete(additionalProperties, "verifiable_addresses")
+		delete(additionalProperties, "mfa_required")
 		o.AdditionalProperties = additionalProperties
 	}
 

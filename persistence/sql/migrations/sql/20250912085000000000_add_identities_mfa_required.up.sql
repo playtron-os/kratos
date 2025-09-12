@@ -1,0 +1,2 @@
+ALTER TABLE identities
+ADD COLUMN mfa_required BOOLEAN DEFAULT FALSE;

@@ -436,7 +436,6 @@ func (o *CreateIdentityBody) UnmarshalJSON(data []byte) (err error) {
 	allProperties := make(map[string]interface{})
 
 	err = json.Unmarshal(data, &allProperties)
-
 	if err != nil {
 		return err
 	}
@@ -450,7 +449,6 @@ func (o *CreateIdentityBody) UnmarshalJSON(data []byte) (err error) {
 	varCreateIdentityBody := _CreateIdentityBody{}
 
 	err = json.Unmarshal(data, &varCreateIdentityBody)
-
 	if err != nil {
 		return err
 	}

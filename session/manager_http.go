@@ -316,6 +316,10 @@ func (s *ManagerHTTP) DoesSessionSatisfy(ctx context.Context, sess *Session, req
 		o(managerOpts)
 	}
 
+	if requestedAAL != config.HighestAvailableAAL && sess.Identity.MfaRequired {
+		requestedAAL = config.HighestAvailableAAL
+	}
+
 	loginURL := urlx.AppendPaths(s.r.Config().SelfPublicURL(ctx), "/self-service/login/browser")
 	query := url.Values{
 		"aal": {"aal2"},

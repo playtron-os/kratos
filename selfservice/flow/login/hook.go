@@ -367,18 +367,31 @@ func (e *HookExecutor) PostLoginHook(
 
 	finalReturnTo := returnTo.String()
 	if f.OAuth2LoginChallenge != "" {
-		rt, err := e.d.Hydra().AcceptLoginRequest(ctx,
-			hydra.AcceptLoginRequestParams{
-				LoginChallenge:        string(f.OAuth2LoginChallenge),
-				IdentityID:            i.ID.String(),
-				SessionID:             s.ID.String(),
-				AuthenticationMethods: s.AMR,
-			})
-		if err != nil {
-			return err
+		var aalErr *session.ErrAALNotSatisfied
+		if err = e.d.SessionManager().DoesSessionSatisfy(ctx, s, config.HighestAvailableAAL,
+			// For the time being we want to update the AAL in the database if it is unset.
+			session.UpsertAAL,
+		); errors.As(err, &aalErr) {
+			if f != nil && aalErr.PassReturnToAndLoginChallengeParameters(f.RequestURL) != nil {
+				_ = aalErr.WithDetail("pass_request_params_error", "failed to pass request parameters to aalErr.RedirectTo")
+			}
+			e.d.Audit().WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for logging in with hydra.")
+			finalReturnTo = aalErr.RedirectTo
+			span.SetAttributes(attribute.String("return_to", finalReturnTo), attribute.String("redirect_reason", "oauth2 login challenge"))
+		} else {
+			rt, err := e.d.Hydra().AcceptLoginRequest(ctx,
+				hydra.AcceptLoginRequestParams{
+					LoginChallenge:        string(f.OAuth2LoginChallenge),
+					IdentityID:            i.ID.String(),
+					SessionID:             s.ID.String(),
+					AuthenticationMethods: s.AMR,
+				})
+			if err != nil {
+				return err
+			}
+			finalReturnTo = rt
+			span.SetAttributes(attribute.String("return_to", rt), attribute.String("redirect_reason", "oauth2 login challenge"))
 		}
-		finalReturnTo = rt
-		span.SetAttributes(attribute.String("return_to", rt), attribute.String("redirect_reason", "oauth2 login challenge"))
 	} else if f.ReturnToVerification != "" {
 		finalReturnTo = f.ReturnToVerification
 		span.SetAttributes(attribute.String("redirect_reason", "verification requested"))

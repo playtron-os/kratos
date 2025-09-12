@@ -34,6 +34,7 @@ type UpdateIdentityBody struct {
 	State string `json:"state"`
 	// Traits represent an identity's traits. The identity is able to create, modify, and delete traits in a self-service manner. The input will always be validated against the JSON Schema defined in `schema_id`.
 	Traits               map[string]interface{} `json:"traits"`
+	MfaRequired          bool                   `json:"mfa_required,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -283,6 +284,7 @@ func (o UpdateIdentityBody) ToMap() (map[string]interface{}, error) {
 	if o.MetadataPublic != nil {
 		toSerialize["metadata_public"] = o.MetadataPublic
 	}
+	toSerialize["mfa_required"] = o.MfaRequired
 	toSerialize["schema_id"] = o.SchemaId
 	toSerialize["state"] = o.State
 	toSerialize["traits"] = o.Traits
@@ -307,7 +309,6 @@ func (o *UpdateIdentityBody) UnmarshalJSON(data []byte) (err error) {
 	allProperties := make(map[string]interface{})
 
 	err = json.Unmarshal(data, &allProperties)
-
 	if err != nil {
 		return err
 	}
@@ -321,7 +322,6 @@ func (o *UpdateIdentityBody) UnmarshalJSON(data []byte) (err error) {
 	varUpdateIdentityBody := _UpdateIdentityBody{}
 
 	err = json.Unmarshal(data, &varUpdateIdentityBody)
-
 	if err != nil {
 		return err
 	}
@@ -338,6 +338,7 @@ func (o *UpdateIdentityBody) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "schema_id")
 		delete(additionalProperties, "state")
 		delete(additionalProperties, "traits")
+		delete(additionalProperties, "mfa_required")
 		o.AdditionalProperties = additionalProperties
 	}
 
