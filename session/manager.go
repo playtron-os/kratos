@@ -98,6 +98,27 @@ func (e *ErrAALNotSatisfied) PassReturnToAndLoginChallengeParameters(requestURL 
 	return nil
 }
 
+func (e *ErrAALNotSatisfied) PassReturnToAndLoginChallengeParametersDirect(loginChallenge, returnTo string) error {
+	u, err := url.Parse(e.RedirectTo)
+	if err != nil {
+		return err
+	}
+	q := u.Query()
+
+	if len(loginChallenge) != 0 {
+		q.Set("login_challenge", loginChallenge)
+	}
+
+	if len(returnTo) != 0 {
+		q.Set("return_to", returnTo)
+	}
+
+	u.RawQuery = q.Encode()
+	e.RedirectTo = u.String()
+
+	return nil
+}
+
 // NewErrAALNotSatisfied creates a new ErrAALNotSatisfied.
 func NewErrAALNotSatisfied(redirectTo string) *ErrAALNotSatisfied {
 	return &ErrAALNotSatisfied{

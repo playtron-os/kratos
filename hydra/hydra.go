@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofrs/uuid"
+
 	"github.com/ory/x/httpx"
 	"github.com/ory/x/sqlxx"
 
@@ -27,12 +29,15 @@ type (
 	hydraDependencies interface {
 		config.Provider
 		x.HTTPClientProvider
+		session.ManagementProvider
+		session.PersistenceProvider
 	}
 	Provider interface {
 		Hydra() Hydra
 	}
 	AcceptLoginRequestParams struct {
 		LoginChallenge        string
+		ReturnTo              string
 		IdentityID            string
 		SessionID             string
 		AuthenticationMethods session.AuthenticationMethods
@@ -110,6 +115,29 @@ func (h *DefaultHydra) AcceptLoginRequest(ctx context.Context, params AcceptLogi
 	aa, err := h.getAdminAPIClient(ctx)
 	if err != nil {
 		return "", err
+	}
+
+	sID, err := uuid.FromString(params.SessionID)
+	if err != nil {
+		return "", errors.WithStack(herodot.ErrBadRequest.WithReason("invalid session ID"))
+	}
+
+	var expandables sqlxx.Expandables
+	sess, err := h.d.SessionPersister().GetSession(ctx, sID, expandables)
+	if err != nil {
+		return "", errors.WithStack(herodot.ErrBadRequest.WithReason("session not found"))
+	}
+
+	var aalErr *session.ErrAALNotSatisfied
+	if err = h.d.SessionManager().DoesSessionSatisfy(ctx, sess, config.HighestAvailableAAL,
+		// For the time being we want to update the AAL in the database if it is unset.
+		session.UpsertAAL,
+	); errors.As(err, &aalErr) {
+		if aalErr.PassReturnToAndLoginChallengeParametersDirect(params.LoginChallenge, params.ReturnTo) != nil {
+			_ = aalErr.WithDetail("pass_request_params_error", "failed to pass request parameters to aalErr.RedirectTo")
+		}
+		// h.d.Audit().WithRequest(ctx).WithError(err).Info("Session was found but AAL is not satisfied for logging in with hydra.")
+		return aalErr.RedirectTo, nil
 	}
 
 	resp, r, err := aa.AcceptOAuth2LoginRequest(ctx).LoginChallenge(params.LoginChallenge).AcceptOAuth2LoginRequest(*alr).Execute()

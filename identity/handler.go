@@ -6,7 +6,6 @@ package identity
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -401,7 +400,6 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emit, err := i.WithDeclassifiedCredentials(r.Context(), h.r, declassify)
-	fmt.Printf("#### get: WithDeclassifiedCredentials returned err=%v, emit=%+v\n", err, emit)
 	if err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return

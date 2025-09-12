@@ -316,6 +316,7 @@ func (e *HookExecutor) PostLoginHook(
 			postChallengeURL, err := e.d.Hydra().AcceptLoginRequest(ctx,
 				hydra.AcceptLoginRequestParams{
 					LoginChallenge:        string(f.OAuth2LoginChallenge),
+					ReturnTo:              string(f.ReturnTo),
 					IdentityID:            i.ID.String(),
 					SessionID:             s.ID.String(),
 					AuthenticationMethods: s.AMR,
@@ -382,6 +383,7 @@ func (e *HookExecutor) PostLoginHook(
 			rt, err := e.d.Hydra().AcceptLoginRequest(ctx,
 				hydra.AcceptLoginRequestParams{
 					LoginChallenge:        string(f.OAuth2LoginChallenge),
+					ReturnTo:              string(f.ReturnTo),
 					IdentityID:            i.ID.String(),
 					SessionID:             s.ID.String(),
 					AuthenticationMethods: s.AMR,

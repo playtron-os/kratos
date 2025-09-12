@@ -472,6 +472,7 @@ func (h *Handler) updateVerificationFlow(w http.ResponseWriter, r *http.Request)
 			callbackURL, err := h.d.Hydra().AcceptLoginRequest(ctx,
 				hydra.AcceptLoginRequestParams{
 					LoginChallenge:        string(f.OAuth2LoginChallenge),
+					ReturnTo:              string(f.ReturnTo),
 					IdentityID:            f.IdentityID.UUID.String(),
 					SessionID:             f.SessionID.UUID.String(),
 					AuthenticationMethods: f.AMR,

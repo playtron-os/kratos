@@ -320,6 +320,7 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 			callbackURL, err := e.d.Hydra().AcceptLoginRequest(ctx,
 				hydra.AcceptLoginRequestParams{
 					LoginChallenge:        string(registrationFlow.OAuth2LoginChallenge),
+					ReturnTo:              registrationFlow.ReturnTo,
 					IdentityID:            i.ID.String(),
 					SessionID:             s.ID.String(),
 					AuthenticationMethods: s.AMR,

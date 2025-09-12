@@ -395,6 +395,7 @@ func (h *Handler) createBrowserRegistrationFlow(w http.ResponseWriter, r *http.R
 				rt, err := h.d.Hydra().AcceptLoginRequest(r.Context(),
 					hydra.AcceptLoginRequestParams{
 						LoginChallenge:        string(hydraLoginChallenge),
+						ReturnTo:              "",
 						IdentityID:            sess.IdentityID.String(),
 						SessionID:             sess.ID.String(),
 						AuthenticationMethods: sess.AMR,

@@ -123,6 +123,7 @@ func (e *SessionIssuer) acceptLoginChallenge(ctx context.Context, registrationFl
 		postChallengeURL, err := e.r.Hydra().AcceptLoginRequest(ctx,
 			hydra.AcceptLoginRequestParams{
 				LoginChallenge:        string(registrationFlow.OAuth2LoginChallenge),
+				ReturnTo:              string(registrationFlow.ReturnTo),
 				IdentityID:            i.ID.String(),
 				SessionID:             s.ID.String(),
 				AuthenticationMethods: s.AMR,
