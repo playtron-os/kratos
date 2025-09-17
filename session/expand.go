@@ -19,11 +19,13 @@ const (
 	ExpandSessionIdentity                  Expandable = "Identity"
 	ExpandSessionIdentityRecoveryAddress   Expandable = "Identity.RecoveryAddresses"
 	ExpandSessionIdentityVerifiableAddress Expandable = "Identity.VerifiableAddresses"
+	ExpandSessionIdentityCredentials       Expandable = "Identity.Credentials"
 )
 
 var expandablesMap = map[string]Expandable{
-	"devices":  ExpandSessionDevices,
-	"identity": ExpandSessionIdentity,
+	"devices":              ExpandSessionDevices,
+	"identity":             ExpandSessionIdentity,
+	"identity.credentials": ExpandSessionIdentityCredentials,
 }
 
 // Expandables is a list of Expandable values.

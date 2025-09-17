@@ -57,7 +57,11 @@ func (p *Persister) GetSession(ctx context.Context, sid uuid.UUID, expandables s
 	if expandables.Has(session.ExpandSessionIdentity) {
 		// This is needed because of how identities are fetched from the store (if we use eager not all fields are
 		// available!).
-		i, err := p.PrivilegedPool.GetIdentity(ctx, s.IdentityID, identity.ExpandDefault)
+		expandables := identity.ExpandDefault
+		if expandables.Has(session.ExpandSessionIdentityCredentials) {
+			expandables = append(expandables, identity.ExpandFieldCredentials)
+		}
+		i, err := p.PrivilegedPool.GetIdentity(ctx, s.IdentityID, expandables)
 		if err != nil {
 			return nil, err
 		}

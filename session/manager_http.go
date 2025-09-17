@@ -5,9 +5,12 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/tidwall/gjson"
 
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
@@ -58,6 +61,7 @@ type (
 		x.TransactionPersistenceProvider
 		PersistenceProvider
 		sessiontokenexchange.PersistenceProvider
+		identity.ManagementProvider
 	}
 	ManagerHTTP struct {
 		cookieName func(ctx context.Context) string
@@ -309,6 +313,27 @@ func (s *ManagerHTTP) DoesSessionSatisfy(ctx context.Context, sess *Session, req
 	// If we already have AAL2 there is no need to check further because it is the highest AAL.
 	if sess.AuthenticatorAssuranceLevel == identity.AuthenticatorAssuranceLevel2 {
 		return nil
+	}
+
+	// PLAYTRON: Auto add MFA code method if not existing
+	_, ok := sess.Identity.GetCredentials(identity.CredentialsTypeCodeAuth)
+	if !ok {
+		email := gjson.GetBytes(sess.Identity.Traits, "email").String()
+
+		co, err := json.Marshal(&identity.CredentialsCode{Addresses: []identity.CredentialsCodeAddress{{Channel: identity.CodeChannelEmail, Address: email}}})
+		if err != nil {
+			return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to encode password options to JSON: %s", err))
+		}
+
+		sess.Identity.UpsertCredentialsConfig(identity.CredentialsTypeCodeAuth, co, 0)
+		err = s.r.IdentityManager().Update(ctx, sess.Identity, identity.ManagerAllowWriteProtectedTraits)
+		if err != nil {
+			return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to update identity during hydra accept login request"))
+		}
+
+		if err := s.r.IdentityManager().RefreshAvailableAAL(ctx, sess.Identity); err != nil {
+			return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to refresh available AAL during hydra accept login request"))
+		}
 	}
 
 	managerOpts := &options{}

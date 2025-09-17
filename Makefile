@@ -10,7 +10,7 @@ export PWD                := $(shell pwd)
 export BUILD_DATE         := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 export VCS_REF            := $(shell git rev-parse HEAD)
 export QUICKSTART_OPTIONS ?= ""
-export IMAGE_TAG 					:= $(if $(IMAGE_TAG),$(IMAGE_TAG),v1.3.1-3)
+export IMAGE_TAG 					:= $(if $(IMAGE_TAG),$(IMAGE_TAG),v1.3.1-4)
 
 .bin/clidoc:
 	echo "deprecated usage, use docs/cli instead"

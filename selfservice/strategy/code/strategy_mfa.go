@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/identity"
@@ -50,8 +49,17 @@ func FindCodeAddressCandidates(i *identity.Identity, fallbackEnabled bool) (resu
 
 			return FindAllIdentifiers(i), true, nil
 		}
-		return lo.Map(conf.Addresses, func(item identity.CredentialsCodeAddress, _ int) Address {
-			return Address{Via: item.Channel, To: item.Address}
-		}), true, nil
+
+		addressMap := make(map[Address]struct{})
+		for _, addr := range conf.Addresses {
+			if len(addr.Address) == 0 || len(addr.Channel) == 0 {
+				continue
+			}
+			addressMap[Address{Via: addr.Channel, To: addr.Address}] = struct{}{}
+		}
+		for addr := range addressMap {
+			result = append(result, addr)
+		}
+		return result, true, nil
 	}
 }

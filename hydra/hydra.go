@@ -21,6 +21,7 @@ import (
 	"github.com/ory/herodot"
 	hydraclientgo "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/x"
 )
@@ -31,6 +32,9 @@ type (
 		x.HTTPClientProvider
 		session.ManagementProvider
 		session.PersistenceProvider
+		x.LoggingProvider
+		identity.ManagementProvider
+		identity.PoolProvider
 	}
 	Provider interface {
 		Hydra() Hydra
@@ -122,21 +126,18 @@ func (h *DefaultHydra) AcceptLoginRequest(ctx context.Context, params AcceptLogi
 		return "", errors.WithStack(herodot.ErrBadRequest.WithReason("invalid session ID"))
 	}
 
-	var expandables sqlxx.Expandables
+	expandables := []session.Expandable{session.ExpandSessionIdentity, session.ExpandSessionIdentityCredentials}
 	sess, err := h.d.SessionPersister().GetSession(ctx, sID, expandables)
 	if err != nil {
 		return "", errors.WithStack(herodot.ErrBadRequest.WithReason("session not found"))
 	}
 
 	var aalErr *session.ErrAALNotSatisfied
-	if err = h.d.SessionManager().DoesSessionSatisfy(ctx, sess, config.HighestAvailableAAL,
-		// For the time being we want to update the AAL in the database if it is unset.
-		session.UpsertAAL,
-	); errors.As(err, &aalErr) {
+	if err = h.d.SessionManager().DoesSessionSatisfy(ctx, sess, config.HighestAvailableAAL); errors.As(err, &aalErr) {
 		if aalErr.PassReturnToAndLoginChallengeParametersDirect(params.LoginChallenge, params.ReturnTo) != nil {
 			_ = aalErr.WithDetail("pass_request_params_error", "failed to pass request parameters to aalErr.RedirectTo")
 		}
-		// h.d.Audit().WithRequest(ctx).WithError(err).Info("Session was found but AAL is not satisfied for logging in with hydra.")
+		h.d.Audit().WithError(err).Warnf("Session was found but AAL is not satisfied for logging in with hydra for Identity=%s.", sess.IdentityID)
 		return aalErr.RedirectTo, nil
 	}
 
