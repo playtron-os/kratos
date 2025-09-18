@@ -315,24 +315,36 @@ func (s *ManagerHTTP) DoesSessionSatisfy(ctx context.Context, sess *Session, req
 		return nil
 	}
 
-	// PLAYTRON: Auto add MFA code method if not existing
-	_, ok := sess.Identity.GetCredentials(identity.CredentialsTypeCodeAuth)
-	if !ok {
-		email := gjson.GetBytes(sess.Identity.Traits, "email").String()
+	if requestedAAL == config.HighestAvailableAAL {
+		// PLAYTRON: Auto add MFA code method if not existing
+		_, ok := sess.Identity.GetCredentials(identity.CredentialsTypeCodeAuth)
+		if !ok {
+			s.r.Logger().Infof("Auto-adding MFA code method to identity %s because it does not have any", sess.Identity.ID)
 
-		co, err := json.Marshal(&identity.CredentialsCode{Addresses: []identity.CredentialsCodeAddress{{Channel: identity.CodeChannelEmail, Address: email}}})
-		if err != nil {
-			return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to encode password options to JSON: %s", err))
-		}
+			i, err := s.r.PrivilegedIdentityPool().GetIdentity(ctx, sess.Identity.ID, identity.ExpandEverything)
+			if err != nil {
+				return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to fetch identity: %s", err))
+			}
 
-		sess.Identity.UpsertCredentialsConfig(identity.CredentialsTypeCodeAuth, co, 0)
-		err = s.r.IdentityManager().Update(ctx, sess.Identity, identity.ManagerAllowWriteProtectedTraits)
-		if err != nil {
-			return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to update identity during hydra accept login request"))
-		}
+			email := gjson.GetBytes(i.Traits, "email").String()
 
-		if err := s.r.IdentityManager().RefreshAvailableAAL(ctx, sess.Identity); err != nil {
-			return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to refresh available AAL during hydra accept login request"))
+			cred := identity.CredentialsCode{Addresses: []identity.CredentialsCodeAddress{{Channel: identity.CodeChannelEmail, Address: email}}}
+			co, err := json.Marshal(&cred)
+			if err != nil {
+				return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to encode password options to JSON: %s", err))
+			}
+
+			i.UpsertCredentialsConfig(identity.CredentialsTypeCodeAuth, co, 0)
+			err = s.r.IdentityManager().Update(ctx, i, identity.ManagerAllowWriteProtectedTraits)
+			if err != nil {
+				return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to update identity"))
+			}
+
+			if err := s.r.IdentityManager().RefreshAvailableAAL(ctx, i); err != nil {
+				return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to refresh available AAL"))
+			}
+
+			sess.Identity = i
 		}
 	}
 
