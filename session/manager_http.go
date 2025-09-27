@@ -315,7 +315,7 @@ func (s *ManagerHTTP) DoesSessionSatisfy(ctx context.Context, sess *Session, req
 		return nil
 	}
 
-	if requestedAAL == config.HighestAvailableAAL {
+	if requestedAAL == config.HighestAvailableAAL || requestedAAL == string(identity.AuthenticatorAssuranceLevel2) {
 		// PLAYTRON: Auto add MFA code method if not existing
 		_, ok := sess.Identity.GetCredentials(identity.CredentialsTypeCodeAuth)
 		if !ok {
