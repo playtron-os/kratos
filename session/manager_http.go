@@ -5,12 +5,9 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
-
-	"github.com/tidwall/gjson"
 
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
@@ -315,37 +312,11 @@ func (s *ManagerHTTP) DoesSessionSatisfy(ctx context.Context, sess *Session, req
 		return nil
 	}
 
-	if requestedAAL == config.HighestAvailableAAL || requestedAAL == string(identity.AuthenticatorAssuranceLevel2) {
-		// PLAYTRON: Auto add MFA code method if not existing
-		_, ok := sess.Identity.GetCredentials(identity.CredentialsTypeCodeAuth)
-		if !ok {
-			s.r.Logger().Infof("Auto-adding MFA code method to identity %s because it does not have any", sess.Identity.ID)
-
-			i, err := s.r.PrivilegedIdentityPool().GetIdentity(ctx, sess.Identity.ID, identity.ExpandEverything)
-			if err != nil {
-				return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to fetch identity: %s", err))
-			}
-
-			email := gjson.GetBytes(i.Traits, "email").String()
-
-			cred := identity.CredentialsCode{Addresses: []identity.CredentialsCodeAddress{{Channel: identity.CodeChannelEmail, Address: email}}}
-			co, err := json.Marshal(&cred)
-			if err != nil {
-				return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to encode password options to JSON: %s", err))
-			}
-
-			i.UpsertCredentialsConfig(identity.CredentialsTypeCodeAuth, co, 0)
-			err = s.r.IdentityManager().Update(ctx, i, identity.ManagerAllowWriteProtectedTraits)
-			if err != nil {
-				return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to update identity"))
-			}
-
-			if err := s.r.IdentityManager().RefreshAvailableAAL(ctx, i); err != nil {
-				return errors.WithStack(herodot.ErrInternalServerError.WithWrap(err).WithReason("failed to refresh available AAL"))
-			}
-
-			sess.Identity = i
-		}
+	// PLAYTRON: Auto add MFA code method if not existing
+	if updatedIdentity, err := AutoAddMFACodeMethod(ctx, s.r, sess.Identity.ID, requestedAAL); err != nil {
+		return err
+	} else if updatedIdentity != nil {
+		sess.Identity = updatedIdentity
 	}
 
 	managerOpts := &options{}

@@ -66,6 +66,8 @@ type (
 		ErrorHandlerProvider
 		sessiontokenexchange.PersistenceProvider
 		x.LoggingProvider
+		identity.PrivilegedPoolProvider
+		identity.ManagementProvider
 	}
 	HandlerProvider interface {
 		LoginHandler() *Handler
@@ -213,6 +215,14 @@ func (h *Handler) NewLoginFlow(w http.ResponseWriter, r *http.Request, ft flow.T
 		}
 
 		// Looks like we are requesting an AAL which is higher than what the session has.
+
+		// PLAYTRON: Auto add MFA code method if requesting AAL2 and not existing
+		if updatedIdentity, err := session.AutoAddMFACodeMethod(r.Context(), h.d, sess.Identity.ID, string(f.RequestedAAL)); err != nil {
+			return nil, nil, err
+		} else if updatedIdentity != nil {
+			sess.Identity = updatedIdentity
+		}
+
 		goto preLoginHook
 	}
 
