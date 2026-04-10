@@ -378,7 +378,7 @@ func (e *HookExecutor) PostLoginHook(
 			if f != nil && aalErr.PassReturnToAndLoginChallengeParameters(f.RequestURL) != nil {
 				_ = aalErr.WithDetail("pass_request_params_error", "failed to pass request parameters to aalErr.RedirectTo")
 			}
-			e.d.Audit().WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for logging in with hydra.")
+			e.d.Logger().WithField("audience", "audit").WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for logging in with hydra.")
 			finalReturnTo = aalErr.RedirectTo
 			span.SetAttributes(attribute.String("return_to", finalReturnTo), attribute.String("redirect_reason", "oauth2 login challenge"))
 		} else {

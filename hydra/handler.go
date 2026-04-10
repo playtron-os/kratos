@@ -9,8 +9,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/ory/x/decoderx"
 	"github.com/ory/x/errorsx"
+	"github.com/ory/x/httprouterx"
 	"github.com/ory/x/httpx"
 	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx"
@@ -18,7 +18,6 @@ import (
 	"github.com/ory/herodot"
 
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/x"
 )
 
 type (
@@ -32,8 +31,7 @@ type (
 		session.ManagementProvider
 	}
 	Handler struct {
-		r  handlerDependencies
-		dx *decoderx.HTTP
+		r handlerDependencies
 	}
 )
 
@@ -41,8 +39,7 @@ func NewHandler(
 	r handlerDependencies,
 ) *Handler {
 	return &Handler{
-		r:  r,
-		dx: decoderx.NewHTTP(),
+		r: r,
 	}
 }
 
@@ -51,7 +48,7 @@ const (
 	RouteExchangeToken = Route + "/token-exchange"
 )
 
-func (h *Handler) RegisterPublicRoutes(router *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(router *httprouterx.RouterPublic) {
 	router.GET(RouteExchangeToken, h.exchangeToken)
 }
 
