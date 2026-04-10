@@ -113,7 +113,7 @@ type OAuth2LoginChallengeParams struct {
 
 var _ flow.Flow = (*Flow)(nil)
 
-func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategy Strategy, ft flow.Type) (*Flow, error) {
+func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategies Strategies, ft flow.Type) (*Flow, error) {
 	now := time.Now().UTC()
 	id := x.NewUUID()
 
@@ -143,8 +143,10 @@ func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Reques
 		Type:      ft,
 	}
 
-	if strategy != nil {
-		f.Active = sqlxx.NullString(strategy.NodeGroup())
+	for _, strategy := range strategies {
+		if ps, isPrimary := strategy.(PrimaryStrategy); isPrimary {
+			f.Active = sqlxx.NullString(ps.NodeGroup())
+		}
 		if err := strategy.PopulateVerificationMethod(r, f); err != nil {
 			return nil, err
 		}
@@ -153,13 +155,13 @@ func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Reques
 	return f, nil
 }
 
-func FromOldFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategy Strategy, of *Flow) (*Flow, error) {
+func FromOldFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategies Strategies, of *Flow) (*Flow, error) {
 	f := of.Type
 	// Using the same flow in the recovery/verification context can lead to using API flow in a verification/recovery email
 	if of.Type == flow.TypeAPI {
 		f = flow.TypeBrowser
 	}
-	nf, err := NewFlow(conf, exp, csrf, r, strategy, f)
+	nf, err := NewFlow(conf, exp, csrf, r, strategies, f)
 	if err != nil {
 		return nil, err
 	}
@@ -168,10 +170,8 @@ func FromOldFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Re
 	return nf, nil
 }
 
-func NewPostHookFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategy Strategy, original interface {
-	flow.Flow
-}) (*Flow, error) {
-	f, err := NewFlow(conf, exp, csrf, r, strategy, original.GetType())
+func NewPostHookFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategies Strategies, original flow.Flow) (*Flow, error) {
+	f, err := NewFlow(conf, exp, csrf, r, strategies, original.GetType())
 	if err != nil {
 		return nil, err
 	}
@@ -197,10 +197,10 @@ func NewPostHookFlow(conf *config.Config, exp time.Duration, csrf string, r *htt
 
 func (f *Flow) GetType() flow.Type                        { return f.Type }
 func (f *Flow) GetRequestURL() string                     { return f.RequestURL }
-func (_ Flow) TableName() string                          { return "selfservice_verification_flows" }
+func (Flow) TableName() string                            { return "selfservice_verification_flows" }
 func (f Flow) GetID() uuid.UUID                           { return f.ID }
 func (f *Flow) GetState() State                           { return f.State }
-func (_ *Flow) GetFlowName() flow.FlowName                { return flow.VerificationFlow }
+func (Flow) GetFlowName() flow.FlowName                   { return flow.VerificationFlow }
 func (f *Flow) SetState(state State)                      { f.State = state }
 func (f *Flow) GetTransientPayload() json.RawMessage      { return f.TransientPayload }
 func (f *Flow) GetOAuth2LoginChallenge() sqlxx.NullString { return f.OAuth2LoginChallenge }

@@ -18,14 +18,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
+	"github.com/ory/x/configx"
+
 	"github.com/ory/client-go"
 	"github.com/ory/kratos/corpx"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	kratos "github.com/ory/kratos/internal/httpclient"
-	"github.com/ory/kratos/internal/settingshelpers"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	kratos "github.com/ory/kratos/pkg/httpclient"
+	"github.com/ory/kratos/pkg/settingshelpers"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/settings"
 	"github.com/ory/kratos/text"
@@ -79,17 +81,18 @@ func newIdentityWithoutCredentials(email string) *identity.Identity {
 }
 
 func TestSettings(t *testing.T) {
-	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	conf.MustSet(ctx, config.ViperKeySelfServiceBrowserDefaultReturnTo, "https://www.ory.sh/")
-	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/profile.schema.json")
-	testhelpers.StrategyEnable(t, conf, identity.CredentialsTypePassword.String(), true)
-	testhelpers.StrategyEnable(t, conf, settings.StrategyProfile, true)
+	t.Parallel()
+
+	conf, reg := pkg.NewFastRegistryWithMocks(t,
+		configx.WithValues(testhelpers.DefaultIdentitySchemaConfig("file://./stub/profile.schema.json")),
+		configx.WithValues(testhelpers.MethodEnableConfig(identity.CredentialsTypePassword, true)),
+		configx.WithValues(testhelpers.MethodEnableConfig(settings.StrategyProfile, true)),
+		configx.WithValue(config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1m"),
+	)
 
 	settingsUI := testhelpers.NewSettingsUIFlowEchoServer(t, reg)
 	_ = testhelpers.NewErrorTestServer(t, reg)
 	_ = testhelpers.NewLoginUIWith401Response(t, conf)
-	conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1m")
 
 	browserIdentity1 := newIdentityWithPassword("john-browser@doe.com")
 	apiIdentity1 := newIdentityWithPassword("john-api@doe.com")
@@ -98,15 +101,17 @@ func TestSettings(t *testing.T) {
 
 	publicTS, _ := testhelpers.NewKratosServer(t, reg)
 
-	browserUser1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, browserIdentity1)
-	browserUser2 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, browserIdentity2)
-	apiUser1 := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, apiIdentity1)
-	apiUser2 := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, apiIdentity2)
+	browserUser1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, browserIdentity1)
+	browserUser1.Jar.SetCookies(nosurfx.WithFakeCSRFCookie(t, reg, publicTS.URL))
+	browserUser2 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, browserIdentity2)
+	browserUser2.Jar.SetCookies(nosurfx.WithFakeCSRFCookie(t, reg, publicTS.URL))
+	apiUser1 := testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, apiIdentity1)
+	apiUser2 := testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, apiIdentity2)
 
 	t.Run("case=should reject a new password if it is the same as the old one", func(t *testing.T) {
-		conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), []config.SelfServiceHook{{Name: "session"}})
+		conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), []config.SelfServiceHook{{Name: "session"}})
 		t.Cleanup(func() {
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), nil)
+			conf.MustSet(context.Background(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), nil)
 		})
 
 		cfg := client.NewConfiguration()
@@ -273,15 +278,15 @@ func TestSettings(t *testing.T) {
 		t.Run("type=browser", func(t *testing.T) {
 			res, err := c.Do(httpx.MustNewRequest("POST", publicTS.URL+settings.RouteSubmitFlow, strings.NewReader(url.Values{"foo": {"bar"}}.Encode()), "application/x-www-form-urlencoded"))
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.EqualValues(t, http.StatusUnauthorized, res.StatusCode, "%+v", res.Request)
-			assert.Contains(t, res.Request.URL.String(), conf.GetProvider(ctx).String(config.ViperKeySelfServiceLoginUI))
+			assert.Contains(t, res.Request.URL.String(), conf.GetProvider(t.Context()).String(config.ViperKeySelfServiceLoginUI))
 		})
 
 		t.Run("type=spa", func(t *testing.T) {
 			res, err := c.Do(httpx.MustNewRequest("POST", publicTS.URL+settings.RouteSubmitFlow, strings.NewReader(url.Values{"foo": {"bar"}}.Encode()), "application/json"))
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.EqualValues(t, http.StatusUnauthorized, res.StatusCode, "%+v", res.Request)
 			assert.Contains(t, res.Request.URL.String(), settings.RouteSubmitFlow)
 		})
@@ -290,7 +295,7 @@ func TestSettings(t *testing.T) {
 			res, err := c.Do(httpx.MustNewRequest("POST", publicTS.URL+settings.RouteSubmitFlow, strings.NewReader(`{"foo":"bar"}`), "application/json"))
 			require.NoError(t, err)
 			assert.Len(t, res.Cookies(), 0)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.EqualValues(t, http.StatusUnauthorized, res.StatusCode)
 		})
 	})
@@ -298,7 +303,7 @@ func TestSettings(t *testing.T) {
 	expectValidationError := func(t *testing.T, isAPI, isSPA bool, hc *http.Client, values func(url.Values)) string {
 		return testhelpers.SubmitSettingsForm(t, isAPI, isSPA, hc, publicTS, values,
 			testhelpers.ExpectStatusCode(isAPI || isSPA, http.StatusBadRequest, http.StatusOK),
-			testhelpers.ExpectURL(isAPI || isSPA, publicTS.URL+settings.RouteSubmitFlow, conf.SelfServiceFlowSettingsUI(ctx).String()))
+			testhelpers.ExpectURL(isAPI || isSPA, publicTS.URL+settings.RouteSubmitFlow, conf.SelfServiceFlowSettingsUI(t.Context()).String()))
 	}
 
 	t.Run("description=should fail if password violates policy", func(t *testing.T) {
@@ -309,7 +314,7 @@ func TestSettings(t *testing.T) {
 		}
 
 		t.Run("session=with privileged session", func(t *testing.T) {
-			conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "5m")
+			conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "5m")
 
 			payload := func(v url.Values) {
 				v.Set("password", "123456")
@@ -330,10 +335,10 @@ func TestSettings(t *testing.T) {
 		})
 
 		t.Run("session=needs reauthentication", func(t *testing.T) {
-			conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1ns")
+			conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1ns")
 			defer testhelpers.NewLoginUIWith401Response(t, conf)
 			t.Cleanup(func() {
-				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "5m")
+				conf.MustSet(context.Background(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "5m")
 			})
 
 			payload := func(v url.Values) {
@@ -422,7 +427,7 @@ func TestSettings(t *testing.T) {
 		})
 
 		t.Run("type=browser", func(t *testing.T) {
-			actual := testhelpers.SubmitSettingsForm(t, false, false, browserUser1, publicTS, payload, http.StatusOK, conf.SelfServiceFlowSettingsUI(ctx).String())
+			actual := testhelpers.SubmitSettingsForm(t, false, false, browserUser1, publicTS, payload, http.StatusOK, conf.SelfServiceFlowSettingsUI(t.Context()).String())
 			check(t, actual)
 			assert.Empty(t, gjson.Get(actual, "continue_with").Array(), "%s", actual)
 		})
@@ -437,9 +442,9 @@ func TestSettings(t *testing.T) {
 
 		actual, res := testhelpers.SettingsMakeRequest(t, false, false, f, browserUser1, values.Encode())
 		assert.Equal(t, http.StatusOK, res.StatusCode)
-		assert.Contains(t, res.Request.URL.String(), conf.GetProvider(ctx).String(config.ViperKeySelfServiceErrorUI))
+		assert.Contains(t, res.Request.URL.String(), conf.GetProvider(t.Context()).String(config.ViperKeySelfServiceErrorUI))
 
-		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFToken, json.RawMessage(actual), "%s", actual)
+		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFTokenServerTokenMismatch, json.RawMessage(actual), "%s", actual)
 	})
 
 	t.Run("case=should pass even without CSRF token/type=spa", func(t *testing.T) {
@@ -452,7 +457,7 @@ func TestSettings(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, res.StatusCode)
 
 		assert.Contains(t, res.Request.URL.String(), publicTS.URL+settings.RouteSubmitFlow)
-		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFToken, json.RawMessage(gjson.Get(actual, "error").Raw), "%s", actual)
+		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFTokenAJAXTokenMismatch, json.RawMessage(gjson.Get(actual, "error").Raw), "%s", actual)
 	})
 
 	t.Run("case=should pass even without CSRF token/type=api", func(t *testing.T) {
@@ -491,12 +496,12 @@ func TestSettings(t *testing.T) {
 				values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
 				values.Set("password", x.NewUUID().String())
 
-				req := testhelpers.NewRequest(t, true, "POST", f.Ui.Action, bytes.NewBufferString(testhelpers.EncodeFormAsJSON(t, true, values)))
+				req := testhelpers.NewPostRequest(t, true, f.Ui.Action, bytes.NewBufferString(testhelpers.EncodeFormAsJSON(t, true, values)))
 				tc.mod(req.Header)
 
 				res, err := apiUser1.Do(req)
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 
 				actual := string(ioutilx.MustReadAll(res.Body))
 				assert.EqualValues(t, http.StatusBadRequest, res.StatusCode)
@@ -507,16 +512,16 @@ func TestSettings(t *testing.T) {
 
 	expectSuccess := func(t *testing.T, isAPI, isSPA bool, hc *http.Client, values func(url.Values)) string {
 		return testhelpers.SubmitSettingsForm(t, isAPI, isSPA, hc, publicTS, values, http.StatusOK,
-			testhelpers.ExpectURL(isAPI || isSPA, publicTS.URL+settings.RouteSubmitFlow, conf.SelfServiceFlowSettingsUI(ctx).String()))
+			testhelpers.ExpectURL(isAPI || isSPA, publicTS.URL+settings.RouteSubmitFlow, conf.SelfServiceFlowSettingsUI(t.Context()).String()))
 	}
 
 	t.Run("description=should update the password even if no password was set before", func(t *testing.T) {
 		bi := newIdentityWithoutCredentials(x.NewUUID().String() + "@ory.sh")
 		si := newIdentityWithoutCredentials(x.NewUUID().String() + "@ory.sh")
 		ai := newIdentityWithoutCredentials(x.NewUUID().String() + "@ory.sh")
-		browserUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, bi)
-		spaUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, si)
-		apiUser := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, ai)
+		browserUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, bi)
+		spaUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, si)
+		apiUser := testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, ai)
 
 		check := func(t *testing.T, actual string, id *identity.Identity) {
 			assert.Equal(t, "success", gjson.Get(actual, "state").String(), "%s", actual)
@@ -553,9 +558,9 @@ func TestSettings(t *testing.T) {
 
 	t.Run("description=should update the password and perform the correct redirection", func(t *testing.T) {
 		rts := testhelpers.NewRedirTS(t, "", conf)
-		conf.MustSet(ctx, config.ViperKeySelfServiceSettingsAfter+"."+config.DefaultBrowserReturnURL, rts.URL+"/return-ts")
+		conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsAfter+"."+config.DefaultBrowserReturnURL, rts.URL+"/return-ts")
 		t.Cleanup(func() {
-			conf.MustSet(ctx, config.ViperKeySelfServiceSettingsAfter, nil)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceSettingsAfter, nil)
 		})
 
 		run := func(t *testing.T, f *kratos.SettingsFlow, isAPI bool, c *http.Client, _ *identity.Identity) {
@@ -588,9 +593,9 @@ func TestSettings(t *testing.T) {
 	})
 
 	t.Run("description=should update the password and revoke other user sessions", func(t *testing.T) {
-		conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceSettingsAfter, "password"), []config.SelfServiceHook{{Name: "revoke_active_sessions"}})
+		conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceSettingsAfter, "password"), []config.SelfServiceHook{{Name: "revoke_active_sessions"}})
 		t.Cleanup(func() {
-			conf.MustSet(ctx, config.ViperKeySelfServiceSettingsAfter, nil)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceSettingsAfter, nil)
 		})
 
 		check := func(t *testing.T, actual string, id *identity.Identity) {
@@ -605,14 +610,14 @@ func TestSettings(t *testing.T) {
 			assert.Contains(t, actualIdentity.Credentials[identity.CredentialsTypePassword].Identifiers[0], "-4")
 		}
 
-		initClients := func(isAPI, isSPA bool, id *identity.Identity) (client1, client2 *http.Client) {
+		initClients := func(isAPI bool, id *identity.Identity) (client1, client2 *http.Client) {
 			if isAPI {
-				client1 = testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
-				client2 = testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
+				client1 = testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, id)
+				client2 = testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, id)
 				return client1, client2
 			}
-			client1 = testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, id)
-			client2 = testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, id)
+			client1 = testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, id)
+			client2 = testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, id)
 
 			return client1, client2
 		}
@@ -623,7 +628,7 @@ func TestSettings(t *testing.T) {
 				v.Set("password", randx.MustString(16, randx.AlphaNum))
 			}
 
-			user1, user2 := initClients(isAPI, isSPA, id)
+			user1, user2 := initClients(isAPI, id)
 
 			actual := expectSuccess(t, isAPI, isSPA, user1, payload)
 			check(t, actual, id)
@@ -631,7 +636,7 @@ func TestSettings(t *testing.T) {
 			// second client should be logged out
 			res, err := user2.Do(httpx.MustNewRequest("POST", publicTS.URL+settings.RouteSubmitFlow, strings.NewReader(url.Values{"foo": {"bar"}}.Encode()), "application/json"))
 			require.NoError(t, err)
-			res.Body.Close()
+			require.NoError(t, res.Body.Close())
 			assert.EqualValues(t, http.StatusUnauthorized, res.StatusCode, "%+v", res.Request)
 
 			// again change password via first client
@@ -659,8 +664,8 @@ func TestSettings(t *testing.T) {
 		testhelpers.SetDefaultIdentitySchema(conf, "file://stub/missing-identifier.schema.json")
 
 		id := newIdentityWithoutCredentials(testhelpers.RandomEmail())
-		browser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, id)
-		api := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, id)
+		browser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, id)
+		api := testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, id)
 
 		for _, f := range []string{"spa", "api", "browser"} {
 			t.Run("type="+f, func(t *testing.T) {

@@ -4,11 +4,11 @@
 package password
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
-	"golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ory/x/otelx"
@@ -31,9 +31,6 @@ import (
 	"github.com/ory/kratos/x"
 	"github.com/ory/x/decoderx"
 )
-
-func (s *Strategy) RegisterSettingsRoutes(_ *x.RouterPublic) {
-}
 
 func (s *Strategy) SettingsStrategyID() string {
 	return identity.CredentialsTypePassword.String()
@@ -112,7 +109,7 @@ func (s *Strategy) decodeSettingsFlow(r *http.Request, dest interface{}) error {
 		return errors.WithStack(err)
 	}
 
-	return decoderx.NewHTTP().Decode(r, dest, compiler,
+	return decoderx.Decode(r, dest, compiler,
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
 		decoderx.HTTPDecoderSetValidatePayloads(true),

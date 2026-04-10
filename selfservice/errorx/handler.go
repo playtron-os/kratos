@@ -4,19 +4,18 @@
 package errorx
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
 
+	"github.com/ory/herodot"
+	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
-
-	"github.com/ory/x/stringsx"
-
-	"github.com/ory/kratos/driver/config"
-
-	"github.com/ory/herodot"
-	"github.com/ory/kratos/x"
 	"github.com/ory/nosurf"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/httpx"
 )
 
 const RouteGet = "/self-service/errors"
@@ -25,7 +24,7 @@ var stub500, _ = json.Marshal(herodot.ErrInternalServerError.WithReasonf("This i
 
 type (
 	handlerDependencies interface {
-		x.WriterProvider
+		httpx.WriterProvider
 		PersistenceProvider
 		config.Provider
 	}
@@ -48,11 +47,11 @@ func (h *Handler) WithTokenGenerator(f func(r *http.Request) string) {
 	h.csrf = f
 }
 
-func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(public *httprouterx.RouterPublic) {
 	public.GET(RouteGet, h.publicFetchError)
 }
 
-func (h *Handler) RegisterAdminRoutes(public *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(public *httprouterx.RouterAdmin) {
 	public.GET(RouteGet, redir.RedirectToPublicRoute(h.r))
 }
 
@@ -90,6 +89,9 @@ type getFlowError struct {
 //	  403: errorGeneric
 //	  404: errorGeneric
 //	  500: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-low
 func (h *Handler) publicFetchError(w http.ResponseWriter, r *http.Request) {
 	if err := h.fetchError(w, r); err != nil {
 		h.r.Writer().WriteError(w, r, err)
@@ -98,10 +100,7 @@ func (h *Handler) publicFetchError(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) fetchError(w http.ResponseWriter, r *http.Request) error {
-	id :=
-		stringsx.Coalesce(
-			r.URL.Query().Get("error"), // https://github.com/ory/kratos/issues/1507
-			r.URL.Query().Get("id"))
+	id := cmp.Or(r.URL.Query().Get("error"), r.URL.Query().Get("id"))
 	switch id {
 	case "stub:500":
 		h.r.Writer().Write(w, r, &ErrorContainer{ID: x.NewUUID(), Errors: stub500})

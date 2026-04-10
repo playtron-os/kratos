@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 
 	"github.com/ory/kratos/x"
 
@@ -15,7 +16,6 @@ import (
 	"golang.org/x/oauth2/github"
 
 	"github.com/ory/x/httpx"
-	"github.com/ory/x/stringslice"
 	"github.com/ory/x/stringsx"
 
 	ghapi "github.com/google/go-github/v38/github"
@@ -65,7 +65,7 @@ func (g *ProviderGitHub) AuthCodeURLOptions(r ider) []oauth2.AuthCodeOption {
 func (g *ProviderGitHub) Claims(ctx context.Context, exchange *oauth2.Token, query url.Values) (*Claims, error) {
 	grantedScopes := stringsx.Splitx(fmt.Sprintf("%s", exchange.Extra("scope")), ",")
 	for _, check := range g.Config().Scope {
-		if !stringslice.Has(grantedScopes, check) {
+		if !slices.Contains(grantedScopes, check) {
 			return nil, errors.WithStack(ErrScopeMissing)
 		}
 	}
@@ -75,7 +75,7 @@ func (g *ProviderGitHub) Claims(ctx context.Context, exchange *oauth2.Token, que
 
 	user, _, err := gh.Users.Get(ctx, "")
 	if err != nil {
-		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
+		return nil, errors.WithStack(herodot.ErrUpstreamError.WithWrap(err).WithReasonf("%s", err))
 	}
 
 	claims := &Claims{
@@ -91,10 +91,10 @@ func (g *ProviderGitHub) Claims(ctx context.Context, exchange *oauth2.Token, que
 
 	// GitHub does not provide the user's private emails in the call to `/user`. Therefore, if scope "user:email" is set,
 	// we want to make another request to `/user/emails` and merge that with our claims.
-	if stringslice.Has(grantedScopes, "user:email") {
+	if slices.Contains(grantedScopes, "user:email") {
 		emails, _, err := gh.Users.ListEmails(ctx, nil)
 		if err != nil {
-			return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
+			return nil, errors.WithStack(herodot.ErrUpstreamError.WithWrap(err).WithReasonf("%s", err))
 		}
 
 		for k, e := range emails {

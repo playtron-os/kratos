@@ -29,12 +29,6 @@ func (s *Strategy) VerificationStrategyID() string {
 	return string(verification.VerificationStrategyCode)
 }
 
-func (s *Strategy) RegisterPublicVerificationRoutes(public *x.RouterPublic) {
-}
-
-func (s *Strategy) RegisterAdminVerificationRoutes(admin *x.RouterAdmin) {
-}
-
 // PopulateVerificationMethod set's the appropriate UI nodes on this flow
 //
 // If the flow's state is `sent_email`, the `code` input and the success notification is set
@@ -52,7 +46,7 @@ func (s *Strategy) decodeVerification(r *http.Request) (*updateVerificationFlowW
 		return nil, errors.WithStack(err)
 	}
 
-	if err := s.dx.Decode(r, &body, compiler,
+	if err := decoderx.Decode(r, &body, compiler,
 		decoderx.HTTPDecoderUseQueryAndBody(),
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
@@ -212,7 +206,7 @@ func (s *Strategy) verificationHandleFormSubmission(ctx context.Context, w http.
 		return s.handleVerificationError(r, f, body, err)
 	}
 
-	if err := s.deps.CodeSender().SendVerificationCode(ctx, f, identity.VerifiableAddressTypeEmail, body.Email); err != nil {
+	if err := s.deps.CodeSender().SendVerificationCode(ctx, f, identity.AddressTypeEmail, body.Email); err != nil {
 		if !errors.Is(err, ErrUnknownAddress) {
 			return s.handleVerificationError(r, f, body, err)
 		}
@@ -307,7 +301,7 @@ func (s *Strategy) retryVerificationFlowWithMessage(ctx context.Context, w http.
 		Debug("A verification flow is being retried because a validation error occurred.")
 
 	f, err := verification.NewFlow(s.deps.Config(),
-		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, s, ft)
+		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, verification.Strategies{s}, ft)
 	if err != nil {
 		return s.handleVerificationError(r, f, nil, err)
 	}
@@ -335,7 +329,7 @@ func (s *Strategy) retryVerificationFlowWithError(ctx context.Context, w http.Re
 		Debug("A verification flow is being retried because an error occurred.")
 
 	f, err := verification.NewFlow(s.deps.Config(),
-		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, s, ft)
+		s.deps.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, verification.Strategies{s}, ft)
 	if err != nil {
 		return s.handleVerificationError(r, f, nil, err)
 	}

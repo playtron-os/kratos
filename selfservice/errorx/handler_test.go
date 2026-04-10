@@ -12,41 +12,40 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ory/kratos/x/nosurfx"
-
-	"github.com/ory/x/assertx"
-
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
 	"github.com/ory/herodot"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/selfservice/errorx"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/nosurf"
+	"github.com/ory/x/assertx"
 	"github.com/ory/x/errorsx"
+	"github.com/ory/x/httprouterx"
 )
 
 func TestHandler(t *testing.T) {
-	_, reg := internal.NewFastRegistryWithMocks(t)
+	_, reg := pkg.NewFastRegistryWithMocks(t)
 	h := errorx.NewHandler(reg)
 
 	t.Run("case=public authorization", func(t *testing.T) {
-		router := x.NewTestRouterPublic(t)
+		router := httprouterx.NewTestRouterPublic(t)
 		ns := nosurfx.NewTestCSRFHandler(router, reg)
 
 		h.RegisterPublicRoutes(router)
-		router.HandleFunc("GET /regen", func(w http.ResponseWriter, r *http.Request) {
+		router.Handler("GET", "/regen", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ns.RegenerateToken(w, r)
 			w.WriteHeader(http.StatusNoContent)
-		})
-		router.HandleFunc("GET /set-error", func(w http.ResponseWriter, r *http.Request) {
+		}))
+		router.Handler("GET", "/set-error", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id, err := reg.SelfServiceErrorPersister().CreateErrorContainer(context.Background(), nosurf.Token(r), herodot.ErrNotFound.WithReason("foobar"))
 			require.NoError(t, err)
 			_, _ = w.Write([]byte(id.String()))
-		})
+		}))
 
 		ts := httptest.NewServer(ns)
 		defer ts.Close()
@@ -54,7 +53,7 @@ func TestHandler(t *testing.T) {
 		getBody := func(t *testing.T, hc *http.Client, path string, expectedCode int) []byte {
 			res, err := hc.Get(ts.URL + path)
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			require.EqualValues(t, expectedCode, res.StatusCode)
 			body, err := io.ReadAll(res.Body)
 			require.NoError(t, err)
@@ -74,7 +73,7 @@ func TestHandler(t *testing.T) {
 	})
 
 	t.Run("case=stubs", func(t *testing.T) {
-		router := x.NewTestRouterPublic(t)
+		router := httprouterx.NewTestRouterPublic(t)
 		h.RegisterPublicRoutes(router)
 		ts := httptest.NewServer(router)
 		defer ts.Close()
@@ -90,7 +89,7 @@ func TestHandler(t *testing.T) {
 	})
 
 	t.Run("case=errors types", func(t *testing.T) {
-		router := x.NewTestRouterPublic(t)
+		router := httprouterx.NewTestRouterPublic(t)
 		h.RegisterPublicRoutes(router)
 		ts := httptest.NewServer(router)
 		defer ts.Close()
@@ -110,7 +109,7 @@ func TestHandler(t *testing.T) {
 
 				res, err := ts.Client().Get(ts.URL + errorx.RouteGet + "?id=" + id.String())
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				assert.EqualValues(t, http.StatusOK, res.StatusCode)
 
 				actual, err := io.ReadAll(res.Body)

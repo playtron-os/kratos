@@ -7,13 +7,13 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 
 	"github.com/ory/herodot"
 
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 
-	"github.com/ory/x/stringslice"
 	"github.com/ory/x/stringsx"
 
 	"github.com/slack-go/slack"
@@ -66,7 +66,7 @@ func (d *ProviderSlack) AuthCodeURLOptions(r ider) []oauth2.AuthCodeOption {
 func (d *ProviderSlack) Claims(ctx context.Context, exchange *oauth2.Token, query url.Values) (*Claims, error) {
 	grantedScopes := stringsx.Splitx(fmt.Sprintf("%s", exchange.Extra("scope")), ",")
 	for _, check := range d.Config().Scope {
-		if !stringslice.Has(grantedScopes, check) {
+		if !slices.Contains(grantedScopes, check) {
 			return nil, errors.WithStack(ErrScopeMissing)
 		}
 	}
@@ -74,7 +74,7 @@ func (d *ProviderSlack) Claims(ctx context.Context, exchange *oauth2.Token, quer
 	api := slack.New(exchange.AccessToken)
 	identity, err := api.GetUserIdentity()
 	if err != nil {
-		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
+		return nil, errors.WithStack(herodot.ErrUpstreamError.WithWrap(err).WithReasonf("%s", err))
 	}
 
 	claims := &Claims{

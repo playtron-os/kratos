@@ -1,4 +1,4 @@
-FROM golang:1.25-trixie AS builder
+FROM golang:1.26-trixie AS builder
 
 RUN apt-get update && apt-get upgrade -y &&\
   mkdir -p /var/lib/sqlite
@@ -11,9 +11,8 @@ COPY oryx/go.sum oryx/go.sum
 
 COPY go.mod go.mod
 COPY go.sum go.sum
-COPY internal/client-go/go.* internal/client-go/
+COPY pkg/client-go/go.* pkg/client-go/
 
-ENV GO111MODULE on
 ENV CGO_ENABLED 1
 ENV CGO_CPPFLAGS -DSQLITE_DEFAULT_FILE_PERMISSIONS=0600
 

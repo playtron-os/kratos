@@ -11,15 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ory/kratos/courier"
-	"github.com/ory/kratos/internal/testhelpers"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
+	"github.com/ory/x/configx"
+
+	"github.com/ory/kratos/courier"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/flow/verification"
@@ -32,14 +34,20 @@ var b64 = func(str string) string {
 }
 
 func TestSender(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/default.schema.json")
-	conf.MustSet(ctx, config.ViperKeyPublicBaseURL, "https://www.ory.sh/")
-	conf.MustSet(ctx, config.ViperKeyCourierSMTPURL, "smtp://foo@bar@dev.null/")
-	conf.MustSet(ctx, config.ViperKeyLinkBaseURL, "https://link-url/")
-	conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryNotifyUnknownRecipients, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceVerificationNotifyUnknownRecipients, true)
+	conf, reg := pkg.NewFastRegistryWithMocks(t,
+		configx.WithValues(testhelpers.DefaultIdentitySchemaConfig("file://./stub/default.schema.json")),
+		configx.WithValues(map[string]any{
+			config.ViperKeyPublicBaseURL:                                  "https://www.ory.sh/",
+			config.ViperKeyCourierSMTPURL:                                 "smtp://foo@bar@dev.null/",
+			config.ViperKeySelfServiceRecoveryNotifyUnknownRecipients:     true,
+			config.ViperKeySelfServiceVerificationNotifyUnknownRecipients: true,
+		}),
+	)
+
+	conf.MustSet(ctx, config.ViperKeyWebhookHeaderAllowlist, []string{"user-agent", "X-CUSTOM-HEADER"})
 
 	u := &http.Request{URL: urlx.ParseOrPanic("https://www.ory.sh/")}
 
@@ -57,13 +65,18 @@ func TestSender(t *testing.T) {
 	t.Run("method=SendRecoveryCode email", func(t *testing.T) {
 		recoveryCode := func(t *testing.T) {
 			t.Helper()
-			f, err := recovery.NewFlow(conf, time.Hour, "", u, code.NewStrategy(reg), flow.TypeBrowser)
+			f, err := recovery.NewFlow(conf, time.Hour, "", u, recovery.Strategies{code.NewStrategy(reg)}, flow.TypeBrowser)
 			require.NoError(t, err)
 
 			require.NoError(t, reg.RecoveryFlowPersister().CreateRecoveryFlow(ctx, f))
 
-			require.NoError(t, reg.CodeSender().SendRecoveryCode(ctx, f, "email", "tracked@ory.sh"))
-			require.ErrorIs(t, reg.CodeSender().SendRecoveryCode(ctx, f, "email", "not-tracked@ory.sh"), code.ErrUnknownAddress)
+			header := http.Header{}
+			header.Add("user-agent", "user-agent header")
+			header.Add("X-CUSTOM-HEADER", "x-custom header 1")
+			header.Add("X-Custom-header", "x-custom header 2")
+			header.Add("some-other-header", "some-other-value")
+			require.NoError(t, reg.CodeSender().SendRecoveryCode(ctx, f, "email", "tracked@ory.sh", header))
+			require.ErrorIs(t, reg.CodeSender().SendRecoveryCode(ctx, f, "email", "not-tracked@ory.sh", header), code.ErrUnknownAddress)
 		}
 
 		t.Run("case=with default templates", func(t *testing.T) {
@@ -81,6 +94,11 @@ func TestSender(t *testing.T) {
 			assert.Contains(t, messages[1].Subject, "Account access attempted")
 
 			assert.NotRegexp(t, testhelpers.CodeRegex, messages[1].Body, "Expected message to not contain an 6 digit recovery code, but it did: ", messages[1].Body)
+
+			headers := messages[0].RequestHeaders
+			assert.Equal(t, []any{"user-agent header"}, gjson.GetBytes(headers, "User-Agent").Value())
+			assert.Equal(t, []any{"x-custom header 1", "x-custom header 2"}, gjson.GetBytes(headers, "X-Custom-Header").Value())
+			assert.Empty(t, gjson.GetBytes(headers, "Some-Other-Header").Value(), "Expected Some-Other-Header to be empty")
 		})
 
 		t.Run("case=with custom templates", func(t *testing.T) {
@@ -106,19 +124,29 @@ func TestSender(t *testing.T) {
 			assert.EqualValues(t, "not-tracked@ory.sh", messages[1].Recipient)
 			assert.Equal(t, messages[1].Subject, subject+" invalid")
 			assert.Equal(t, messages[1].Body, body)
+
+			headers := messages[0].RequestHeaders
+			assert.Equal(t, []any{"user-agent header"}, gjson.GetBytes(headers, "User-Agent").Value())
+			assert.Equal(t, []any{"x-custom header 1", "x-custom header 2"}, gjson.GetBytes(headers, "X-Custom-Header").Value())
+			assert.Empty(t, gjson.GetBytes(headers, "Some-Other-Header").Value(), "Expected Some-Other-Header to be empty")
 		})
 	})
 
 	t.Run("method=SendRecoveryCode sms", func(t *testing.T) {
 		recoveryCode := func(t *testing.T) {
 			t.Helper()
-			f, err := recovery.NewFlow(conf, time.Hour, "", u, code.NewStrategy(reg), flow.TypeBrowser)
+			f, err := recovery.NewFlow(conf, time.Hour, "", u, recovery.Strategies{code.NewStrategy(reg)}, flow.TypeBrowser)
 			require.NoError(t, err)
 
 			require.NoError(t, reg.RecoveryFlowPersister().CreateRecoveryFlow(ctx, f))
 
-			require.NoError(t, reg.CodeSender().SendRecoveryCode(ctx, f, "sms", phoneNumberKnown))
-			require.ErrorIs(t, reg.CodeSender().SendRecoveryCode(ctx, f, "sms", phoneNumberUnknown), code.ErrUnknownAddress)
+			header := http.Header{}
+			header.Add("user-agent", "user-agent header")
+			header.Add("X-CUSTOM-HEADER", "x-custom header 1")
+			header.Add("X-Custom-header", "x-custom header 2")
+			header.Add("some-other-header", "some-other-value")
+			require.NoError(t, reg.CodeSender().SendRecoveryCode(ctx, f, "sms", phoneNumberKnown, header))
+			require.ErrorIs(t, reg.CodeSender().SendRecoveryCode(ctx, f, "sms", phoneNumberUnknown, header), code.ErrUnknownAddress)
 		}
 
 		t.Run("case=with default templates", func(t *testing.T) {
@@ -147,6 +175,10 @@ func TestSender(t *testing.T) {
 
 			assert.EqualValues(t, phoneNumberKnown, messages[0].Recipient)
 			assert.Contains(t, messages[0].Body, body)
+			headers := messages[0].RequestHeaders
+			assert.Equal(t, []any{"user-agent header"}, gjson.GetBytes(headers, "User-Agent").Value())
+			assert.Equal(t, []any{"x-custom header 1", "x-custom header 2"}, gjson.GetBytes(headers, "X-Custom-Header").Value())
+			assert.Empty(t, gjson.GetBytes(headers, "Some-Other-Header").Value(), "Expected Some-Other-Header to be empty")
 
 			assert.Regexp(t, testhelpers.CodeRegex, messages[0].Body)
 		})
@@ -156,7 +188,7 @@ func TestSender(t *testing.T) {
 		verificationFlow := func(t *testing.T) {
 			t.Helper()
 
-			f, err := verification.NewFlow(conf, time.Hour, "", u, code.NewStrategy(reg), flow.TypeBrowser)
+			f, err := verification.NewFlow(conf, time.Hour, "", u, verification.Strategies{code.NewStrategy(reg)}, flow.TypeBrowser)
 			require.NoError(t, err)
 
 			require.NoError(t, reg.VerificationFlowPersister().CreateVerificationFlow(ctx, f))
@@ -218,14 +250,14 @@ func TestSender(t *testing.T) {
 				flow:      "recovery",
 				configKey: config.ViperKeySelfServiceRecoveryNotifyUnknownRecipients,
 				send: func(t *testing.T) {
-					s, err := reg.RecoveryStrategies(ctx).Strategy("code")
+					s, _, err := reg.RecoveryStrategies(ctx).ActiveStrategies("code")
 					require.NoError(t, err)
 					f, err := recovery.NewFlow(conf, time.Hour, "", u, s, flow.TypeBrowser)
 					require.NoError(t, err)
 
 					require.NoError(t, reg.RecoveryFlowPersister().CreateRecoveryFlow(ctx, f))
 
-					err = reg.CodeSender().SendRecoveryCode(ctx, f, "email", "not-tracked@ory.sh")
+					err = reg.CodeSender().SendRecoveryCode(ctx, f, "email", "not-tracked@ory.sh", nil)
 					require.ErrorIs(t, err, code.ErrUnknownAddress)
 				},
 			},
@@ -233,7 +265,7 @@ func TestSender(t *testing.T) {
 				flow:      "verification",
 				configKey: config.ViperKeySelfServiceVerificationNotifyUnknownRecipients,
 				send: func(t *testing.T) {
-					s, err := reg.VerificationStrategies(ctx).Strategy("code")
+					s, _, err := reg.VerificationStrategies(ctx).ActiveStrategies("code")
 					require.NoError(t, err)
 					f, err := verification.NewFlow(conf, time.Hour, "", u, s, flow.TypeBrowser)
 					require.NoError(t, err)
@@ -246,10 +278,10 @@ func TestSender(t *testing.T) {
 			},
 		} {
 			t.Run("strategy="+tc.flow, func(t *testing.T) {
-				conf.Set(ctx, tc.configKey, false)
+				conf.MustSet(ctx, tc.configKey, false)
 
 				t.Cleanup(func() {
-					conf.Set(ctx, tc.configKey, true)
+					conf.MustSet(ctx, tc.configKey, true)
 				})
 
 				tc.send(t)

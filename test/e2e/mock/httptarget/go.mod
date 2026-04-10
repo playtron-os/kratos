@@ -1,3 +1,3 @@
 module github.com/ory/mock
 
-go 1.25
+go 1.26

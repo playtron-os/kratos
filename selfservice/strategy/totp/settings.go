@@ -37,9 +37,6 @@ import (
 
 const InternalContextKeyURL = "url"
 
-func (s *Strategy) RegisterSettingsRoutes(_ *x.RouterPublic) {
-}
-
 func (s *Strategy) SettingsStrategyID() string {
 	return identity.CredentialsTypeTOTP.String()
 }
@@ -126,7 +123,7 @@ func (s *Strategy) decodeSettingsFlow(r *http.Request, dest interface{}) error {
 		return errors.WithStack(err)
 	}
 
-	return decoderx.NewHTTP().Decode(r, dest, compiler,
+	return decoderx.Decode(r, dest, compiler,
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
 		decoderx.HTTPDecoderSetValidatePayloads(true),
@@ -174,7 +171,7 @@ func (s *Strategy) continueSettingsFlow(ctx context.Context, r *http.Request, ct
 func (s *Strategy) continueSettingsFlowAddTOTP(ctx context.Context, ctxUpdate *settings.UpdateContext, p updateSettingsFlowWithTotpMethod) (*identity.Identity, error) {
 	keyURL := gjson.GetBytes(ctxUpdate.Flow.InternalContext, flow.PrefixInternalContextKey(s.ID(), InternalContextKeyURL)).String()
 	if len(keyURL) == 0 {
-		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Could not find they TOTP key in the internal context. This is a code bug and should be reported to https://github.com/ory/kratos/."))
+		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Could not find the TOTP key in the internal context. This is a code bug and should be reported to https://github.com/ory/kratos/."))
 	}
 
 	key, err := otp.NewKeyFromURL(keyURL)

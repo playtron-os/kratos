@@ -7,12 +7,12 @@ import (
 	"database/sql"
 	"net/http"
 
-	"google.golang.org/grpc/codes"
-
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgconn"
+	pgxconn "github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc/codes"
 
 	"github.com/ory/herodot"
 )
@@ -45,6 +45,12 @@ var (
 		StatusField:   http.StatusText(http.StatusInternalServerError),
 		ErrorField:    "Unable to locate the table",
 	}
+	ErrNoSuchColumn = &herodot.DefaultError{
+		CodeField:     http.StatusInternalServerError,
+		GRPCCodeField: codes.Internal,
+		StatusField:   http.StatusText(http.StatusInternalServerError),
+		ErrorField:    "Unable to locate the column",
+	}
 )
 
 func handlePostgres(err error, sqlState string) error {
@@ -56,6 +62,8 @@ func handlePostgres(err error, sqlState string) error {
 		return errors.WithStack(ErrConcurrentUpdate.WithWrap(err))
 	case "42P01": // "no such table"
 		return errors.WithStack(ErrNoSuchTable.WithWrap(err))
+	case "42703": // "no such column"
+		return errors.WithStack(ErrNoSuchColumn.WithWrap(err))
 	}
 	return errors.WithStack(err)
 }
@@ -74,22 +82,26 @@ func HandleError(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return errors.WithStack(ErrNoRows)
 	} else if errors.As(err, &st) {
-		return handlePostgres(err, st.SQLState())
+		return errors.WithStack(handlePostgres(err, st.SQLState()))
 	} else if e := new(pq.Error); errors.As(err, &e) {
-		return handlePostgres(err, string(e.Code))
+		return errors.WithStack(handlePostgres(err, string(e.Code)))
 	} else if e := new(pgconn.PgError); errors.As(err, &e) {
-		return handlePostgres(err, e.Code)
+		return errors.WithStack(handlePostgres(err, e.Code))
+	} else if e := new(pgxconn.PgError); errors.As(err, &e) {
+		return errors.WithStack(handlePostgres(err, e.Code))
 	} else if e := new(mysql.MySQLError); errors.As(err, &e) {
 		switch e.Number {
-		case 1062:
+		case 1062: // https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_dup_entry
 			return errors.WithStack(ErrUniqueViolation.WithWrap(err))
-		case 1146:
+		case 1146: // https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_no_such_table
 			return errors.WithStack(ErrNoSuchTable.WithWrap(e))
+		case 1054: // https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_bad_field_error
+			return errors.WithStack(ErrNoSuchColumn.WithWrap(e))
 		}
 	}
 
 	if err := handleSqlite(err); err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 
 	return errors.WithStack(err)

@@ -10,17 +10,19 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/ory/kratos/x/redir"
 
-	"github.com/ory/x/pointerx"
+	"github.com/ory/x/otelx/semconv"
 	"github.com/ory/x/sqlcon"
 
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ory/herodot"
 	"github.com/ory/x/decoderx"
@@ -43,6 +45,10 @@ func (s *Strategy) RecoveryStrategyID() string {
 	return string(recovery.RecoveryStrategyCode)
 }
 
+func (s *Strategy) IsPrimary() bool {
+	return true
+}
+
 // This builds the initial UI (first recovery screen).
 func (s *Strategy) PopulateRecoveryMethod(r *http.Request, f *recovery.Flow) error {
 	switch f.State {
@@ -57,7 +63,9 @@ func (s *Strategy) PopulateRecoveryMethod(r *http.Request, f *recovery.Flow) err
 		f.UI = &container.Container{
 			Method: "POST",
 			Action: flow.AppendFlowTo(urlx.AppendPaths(s.deps.Config().SelfPublicURL(r.Context()), recovery.RouteSubmitFlow), f.ID).String(),
+			Nodes:  f.UI.Nodes,
 		}
+		f.UI.Nodes.ClearTransientNodes()
 		f.UI.SetCSRF(s.deps.GenerateCSRFToken(r))
 		f.UI.GetNodes().Append(
 			node.NewInputField("recovery_address", nil, node.CodeGroup, node.InputAttributeTypeText, node.WithRequiredInputAttribute).
@@ -289,7 +297,7 @@ func (s *Strategy) recoveryIssueSession(w http.ResponseWriter, r *http.Request, 
 		f.ContinueWith = append(f.ContinueWith, flow.NewContinueWithSetToken(sess.Token))
 	}
 
-	sf, err := s.deps.SettingsHandler().NewFlow(ctx, w, r, sess.Identity, f.Type)
+	sf, err := s.deps.SettingsHandler().NewFlow(ctx, w, r, sess.Identity, sess, f.Type)
 	if err != nil {
 		return s.retryRecoveryFlow(w, r, f.Type, RetryWithError(err))
 	}
@@ -321,6 +329,7 @@ func (s *Strategy) recoveryIssueSession(w http.ResponseWriter, r *http.Request, 
 			http.Redirect(w, r, redirectTo, http.StatusSeeOther)
 		}
 	} else {
+		trace.SpanFromContext(r.Context()).AddEvent(semconv.NewDeprecatedFeatureUsedEvent(r.Context(), "no_continue_with_transition_recovery_issue_session"))
 		if x.IsJSONRequest(r) {
 			s.deps.Writer().WriteError(w, r, flow.NewBrowserLocationChangeRequiredError(sf.AppendTo(s.deps.Config().SelfServiceFlowSettingsUI(r.Context())).String()))
 		} else {
@@ -406,7 +415,7 @@ func (s *Strategy) retryRecoveryFlow(w http.ResponseWriter, r *http.Request, ft 
 	ctx := r.Context()
 	config := s.deps.Config()
 
-	f, err := recovery.NewFlow(config, config.SelfServiceFlowRecoveryRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, s, ft)
+	f, err := recovery.NewFlow(config, config.SelfServiceFlowRecoveryRequestLifespan(ctx), s.deps.CSRFHandler().RegenerateToken(w, r), r, recovery.Strategies{s}, ft)
 	if err != nil {
 		return err
 	}
@@ -438,6 +447,7 @@ func (s *Strategy) retryRecoveryFlow(w http.ResponseWriter, r *http.Request, ft 
 			http.Redirect(w, r, f.AppendTo(config.SelfServiceFlowRecoveryUI(ctx)).String(), http.StatusSeeOther)
 		}
 	} else {
+		trace.SpanFromContext(r.Context()).AddEvent(semconv.NewDeprecatedFeatureUsedEvent(r.Context(), "no_continue_with_transition_recovery_retry_flow_handler"))
 		if x.IsJSONRequest(r) {
 			http.Redirect(w, r, urlx.CopyWithQuery(urlx.AppendPaths(config.SelfPublicURL(ctx),
 				recovery.RouteGetFlow), url.Values{"id": {f.ID.String()}}).String(), http.StatusSeeOther)
@@ -496,12 +506,18 @@ func (s *Strategy) recoveryV2HandleStateAwaitingAddress(r *http.Request, f *reco
 	f.UI = &container.Container{
 		Method: "POST",
 		Action: flow.AppendFlowTo(urlx.AppendPaths(s.deps.Config().SelfPublicURL(r.Context()), recovery.RouteSubmitFlow), f.ID).String(),
+		Nodes:  f.UI.Nodes,
 	}
+	f.UI.Nodes.ClearTransientNodes()
 
 	f.UI.SetCSRF(f.CSRFToken)
 
 	f.State = flow.StateRecoveryAwaitingAddressChoice
 	f.UI.Messages.Set(text.NewRecoveryAskToChooseAddress())
+
+	slices.SortFunc(recoveryAddresses, func(a, b identity.RecoveryAddress) int {
+		return strings.Compare(a.Value, b.Value)
+	})
 
 	for _, a := range recoveryAddresses {
 		// NOTE: Only send the masked value and the hash, to avoid information exfiltration.
@@ -559,15 +575,34 @@ func (s *Strategy) recoveryV2HandleStateAwaitingAddressChoice(r *http.Request, f
 	f.UI = &container.Container{
 		Method: "POST",
 		Action: flow.AppendFlowTo(urlx.AppendPaths(s.deps.Config().SelfPublicURL(r.Context()), recovery.RouteSubmitFlow), f.ID).String(),
+		Nodes:  f.UI.Nodes,
 	}
+	f.UI.Nodes.ClearTransientNodes()
 	f.UI.SetCSRF(f.CSRFToken)
 
 	f.State = flow.StateRecoveryAwaitingAddressConfirm
 	f.UI.Messages.Set(text.NewRecoveryAskForFullAddress())
 
+	// Retrieve the selected recovery address in plaintext to determine the input label and type.
+	var plaintextRecoveryAddress string
+	recoveryAddresses, err := s.deps.IdentityPool().FindAllRecoveryAddressesForIdentityByRecoveryAddressValue(r.Context(), body.RecoveryAddress)
+	if err == nil {
+		for _, a := range recoveryAddresses {
+			if subtle.ConstantTimeCompare([]byte(AddressToHashBase64(a.Value)), []byte(body.RecoverySelectAddress)) == 1 {
+				plaintextRecoveryAddress = a.Value
+				break
+			}
+		}
+	}
+	if plaintextRecoveryAddress == "" {
+		return herodot.ErrBadRequest.
+			WithReason("The selected recovery address is not valid.").
+			WithDebug("The selected recovery address does not match any of the known recovery addresses.")
+	}
+
 	var inputType node.UiNodeInputAttributeType
 	var label *text.Message
-	if strings.ContainsRune(body.RecoverySelectAddress, '@') {
+	if strings.ContainsRune(plaintextRecoveryAddress, '@') {
 		inputType = node.InputAttributeTypeEmail
 		label = text.NewInfoNodeInputEmail()
 	} else {
@@ -584,6 +619,9 @@ func (s *Strategy) recoveryV2HandleStateAwaitingAddressChoice(r *http.Request, f
 		GetNodes().
 		Append(node.NewInputField("method", s.RecoveryStrategyID(), node.CodeGroup, node.InputAttributeTypeSubmit).
 			WithMetaLabel(text.NewInfoNodeLabelContinue()))
+
+	f.UI.Nodes.Append(node.NewInputField("method", s.NodeGroup(), node.CodeGroup, node.InputAttributeTypeHidden))
+
 	buttonScreen := node.NewInputField("screen", "previous", node.CodeGroup, node.InputAttributeTypeSubmit).
 		WithMetaLabel(text.NewRecoveryBack())
 	f.UI.GetNodes().Append(buttonScreen)
@@ -610,19 +648,10 @@ func (s *Strategy) recoveryV2HandleStateConfirmingAddress(r *http.Request, f *re
 
 	f.TransientPayload = body.TransientPayload
 
-	var addressType identity.RecoveryAddressType
-	// Inferring the address type like this is a bit hacky, and actually not really necessary.
-	// That's because `SendRecoveryCode` expects it, but not because it fundamentally is required.
-	if strings.ContainsRune(body.RecoveryConfirmAddress, '@') {
-		addressType = identity.RecoveryAddressTypeEmail
-	} else {
-		addressType = identity.RecoveryAddressTypeSMS
-	}
-
 	// NOTE: We do not fetch the db address here. We only (try to) send the code to the user provided address.
 	// That way we avoid information exfiltration.
 	// `SendRecoveryCode` will anyway check by itself if the provided address is a known address or not.
-	if err := s.deps.CodeSender().SendRecoveryCode(r.Context(), f, addressType, body.RecoveryConfirmAddress); err != nil {
+	if err := s.deps.CodeSender().SendRecoveryCode(r.Context(), f, hackyInferChannel(body.RecoveryConfirmAddress), body.RecoveryConfirmAddress, r.Header); err != nil {
 		if !errors.Is(err, ErrUnknownAddress) {
 			return err
 		}
@@ -634,7 +663,9 @@ func (s *Strategy) recoveryV2HandleStateConfirmingAddress(r *http.Request, f *re
 	f.UI = &container.Container{
 		Method: "POST",
 		Action: flow.AppendFlowTo(urlx.AppendPaths(s.deps.Config().SelfPublicURL(r.Context()), recovery.RouteSubmitFlow), f.ID).String(),
+		Nodes:  f.UI.Nodes,
 	}
+	f.UI.Nodes.ClearTransientNodes()
 	f.UI.SetCSRF(f.CSRFToken)
 
 	f.State = flow.StateRecoveryAwaitingCode
@@ -653,6 +684,8 @@ func (s *Strategy) recoveryV2HandleStateConfirmingAddress(r *http.Request, f *re
 	f.UI.Nodes.Append(node.NewInputField("method", s.NodeGroup(), node.CodeGroup, node.InputAttributeTypeSubmit).
 		WithMetaLabel(text.NewInfoNodeLabelContinue()),
 	)
+
+	f.UI.Nodes.Append(node.NewInputField("method", s.NodeGroup(), node.CodeGroup, node.InputAttributeTypeHidden))
 
 	// Required to make 'resend' work.
 	f.UI.Nodes.Append(node.NewInputField("recovery_confirm_address", body.RecoveryConfirmAddress, node.CodeGroup, node.InputAttributeTypeSubmit).
@@ -743,7 +776,7 @@ func (s *Strategy) recoveryHandleFormSubmission(w http.ResponseWriter, r *http.R
 	}
 
 	f.TransientPayload = body.TransientPayload
-	if err := s.deps.CodeSender().SendRecoveryCode(ctx, f, identity.RecoveryAddressTypeEmail, body.Email); err != nil {
+	if err := s.deps.CodeSender().SendRecoveryCode(ctx, f, identity.AddressTypeEmail, body.Email, r.Header); err != nil {
 		if !errors.Is(err, ErrUnknownAddress) {
 			return s.HandleRecoveryError(w, r, f, body, err)
 		}
@@ -754,7 +787,9 @@ func (s *Strategy) recoveryHandleFormSubmission(w http.ResponseWriter, r *http.R
 	f.UI = &container.Container{
 		Method: "POST",
 		Action: flow.AppendFlowTo(urlx.AppendPaths(s.deps.Config().SelfPublicURL(r.Context()), recovery.RouteSubmitFlow), f.ID).String(),
+		Nodes:  f.UI.Nodes,
 	}
+	f.UI.Nodes.ClearTransientNodes()
 
 	f.UI.SetCSRF(s.deps.GenerateCSRFToken(r))
 
@@ -789,7 +824,7 @@ func (s *Strategy) markRecoveryAddressVerified(w http.ResponseWriter, r *http.Re
 	for k, v := range id.VerifiableAddresses {
 		if v.Value == recoveryAddress.Value {
 			id.VerifiableAddresses[k].Verified = true
-			id.VerifiableAddresses[k].VerifiedAt = pointerx.Ptr(sqlxx.NullTime(time.Now().UTC()))
+			id.VerifiableAddresses[k].VerifiedAt = new(sqlxx.NullTime(time.Now().UTC()))
 			id.VerifiableAddresses[k].Status = identity.VerifiableAddressStatusCompleted
 			if err := s.deps.PrivilegedIdentityPool().UpdateVerifiableAddress(r.Context(), &id.VerifiableAddresses[k], "verified", "verified_at", "status"); err != nil {
 				return s.HandleRecoveryError(w, r, f, nil, err)
@@ -844,7 +879,7 @@ func (s *Strategy) decodeRecovery(r *http.Request) (*recoverySubmitPayload, erro
 		return nil, errors.WithStack(err)
 	}
 
-	if err := s.dx.Decode(r, &body, compiler,
+	if err := decoderx.Decode(r, &body, compiler,
 		decoderx.HTTPDecoderUseQueryAndBody(),
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST"),

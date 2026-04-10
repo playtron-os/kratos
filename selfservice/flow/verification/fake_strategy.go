@@ -19,6 +19,10 @@ func (f FakeStrategy) VerificationStrategyID() string {
 	return "fake"
 }
 
+func (f FakeStrategy) IsPrimary() bool {
+	return true
+}
+
 func (f FakeStrategy) VerificationNodeGroup() node.UiNodeGroup {
 	return "fake"
 }

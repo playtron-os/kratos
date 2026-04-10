@@ -41,16 +41,17 @@ func (m *RegistryDefault) RecoveryStrategies(ctx context.Context) (recoveryStrat
 	return
 }
 
-// GetActiveRecoveryStrategy returns the currently active recovery strategy
-// If no recovery strategy has been set, an error is returned
-func (m *RegistryDefault) GetActiveRecoveryStrategy(ctx context.Context) (recovery.Strategy, error) {
+// GetActiveRecoveryStrategies returns the currently active recovery strategies.
+// It returns a list of all strategies and the specific primary strategy.
+// If no primary recovery strategy has been set, an error is returned.
+func (m *RegistryDefault) GetActiveRecoveryStrategies(ctx context.Context) (active recovery.Strategies, primary recovery.Strategy, err error) {
 	as := m.Config().SelfServiceFlowRecoveryUse(ctx)
-	s, err := m.RecoveryStrategies(ctx).Strategy(as)
+	s, ps, err := m.RecoveryStrategies(ctx).ActiveStrategies(as)
 	if err != nil {
-		return nil, errors.WithStack(herodot.ErrBadRequest.
+		return nil, ps, errors.WithStack(herodot.ErrBadRequest.
 			WithReasonf("You attempted recovery using %s, which is not enabled or does not exist. An administrator needs to enable this recovery method.", as))
 	}
-	return s, nil
+	return s, ps, nil
 }
 
 func (m *RegistryDefault) AllRecoveryStrategies() (recoveryStrategies recovery.Strategies) {

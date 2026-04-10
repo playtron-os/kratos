@@ -53,12 +53,59 @@ for i in "$@"; do
 done
 
 cleanup() {
-    killall modd || true
-    killall webhook || true
-    killall hydra || true
-    killall hydra-login-consent || true
-    killall hydra-kratos-login-consent || true
-    docker kill kratos_test_hydra || true
+    # Temporarily disable exit on error for cleanup (services may not be running)
+    set +e
+
+    echo "=== E2E Cleanup ==="
+
+    # Step 1: Kill process supervisors FIRST (they respawn children)
+    echo "Killing process supervisors (modd, nodemon)..."
+    pkill -9 -f "modd" 2>/dev/null
+    pkill -9 -f "nodemon" 2>/dev/null
+    sleep 2
+
+    # Step 2: Kill Kratos and webhook (were managed by modd)
+    echo "Killing Kratos and webhook..."
+    pkill -9 -f "kratos serve" 2>/dev/null
+    pkill -9 -f "\.bin/kratos" 2>/dev/null
+    pkill -9 -f "\.bin/webhook" 2>/dev/null
+    killall kratos 2>/dev/null
+    killall webhook 2>/dev/null
+
+    # Step 3: Kill Node.js services
+    echo "Killing Node.js services..."
+    pkill -9 -f "node.*proxy" 2>/dev/null
+    pkill -9 -f "kratos-selfservice-ui-node" 2>/dev/null
+    pkill -9 -f "kratos-selfservice-ui-react-nextjs" 2>/dev/null
+    pkill -9 -f "expo" 2>/dev/null
+    pkill -9 -f "webpack.*19006" 2>/dev/null
+
+    # Step 4: Kill Hydra processes
+    echo "Killing Hydra processes..."
+    killall hydra 2>/dev/null
+    killall hydra-login-consent 2>/dev/null
+    killall hydra-kratos-login-consent 2>/dev/null
+    pkill -9 -f "hydra serve" 2>/dev/null
+
+    # Step 5: Kill any remaining processes on known ports
+    echo "Cleaning up any remaining port listeners..."
+    for port in 4433 4434 4444 4445 4446 4455 4456 4458 4744 4745 4746 19006; do
+        pid=$(lsof -ti:$port 2>/dev/null)
+        if [ -n "$pid" ]; then
+            echo "  Killing PID $pid on port $port"
+            kill -9 $pid 2>/dev/null
+        fi
+    done
+
+    # Step 6: Stop and remove Docker containers
+    echo "Stopping Docker containers..."
+    docker stop kratos_test_database_mysql kratos_test_database_postgres kratos_test_database_cockroach mailslurper kratos_test_hydra 2>/dev/null
+    docker rm kratos_test_database_mysql kratos_test_database_postgres kratos_test_database_cockroach mailslurper kratos_test_hydra 2>/dev/null
+
+    echo "=== Cleanup Complete ==="
+
+    # Re-enable exit on error
+    set -e
 }
 
 prepare() {
@@ -71,7 +118,7 @@ prepare() {
     docker rm -f kratos_test_database_mysql kratos_test_database_postgres kratos_test_database_cockroach || true
     docker run --name kratos_test_database_mysql -p 3444:3306 -e MYSQL_ROOT_PASSWORD=secret -d mysql:8.0
     docker run --name kratos_test_database_postgres -p 3445:5432 -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=postgres -d postgres:14 postgres -c log_statement=all
-    docker run --name kratos_test_database_cockroach -p 3446:26257 -d cockroachdb/cockroach:latest-v25.2 start-single-node --insecure
+    docker run --name kratos_test_database_cockroach -p 3446:26257 -d cockroachdb/cockroach:latest-v25.4 start-single-node --insecure
 
     export TEST_DATABASE_MYSQL="mysql://root:secret@(localhost:3444)/mysql?parseTime=true&multiStatements=true"
     export TEST_DATABASE_POSTGRESQL="postgres://postgres:secret@localhost:3445/postgres?sslmode=disable"
@@ -258,7 +305,8 @@ run() {
 
   (go tool modd -f test/e2e/modd.conf >"${base}/test/e2e/kratos.e2e.log" 2>&1 &)
 
-  npm run wait-on -- -l -t 7m http-get://127.0.0.1:4434/health/ready \
+  # Having to wait 10 minutes for cockroach to apply the migrations is ridiculous but sometimes it takes that long in CI
+  npm run wait-on -- -l -t 10m http-get://127.0.0.1:4434/health/ready \
     http-get://127.0.0.1:4444/.well-known/openid-configuration \
     http-get://127.0.0.1:4455/health/ready \
     http-get://127.0.0.1:4445/health/ready \

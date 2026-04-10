@@ -26,11 +26,13 @@ import (
 	"github.com/tidwall/gjson"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/ory/x/configx"
+
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/hash"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/x"
 	"github.com/ory/x/ioutilx"
@@ -43,23 +45,22 @@ import (
 var ignoreDefault = []string{"id", "schema_url", "state_changed_at", "created_at", "updated_at"}
 
 func TestHandler(t *testing.T) {
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	t.Parallel()
+
+	_, reg := pkg.NewFastRegistryWithMocks(t,
+		configx.WithValues(testhelpers.IdentitySchemasConfig(map[string]string{
+			"default":         "file://./stub/identity.schema.json",
+			"customer":        "file://./stub/handler/customer.schema.json",
+			"multiple_emails": "file://./stub/handler/multiple_emails.schema.json",
+			"employee":        "file://./stub/handler/employee.schema.json",
+		})),
+	)
 
 	// Start kratos server
 	publicTS, adminTS := testhelpers.NewKratosServerWithCSRF(t, reg)
 
 	mockServerURL := urlx.ParseOrPanic(publicTS.URL)
 	defaultSchemaExternalURL := (&schema.Schema{ID: "default"}).SchemaURL(mockServerURL).String()
-
-	conf.MustSet(ctx, config.ViperKeyAdminBaseURL, adminTS.URL)
-	testhelpers.SetIdentitySchemas(t, conf, map[string]string{
-		"default":         "file://./stub/identity.schema.json",
-		"customer":        "file://./stub/handler/customer.schema.json",
-		"multiple_emails": "file://./stub/handler/multiple_emails.schema.json",
-		"employee":        "file://./stub/handler/employee.schema.json",
-	})
-
-	conf.MustSet(ctx, config.ViperKeyPublicBaseURL, mockServerURL.String())
 
 	getFull := func(t *testing.T, base *httptest.Server, href string, expectCode int) (gjson.Result, *http.Response) {
 		t.Helper()
@@ -69,7 +70,7 @@ func TestHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
 
-		require.EqualValues(t, expectCode, res.StatusCode, "%s", body)
+		require.EqualValuesf(t, expectCode, res.StatusCode, "%s", body)
 		return gjson.ParseBytes(body), res
 	}
 
@@ -86,7 +87,7 @@ func TestHandler(t *testing.T) {
 
 		res, err := base.Client().Do(req)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 
 		require.EqualValues(t, expectCode, res.StatusCode, "%s", ioutilx.MustReadAll(res.Body))
 	}
@@ -197,7 +198,10 @@ func TestHandler(t *testing.T) {
 	t.Run("case=should create an identity with an organization ID", func(t *testing.T) {
 		for name, ts := range map[string]*httptest.Server{"public": publicTS, "admin": adminTS} {
 			t.Run("endpoint="+name, func(t *testing.T) {
-				orgID := uuid.NullUUID{x.NewUUID(), true}
+				orgID := uuid.NullUUID{
+					UUID:  x.NewUUID(),
+					Valid: true,
+				}
 				i := identity.CreateIdentityBody{
 					Traits:         []byte(`{"bar":"baz"}`),
 					OrganizationID: orgID,
@@ -228,7 +232,7 @@ func TestHandler(t *testing.T) {
 		ignoreDefault := []string{"id", "schema_url", "state_changed_at", "created_at", "updated_at"}
 		t.Run("without any credentials", func(t *testing.T) {
 			res := send(t, adminTS, "POST", "/identities", http.StatusCreated, identity.CreateIdentityBody{Traits: []byte(`{"email": "import-1@ory.sh"}`)})
-			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 			require.NoError(t, err)
 
 			snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(ignoreDefault...))
@@ -236,7 +240,7 @@ func TestHandler(t *testing.T) {
 
 		t.Run("without traits", func(t *testing.T) {
 			res := send(t, adminTS, "POST", "/identities", http.StatusCreated, json.RawMessage("{}"))
-			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 			require.NoError(t, err)
 
 			snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(ignoreDefault...))
@@ -274,7 +278,7 @@ func TestHandler(t *testing.T) {
 				},
 			})
 
-			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 			require.NoError(t, err)
 
 			snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(append(ignoreDefault, "hashed_password")...), snapshotx.ExceptPaths("credentials.oidc.identifiers"))
@@ -289,7 +293,7 @@ func TestHandler(t *testing.T) {
 			assert.Contains(t, identifiers, "okta:import-saml-2")
 			assert.Contains(t, identifiers, "onelogin:import-saml-2")
 
-			require.NoError(t, hash.Compare(ctx, []byte("123456"), []byte(gjson.GetBytes(actual.Credentials[identity.CredentialsTypePassword].Config, "hashed_password").String())))
+			require.NoError(t, hash.Compare(t.Context(), []byte("123456"), []byte(gjson.GetBytes(actual.Credentials[identity.CredentialsTypePassword].Config, "hashed_password").String())))
 		})
 
 		t.Run("with organization oidc and saml credentials", func(t *testing.T) {
@@ -316,7 +320,7 @@ func TestHandler(t *testing.T) {
 				},
 			})
 
-			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 			require.NoError(t, err)
 
 			snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(append(ignoreDefault, "hashed_password")...), snapshotx.ExceptPaths("credentials.oidc.identifiers"))
@@ -386,12 +390,12 @@ func TestHandler(t *testing.T) {
 							Config: identity.AdminIdentityImportCredentialsPasswordConfig{HashedPassword: tt.hash},
 						}},
 					})
-					actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+					actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 					require.NoError(t, err)
 
 					snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(ignoreDefault...), snapshotx.ExceptNestedKeys("hashed_password"))
 
-					require.NoError(t, hash.Compare(ctx, []byte(tt.pass), []byte(gjson.GetBytes(actual.Credentials[identity.CredentialsTypePassword].Config, "hashed_password").String())))
+					require.NoError(t, hash.Compare(t.Context(), []byte(tt.pass), []byte(gjson.GetBytes(actual.Credentials[identity.CredentialsTypePassword].Config, "hashed_password").String())))
 				})
 			}
 		})
@@ -403,7 +407,7 @@ func TestHandler(t *testing.T) {
 					Config: identity.AdminIdentityImportCredentialsPasswordConfig{UsePasswordMigrationHook: true},
 				}},
 			})
-			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 			require.NoError(t, err)
 
 			snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(ignoreDefault...), snapshotx.ExceptNestedKeys("hashed_password"))
@@ -418,12 +422,12 @@ func TestHandler(t *testing.T) {
 				VerifiableAddresses: []identity.VerifiableAddress{{
 					Verified: true,
 					Value:    "UpperCased@ory.sh",
-					Via:      identity.VerifiableAddressTypeEmail,
+					Via:      identity.AddressTypeEmail,
 					Status:   identity.VerifiableAddressStatusCompleted,
 				}},
 				RecoveryAddresses: []identity.RecoveryAddress{{Value: "UpperCased@ory.sh"}},
 			})
-			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+			actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 			require.NoError(t, err)
 
 			require.Len(t, actual.VerifiableAddresses, 1)
@@ -518,7 +522,7 @@ func TestHandler(t *testing.T) {
 				if token == "" {
 					return ""
 				}
-				c, err := reg.Cipher(ctx).Encrypt(context.Background(), []byte(token+suffix))
+				c, err := reg.Cipher(t.Context()).Encrypt(context.Background(), []byte(token+suffix))
 				require.NoError(t, err)
 				return c
 			}
@@ -819,7 +823,7 @@ func TestHandler(t *testing.T) {
 		})
 
 		t.Run("case=should return decrypted token", func(t *testing.T) {
-			e, _ := reg.Cipher(ctx).Encrypt(context.Background(), []byte("foo_token"))
+			e, _ := reg.Cipher(t.Context()).Encrypt(context.Background(), []byte("foo_token"))
 			id := createOIDCorSAMLIdentity(t, identity.CredentialsTypeOIDC, "foo-failed-2.oidc@bar.com", e, "bar_token", "id_token", false)
 			for name, ts := range map[string]*httptest.Server{"public": publicTS, "admin": adminTS} {
 				t.Run("endpoint="+name, func(t *testing.T) {
@@ -910,7 +914,7 @@ func TestHandler(t *testing.T) {
 					assert.NotEqualValues(t, i.StateChangedAt, sqlxx.NullTime(res.Get("state_changed_at").Time()), "%s", res.Raw)
 					actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(context.Background(), i.ID)
 					require.NoError(t, err)
-					require.NoError(t, hash.Compare(ctx, []byte("pswd1234"), []byte(gjson.GetBytes(actual.Credentials[identity.CredentialsTypePassword].Config, "hashed_password").String())))
+					require.NoError(t, hash.Compare(t.Context(), []byte("pswd1234"), []byte(gjson.GetBytes(actual.Credentials[identity.CredentialsTypePassword].Config, "hashed_password").String())))
 				})
 			}
 		})
@@ -1038,6 +1042,7 @@ func TestHandler(t *testing.T) {
 					{Create: validCreateIdentityBody(t, "valid", 3, false)},
 					{Create: &identity.CreateIdentityBody{Traits: json.RawMessage(`"invalid traits"`)}}, // <-- invalid traits
 					{Create: validCreateIdentityBody(t, "valid", 4, false)},
+					{Create: &identity.CreateIdentityBody{SchemaID: "nonexistent_schema", Traits: json.RawMessage(`{}`)}}, // <-- invalid schema ID
 				}
 				expectedToPass := []*identity.BatchIdentityPatch{patches[0], patches[1], patches[3], patches[5], patches[7]}
 
@@ -1054,7 +1059,7 @@ func TestHandler(t *testing.T) {
 				var actions []string
 				require.NoErrorf(t, json.Unmarshal(([]byte)(body.Get("identities.#.action").Raw), &actions), "%s", body)
 				assert.Equalf(t,
-					[]string{"create", "create", "error", "create", "error", "create", "error", "create"},
+					[]string{"create", "create", "error", "create", "error", "create", "error", "create", "error"},
 					actions, "%s", body)
 
 				// Check that all patch IDs are returned
@@ -1066,11 +1071,20 @@ func TestHandler(t *testing.T) {
 				assert.Equal(t, "Bad Request", body.Get("identities.2.error.status").String())
 				assert.Equal(t, "Conflict", body.Get("identities.4.error.status").String())
 				assert.Equal(t, "Bad Request", body.Get("identities.6.error.status").String())
+				assert.Equal(t, "Bad Request", body.Get("identities.8.error.status").String())
+
+				// Check that error reasons are specific, not generic
+				assert.NotEqualf(t, "The request was malformed or contained invalid parameters",
+					body.Get("identities.2.error.reason").String(), "error reason should be specific, not generic: %s", body)
+				assert.NotEqualf(t, "The request was malformed or contained invalid parameters",
+					body.Get("identities.6.error.reason").String(), "error reason should be specific, not generic: %s", body)
+				assert.Containsf(t, body.Get("identities.8.error.reason").String(),
+					"Unable to find JSON Schema ID: nonexistent_schema", "error reason should mention the missing schema ID: %s", body)
 
 				var identityIDs []uuid.UUID
 				require.NoErrorf(t, json.Unmarshal(([]byte)(body.Get("identities.#.identity").Raw), &identityIDs), "%s", body)
 
-				actualIdentities, _, err := reg.Persister().ListIdentities(ctx, identity.ListIdentityParameters{IdsFilter: identityIDs})
+				actualIdentities, _, err := reg.Persister().ListIdentities(t.Context(), identity.ListIdentityParameters{IdsFilter: identityIDs})
 				require.NoError(t, err)
 				actualIdentityIDs := make([]uuid.UUID, len(actualIdentities))
 				for i, id := range actualIdentities {
@@ -1090,6 +1104,68 @@ func TestHandler(t *testing.T) {
 				assert.Equal(t, expectedTraits, actualTraits)
 			})
 
+			t.Run("case=per-item errors surface specific reasons", func(t *testing.T) {
+				// Regression test: batch endpoint must propagate specific error reasons
+				// instead of replacing them with the generic herodot.ErrBadRequest message.
+				uniqueSuffix := x.NewUUID().String()
+				patches := []*identity.BatchIdentityPatch{
+					// 0: valid identity (should succeed)
+					{Create: &identity.CreateIdentityBody{
+						SchemaID: "multiple_emails",
+						Traits:   json.RawMessage(fmt.Sprintf(`{"emails":["specific-err-%s@ory.sh"],"username":"specific-err-%s@ory.sh"}`, uniqueSuffix, uniqueSuffix)),
+						State:    "active",
+					}},
+					// 1: unknown schema ID
+					{Create: &identity.CreateIdentityBody{
+						SchemaID: "user_v1",
+						Traits:   json.RawMessage(`{"email":"test@ory.com"}`),
+					}},
+					// 2: another unknown schema ID
+					{Create: &identity.CreateIdentityBody{
+						SchemaID: "completely_made_up",
+						Traits:   json.RawMessage(`{}`),
+					}},
+					// 3: traits are not an object (schema validation error)
+					{Create: &identity.CreateIdentityBody{
+						SchemaID: "employee",
+						Traits:   json.RawMessage(`"just a string"`),
+					}},
+					// 4: empty body (missing schema defaults to "default", but no traits)
+					{Create: &identity.CreateIdentityBody{}},
+				}
+
+				req := &identity.BatchPatchIdentitiesBody{Identities: patches}
+				body := send(t, adminTS, "PATCH", "/identities", http.StatusOK, req)
+
+				var actions []string
+				require.NoErrorf(t, json.Unmarshal([]byte(body.Get("identities.#.action").Raw), &actions), "%s", body)
+				assert.Equalf(t, []string{"create", "error", "error", "error", "error"}, actions, "%s", body)
+
+				genericReason := "The request was malformed or contained invalid parameters"
+
+				// Index 1: unknown schema "user_v1"
+				assert.Equalf(t, float64(400), body.Get("identities.1.error.code").Float(), "%s", body)
+				assert.Containsf(t, body.Get("identities.1.error.reason").String(),
+					"Unable to find JSON Schema ID: user_v1",
+					"expected specific schema-not-found reason: %s", body)
+
+				// Index 2: unknown schema "completely_made_up"
+				assert.Equalf(t, float64(400), body.Get("identities.2.error.code").Float(), "%s", body)
+				assert.Containsf(t, body.Get("identities.2.error.reason").String(),
+					"Unable to find JSON Schema ID: completely_made_up",
+					"expected specific schema-not-found reason: %s", body)
+
+				// Index 3: traits type mismatch (schema validation)
+				assert.Equalf(t, float64(400), body.Get("identities.3.error.code").Float(), "%s", body)
+				assert.NotEqualf(t, genericReason, body.Get("identities.3.error.reason").String(),
+					"schema validation error should have a specific reason: %s", body)
+
+				// Index 4: empty body (schema validation)
+				assert.Equalf(t, float64(400), body.Get("identities.4.error.code").Float(), "%s", body)
+				assert.NotEqualf(t, genericReason, body.Get("identities.4.error.reason").String(),
+					"empty body error should have a specific reason: %s", body)
+			})
+
 			t.Run("valid patches succeed", func(t *testing.T) {
 				validPatches := []*identity.BatchIdentityPatch{
 					{Create: validCreateIdentityBody(t, "valid-patch", 0, false)},
@@ -1101,6 +1177,62 @@ func TestHandler(t *testing.T) {
 				req := &identity.BatchPatchIdentitiesBody{Identities: validPatches}
 				send(t, adminTS, "PATCH", "/identities", http.StatusOK, req)
 			})
+		})
+
+		t.Run("case=external_id conflict returns per-item error", func(t *testing.T) {
+			// Regression test for https://github.com/ory-corp/cloud/issues/10580
+			// When batch-importing identities with external_id and the external_id
+			// already exists, the endpoint should return a per-item conflict error
+			// instead of a 500 SQL syntax error.
+			externalID1 := "ext-conflict-" + x.NewUUID().String()
+			externalID2 := "ext-conflict-" + x.NewUUID().String()
+
+			// First call: create two identities with unique external_ids.
+			firstPatches := []*identity.BatchIdentityPatch{
+				{Create: &identity.CreateIdentityBody{
+					SchemaID:   "multiple_emails",
+					Traits:     json.RawMessage(fmt.Sprintf(`{"emails":["first-a-%s@ory.sh"],"username":"first-a-%s@ory.sh"}`, externalID1, externalID1)),
+					ExternalID: externalID1,
+					State:      "active",
+				}},
+				{Create: &identity.CreateIdentityBody{
+					SchemaID:   "multiple_emails",
+					Traits:     json.RawMessage(fmt.Sprintf(`{"emails":["first-b-%s@ory.sh"],"username":"first-b-%s@ory.sh"}`, externalID2, externalID2)),
+					ExternalID: externalID2,
+					State:      "active",
+				}},
+			}
+			res := send(t, adminTS, "PATCH", "/identities", http.StatusOK,
+				&identity.BatchPatchIdentitiesBody{Identities: firstPatches})
+			actions := res.Get("identities.#.action").Array()
+			require.Len(t, actions, 2)
+			assert.Equal(t, "create", actions[0].String())
+			assert.Equal(t, "create", actions[1].String())
+
+			// Second call: different traits/emails, but reuse the same external_ids.
+			// The only conflict is on external_id.
+			secondPatches := []*identity.BatchIdentityPatch{
+				{Create: &identity.CreateIdentityBody{
+					SchemaID:   "multiple_emails",
+					Traits:     json.RawMessage(fmt.Sprintf(`{"emails":["second-a-%s@ory.sh"],"username":"second-a-%s@ory.sh"}`, externalID1, externalID1)),
+					ExternalID: externalID1,
+					State:      "active",
+				}},
+				{Create: &identity.CreateIdentityBody{
+					SchemaID:   "multiple_emails",
+					Traits:     json.RawMessage(fmt.Sprintf(`{"emails":["second-b-%s@ory.sh"],"username":"second-b-%s@ory.sh"}`, externalID2, externalID2)),
+					ExternalID: externalID2,
+					State:      "active",
+				}},
+			}
+			res = send(t, adminTS, "PATCH", "/identities", http.StatusOK,
+				&identity.BatchPatchIdentitiesBody{Identities: secondPatches})
+			actions = res.Get("identities.#.action").Array()
+			require.Lenf(t, actions, 2, "%s", res.Raw)
+			assert.Equalf(t, "error", actions[0].String(), "expected conflict error for duplicate external_id: %s", res.Raw)
+			assert.Equalf(t, "Conflict", res.Get("identities.0.error.status").String(), "%s", res.Raw)
+			assert.Equalf(t, "error", actions[1].String(), "expected conflict error for duplicate external_id: %s", res.Raw)
+			assert.Equalf(t, "Conflict", res.Get("identities.1.error.status").String(), "%s", res.Raw)
 		})
 
 		t.Run("case=ignores create nil bodies", func(t *testing.T) {
@@ -1518,7 +1650,7 @@ func TestHandler(t *testing.T) {
 
 				send(t, ts, "PATCH", "/identities/"+i.ID.String(), http.StatusOK, &patch)
 
-				updated, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, i.ID)
+				updated, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), i.ID)
 				require.NoError(t, err)
 				assert.Equal(t, "foo",
 					gjson.GetBytes(updated.Credentials[identity.CredentialsTypePassword].Config, "hashed_password").String())
@@ -1534,7 +1666,7 @@ func TestHandler(t *testing.T) {
 			t.Helper()
 			email := x.NewUUID().String() + "@ory.sh"
 			password := "ljanf123akf"
-			p, err := reg.Hasher(ctx).Generate(context.Background(), []byte(password))
+			p, err := reg.Hasher(t.Context()).Generate(context.Background(), []byte(password))
 			require.NoError(t, err)
 			i := &identity.Identity{Traits: identity.Traits(`{"email":"` + email + `"}`)}
 			i.SetCredentials(identity.CredentialsTypePassword, identity.Credentials{
@@ -1835,10 +1967,10 @@ func TestHandler(t *testing.T) {
 		for name, ts := range map[string]*httptest.Server{"admin": adminTS} {
 			t.Run("endpoint="+name, func(t *testing.T) {
 				res := get(t, ts, "/identities", http.StatusOK)
-				assert.False(t, res.Get("0.credentials").Exists(), "credentials config should be omitted: %s", res.Raw)
-				assert.True(t, res.Get("0.metadata_public").Exists(), "metadata_public config should be included: %s", res.Raw)
-				assert.True(t, res.Get("0.metadata_admin").Exists(), "metadata_admin config should be included: %s", res.Raw)
-				assert.EqualValues(t, "baz", res.Get(`#(traits.bar=="baz").traits.bar`).String(), "%s", res.Raw)
+				assert.Empty(t, res.Get("#.credentials").Array(), "credentials config should be omitted")
+				assert.Equal(t, res.Get("#").Int(), res.Get("#.metadata_public|#").Int(), "metadata_public config should be included")
+				assert.Equal(t, res.Get("#").Int(), res.Get("#.metadata_admin|#").Int(), "metadata_admin config should be included")
+				assert.EqualValues(t, "baz", res.Get(`#(traits.bar=="baz").traits.bar`).String())
 			})
 		}
 	})
@@ -1849,7 +1981,7 @@ func TestHandler(t *testing.T) {
 				t.Run("endpoint="+name, func(t *testing.T) {
 					orgID := uuid.Must(uuid.NewV4())
 					email := x.NewUUID().String() + "@ory.sh"
-					require.NoError(t, reg.IdentityManager().Create(ctx, &identity.Identity{
+					require.NoError(t, reg.IdentityManager().Create(t.Context(), &identity.Identity{
 						Traits:         identity.Traits(`{"email":"` + email + `"}`),
 						OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 					}))
@@ -1875,7 +2007,7 @@ func TestHandler(t *testing.T) {
 				t.Run("endpoint="+name, func(t *testing.T) {
 					id := x.NewUUID()
 					res := get(t, ts, "/identities?organization_id="+id.String(), http.StatusOK)
-					assert.Len(t, res.Array(), 0)
+					assert.Empty(t, res.Array())
 				})
 			}
 		})
@@ -1901,16 +2033,16 @@ func TestHandler(t *testing.T) {
 			assert.True(t, foundSAML, "SAML credential included")
 		})
 
-		t.Run("include_credential=saml should not include SAML credentials config", func(t *testing.T) {
+		t.Run("include_credential=saml should not include SAML tokens", func(t *testing.T) {
 			res := get(t, adminTS, "/identities?include_credential=saml", http.StatusOK)
-			assert.False(t, res.Get("0.credentials.saml.config").Exists(), "SAML config should not be included: %s", res.Raw)
+			samlProviders := res.Get("#.credentials.saml.config.providers|@flatten")
+			assert.Greaterf(t, samlProviders.Get("#.subject|#").Int(), int64(0), "SAML config should contain subject: %s", samlProviders.Raw)
+			assert.Zerof(t, res.Get("#.initial_id_token|#").Int(), "SAML config should not contain initial_id_token: %s", samlProviders.Raw)
 		})
 		t.Run("include_credential=totp should not include OIDC credentials config", func(t *testing.T) {
 			res := get(t, adminTS, "/identities?include_credential=totp", http.StatusOK)
-			for _, id := range res.Array() {
-				assert.False(t, id.Get("credentials.oidc.config").Exists(), "OIDC config should not be included: %s", res.Raw)
-				assert.False(t, id.Get("credentials.saml.config").Exists(), "SAML config should not be included: %s", res.Raw)
-			}
+			assert.Empty(t, res.Get("#.credentials.oidc.config").Array(), "OIDC config should not be included")
+			assert.Empty(t, res.Get("#.credentials.saml.config").Array(), "SAML config should not be included")
 		})
 	})
 
@@ -2009,7 +2141,7 @@ func TestHandler(t *testing.T) {
 					},
 				})(t)
 				remove(t, ts, "/identities/"+i.ID.String()+"/credentials/password", http.StatusNoContent)
-				actual, creds, err := reg.PrivilegedIdentityPool().FindByCredentialsIdentifier(ctx, identity.CredentialsTypePassword, pwIdentifier)
+				actual, creds, err := reg.PrivilegedIdentityPool().FindByCredentialsIdentifier(t.Context(), identity.CredentialsTypePassword, pwIdentifier)
 				require.NoError(t, err)
 				assert.Equal(t, "{}", string(creds.Config))
 				assert.Equal(t, i.ID, actual.ID)
@@ -2156,7 +2288,7 @@ func TestHandler(t *testing.T) {
 				res := get(t, ts, "/identities/"+i.ID.String(), http.StatusOK)
 				assert.EqualValues(t, i.ID.String(), res.Get("id").String(), "%s", res.Raw)
 
-				actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+				actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 				require.NoError(t, err)
 				snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(append(ignoreDefault, "hashed_password")...), snapshotx.ExceptPaths("credentials.oidc.identifiers"))
 			})
@@ -2227,7 +2359,7 @@ func TestHandler(t *testing.T) {
 				res := get(t, ts, "/identities/"+i.ID.String(), http.StatusOK)
 				assert.EqualValues(t, i.ID.String(), res.Get("id").String(), "%s", res.Raw)
 
-				actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, uuid.FromStringOrNil(res.Get("id").String()))
+				actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), uuid.FromStringOrNil(res.Get("id").String()))
 				require.NoError(t, err)
 				snapshotx.SnapshotT(t, identity.WithCredentialsAndAdminMetadataInJSON(*actual), snapshotx.ExceptNestedKeys(append(ignoreDefault, "hashed_password")...), snapshotx.ExceptPaths("credentials.oidc.identifiers"))
 			})
@@ -2304,17 +2436,15 @@ func TestHandler(t *testing.T) {
 
 	t.Run("case=should paginate all identities", func(t *testing.T) {
 		// Start new server
-		conf, reg := internal.NewFastRegistryWithMocks(t)
+		_, reg := pkg.NewFastRegistryWithMocks(t,
+			configx.WithValues(testhelpers.IdentitySchemasConfig(map[string]string{
+				"default":         "file://./stub/identity.schema.json",
+				"customer":        "file://./stub/handler/customer.schema.json",
+				"multiple_emails": "file://./stub/handler/multiple_emails.schema.json",
+				"employee":        "file://./stub/handler/employee.schema.json",
+			})),
+		)
 		_, ts := testhelpers.NewKratosServerWithCSRF(t, reg)
-		mockServerURL := urlx.ParseOrPanic(publicTS.URL)
-		conf.MustSet(ctx, config.ViperKeyAdminBaseURL, ts.URL)
-		testhelpers.SetIdentitySchemas(t, conf, map[string]string{
-			"default":         "file://./stub/identity.schema.json",
-			"customer":        "file://./stub/handler/customer.schema.json",
-			"multiple_emails": "file://./stub/handler/multiple_emails.schema.json",
-			"employee":        "file://./stub/handler/employee.schema.json",
-		})
-		conf.MustSet(ctx, config.ViperKeyPublicBaseURL, mockServerURL.String())
 
 		var toCreate []*identity.Identity
 		count := 500
@@ -2417,13 +2547,13 @@ func validCreateIdentityBody(t *testing.T, prefix string, i int, plainPassword b
 		traits.Emails = append(traits.Emails, email)
 		verifiableAddresses = append(verifiableAddresses, identity.VerifiableAddress{
 			Value:    email,
-			Via:      identity.VerifiableAddressTypeEmail,
+			Via:      identity.AddressTypeEmail,
 			Verified: j%2 == 0,
 			Status:   verificationStates[j%len(verificationStates)],
 		})
 		recoveryAddresses = append(recoveryAddresses, identity.RecoveryAddress{
 			Value: email,
-			Via:   identity.RecoveryAddressTypeEmail,
+			Via:   identity.AddressTypeEmail,
 		})
 	}
 	traits.Username = traits.Emails[0]

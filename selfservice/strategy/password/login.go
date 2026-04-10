@@ -5,6 +5,7 @@ package password
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -31,18 +32,14 @@ import (
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
 	"github.com/ory/x/decoderx"
-	"github.com/ory/x/stringsx"
 )
 
-var _ login.FormHydrator = new(Strategy)
-
-func (s *Strategy) RegisterLoginRoutes(r *x.RouterPublic) {
-}
+var _ login.AAL1FormHydrator = new(Strategy)
 
 func (s *Strategy) handleLoginError(r *http.Request, f *login.Flow, payload updateLoginFlowWithPasswordMethod, err error) error {
 	if f != nil {
 		f.UI.Nodes.ResetNodes("password")
-		f.UI.Nodes.SetValueAttribute("identifier", stringsx.Coalesce(payload.Identifier, payload.LegacyIdentifier))
+		f.UI.Nodes.SetValueAttribute("identifier", cmp.Or(payload.Identifier, payload.LegacyIdentifier))
 		if f.Type == flow.TypeBrowser {
 			f.UI.SetCSRF(s.d.GenerateCSRFToken(r))
 		}
@@ -65,7 +62,7 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 	}
 
 	var p updateLoginFlowWithPasswordMethod
-	if err := s.hd.Decode(r, &p,
+	if err := decoderx.Decode(r, &p,
 		decoderx.HTTPDecoderSetValidatePayloads(true),
 		decoderx.MustHTTPRawJSONSchemaCompiler(loginSchema),
 		decoderx.HTTPDecoderJSONFollowsFormFormat()); err != nil {
@@ -77,7 +74,7 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 		return nil, s.handleLoginError(r, f, p, err)
 	}
 
-	identifier := stringsx.Coalesce(p.Identifier, p.LegacyIdentifier)
+	identifier := cmp.Or(p.Identifier, p.LegacyIdentifier)
 	i, c, err := s.d.PrivilegedIdentityPool().FindByCredentialsIdentifier(ctx, s.ID(), identifier)
 	if err != nil {
 		time.Sleep(x.RandomDelay(s.d.Config().HasherArgon2(ctx).ExpectedDuration, s.d.Config().HasherArgon2(ctx).ExpectedDeviation))
@@ -87,13 +84,13 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 	var o identity.CredentialsPassword
 	d := json.NewDecoder(bytes.NewBuffer(c.Config))
 	if err := d.Decode(&o); err != nil {
-		return nil, herodot.ErrInternalServerError.WithReason("The password credentials could not be decoded properly").WithDebug(err.Error()).WithWrap(err)
+		return nil, x.WrapWithIdentityIDError(errors.WithStack(herodot.ErrInternalServerError.WithReason("The password credentials could not be decoded properly").WithDebug(err.Error()).WithWrap(err)), i.ID)
 	}
 
 	if o.ShouldUsePasswordMigrationHook() {
 		pwHook := s.d.Config().PasswordMigrationHook(ctx)
 		if !pwHook.Enabled {
-			return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Password migration hook is not enabled but password migration is requested."))
+			return nil, x.WrapWithIdentityIDError(errors.WithStack(herodot.ErrMisconfiguration.WithReasonf("Password migration hook is not enabled but password migration is requested.")), i.ID)
 		}
 
 		migrationHook := hook.NewPasswordMigrationHook(s.d, &pwHook.Config)
@@ -103,27 +100,27 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 			Identity:   i,
 		})
 		if err != nil {
-			return nil, s.handleLoginError(r, f, p, err)
+			return nil, s.handleLoginError(r, f, p, x.WrapWithIdentityIDError(err, i.ID))
 		}
 
 		if err := s.migratePasswordHash(ctx, i.ID, []byte(p.Password)); err != nil {
-			return nil, s.handleLoginError(r, f, p, err)
+			return nil, s.handleLoginError(r, f, p, x.WrapWithIdentityIDError(err, i.ID))
 		}
 	} else {
 		if err := hash.Compare(ctx, []byte(p.Password), []byte(o.HashedPassword)); err != nil {
-			return nil, s.handleLoginError(r, f, p, errors.WithStack(schema.NewInvalidCredentialsError()))
+			return nil, s.handleLoginError(r, f, p, errors.WithStack(x.WrapWithIdentityIDError(schema.NewInvalidCredentialsError(), i.ID)))
 		}
 
 		if !s.d.Hasher(ctx).Understands([]byte(o.HashedPassword)) {
 			if err := s.migratePasswordHash(ctx, i.ID, []byte(p.Password)); err != nil {
-				s.d.Logger().Warnf("Unable to migrate password hash for identity %s: %s Keeping existing password hash and continuing.", i.ID, err)
+				s.d.Logger().Warnf("Unable to migrate password hash for identity %s: %s Keeping existing password hash and continuing.", i.ID, x.WrapWithIdentityIDError(err, i.ID))
 			}
 		}
 	}
 
 	f.Active = s.ID()
 	if err = s.d.LoginFlowPersister().UpdateLoginFlow(ctx, f); err != nil {
-		return nil, s.handleLoginError(r, f, p, errors.WithStack(herodot.ErrInternalServerError.WithReason("Could not update flow").WithDebug(err.Error())))
+		return nil, s.handleLoginError(r, f, p, errors.WithStack(x.WrapWithIdentityIDError(herodot.ErrInternalServerError.WithReason("Could not update flow").WithDebug(err.Error()), i.ID)))
 	}
 
 	return i, nil
@@ -180,14 +177,6 @@ func (s *Strategy) PopulateLoginMethodFirstFactorRefresh(r *http.Request, sr *lo
 	sr.UI.SetNode(node.NewInputField("identifier", identifier, node.DefaultGroup, node.InputAttributeTypeHidden))
 	sr.UI.SetNode(NewPasswordNode("password", node.InputAttributeAutocompleteCurrentPassword))
 	sr.UI.GetNodes().Append(node.NewInputField("method", "password", node.PasswordGroup, node.InputAttributeTypeSubmit).WithMetaLabel(text.NewInfoLogin()))
-	return nil
-}
-
-func (s *Strategy) PopulateLoginMethodSecondFactor(r *http.Request, sr *login.Flow) error {
-	return nil
-}
-
-func (s *Strategy) PopulateLoginMethodSecondFactorRefresh(r *http.Request, sr *login.Flow) error {
 	return nil
 }
 

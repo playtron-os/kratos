@@ -23,8 +23,8 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/hydra"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/verification"
 	"github.com/ory/kratos/text"
@@ -35,7 +35,7 @@ import (
 
 func TestGetFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeySelfServiceVerificationEnabled, true)
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+"."+string(verification.VerificationStrategyLink),
 		map[string]interface{}{"enabled": true})
@@ -153,8 +153,7 @@ func TestGetFlow(t *testing.T) {
 	})
 
 	t.Run("case=relative redirect when self-service verification ui is a relative URL", func(t *testing.T) {
-		router := x.NewRouterPublic(reg)
-		ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
+		ts, _ := testhelpers.NewKratosServer(t, reg)
 		reg.Config().MustSet(ctx, config.ViperKeySelfServiceVerificationUI, "/verification-ts")
 		assert.Regexp(
 			t,
@@ -172,8 +171,7 @@ func TestGetFlow(t *testing.T) {
 	})
 
 	t.Run("case=redirects with 303", func(t *testing.T) {
-		router := x.NewRouterPublic(reg)
-		ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
+		ts, _ := testhelpers.NewKratosServer(t, reg)
 
 		// prevent the redirect
 		ts.Client().CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -184,7 +182,7 @@ func TestGetFlow(t *testing.T) {
 
 		res, err := ts.Client().Do(req)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		// here we check that the redirect status is 303
 		require.Equal(t, http.StatusSeeOther, res.StatusCode)
 	})
@@ -192,7 +190,7 @@ func TestGetFlow(t *testing.T) {
 
 func TestPostFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	reg.WithSelfserviceStrategies(t, []any{&verification.FakeStrategy{}})
 	reg.SetHydra(hydra.NewFake())
 	conf.MustSet(ctx, config.ViperKeySelfServiceVerificationEnabled, true)

@@ -4,7 +4,6 @@
 package link_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,9 +25,9 @@ import (
 	"github.com/ory/kratos/driver"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	kratos "github.com/ory/kratos/internal/httpclient"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	kratos "github.com/ory/kratos/pkg/httpclient"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/strategy/link"
@@ -40,7 +39,6 @@ import (
 	"github.com/ory/x/assertx"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/ioutilx"
-	"github.com/ory/x/pointerx"
 	"github.com/ory/x/sqlxx"
 	"github.com/ory/x/urlx"
 )
@@ -57,9 +55,9 @@ func createIdentityToRecover(t *testing.T, reg *driver.RegistryDefault, email st
 		Traits:   identity.Traits(fmt.Sprintf(`{"email":"%s"}`, email)),
 		SchemaID: config.DefaultIdentityTraitsSchemaID,
 	}
-	require.NoError(t, reg.IdentityManager().Create(context.Background(), id, identity.ManagerAllowWriteProtectedTraits))
+	require.NoError(t, reg.IdentityManager().Create(t.Context(), id, identity.ManagerAllowWriteProtectedTraits))
 
-	addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, email)
+	addr, err := reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, email)
 	assert.NoError(t, err)
 	assert.False(t, addr.Verified)
 	assert.Nil(t, addr.VerifiedAt)
@@ -68,8 +66,8 @@ func createIdentityToRecover(t *testing.T, reg *driver.RegistryDefault, email st
 }
 
 func TestAdminStrategy(t *testing.T) {
-	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	ctx := t.Context()
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	initViper(t, conf)
 
 	_ = testhelpers.NewRecoveryUIFlowEchoServer(t, reg)
@@ -89,35 +87,36 @@ func TestAdminStrategy(t *testing.T) {
 	}
 
 	t.Run("no panic on empty body #1384", func(t *testing.T) {
-		ctx := context.Background()
-		s, err := reg.RecoveryStrategies(ctx).Strategy("link")
+		s, ps, err := reg.RecoveryStrategies(t.Context()).ActiveStrategies("link")
 		require.NoError(t, err)
-		w := httptest.NewRecorder()
+
 		r := &http.Request{URL: new(url.URL)}
 		f, err := recovery.NewFlow(reg.Config(), time.Minute, "", r, s, flow.TypeBrowser)
 		require.NoError(t, err)
-		require.NotPanics(t, func() {
-			require.Error(t, s.(*link.Strategy).HandleRecoveryError(w, r, f, nil, errors.New("test")))
-		})
+
+		require.IsType(t, &link.Strategy{}, ps)
+		expectedErr := errors.New("test")
+		err = ps.(*link.Strategy).HandleRecoveryError(r, f, nil, expectedErr)
+		require.ErrorIs(t, err, expectedErr)
 	})
 
 	t.Run("description=should not be able to recover an account that does not exist", func(t *testing.T) {
-		_, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(context.Background()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
+		_, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(t.Context()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
 			IdentityId: x.NewUUID().String(),
 		}).Execute()
-		require.IsType(t, err, new(kratos.GenericOpenAPIError), "%T", err)
-		assert.EqualError(t, err.(*kratos.GenericOpenAPIError), "400 Bad Request")
+		require.IsTypef(t, err, new(kratos.GenericOpenAPIError), "%T", err)
+		assert.EqualError(t, err, "400 Bad Request")
 	})
 
 	t.Run("description=should create a valid recovery link without email", func(t *testing.T) {
 		id := identity.Identity{Traits: identity.Traits(`{}`)}
 
-		require.NoError(t, reg.IdentityManager().Create(context.Background(),
+		require.NoError(t, reg.IdentityManager().Create(t.Context(),
 			&id, identity.ManagerAllowWriteProtectedTraits))
 
-		rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(context.Background()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
+		rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(t.Context()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
 			IdentityId: id.ID.String(),
-			ExpiresIn:  pointerx.Ptr("100ms"),
+			ExpiresIn:  new("100ms"),
 		}).Execute()
 		require.NoError(t, err)
 
@@ -136,12 +135,12 @@ func TestAdminStrategy(t *testing.T) {
 		recoveryEmail := "recover.expired@ory.sh"
 		id := identity.Identity{Traits: identity.Traits(fmt.Sprintf(`{"email":"%s"}`, recoveryEmail))}
 
-		require.NoError(t, reg.IdentityManager().Create(context.Background(),
+		require.NoError(t, reg.IdentityManager().Create(t.Context(),
 			&id, identity.ManagerAllowWriteProtectedTraits))
 
-		rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(context.Background()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
+		rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(t.Context()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
 			IdentityId: id.ID.String(),
-			ExpiresIn:  pointerx.Ptr("100ms"),
+			ExpiresIn:  new("100ms"),
 		}).Execute()
 		require.NoError(t, err)
 
@@ -155,7 +154,7 @@ func TestAdminStrategy(t *testing.T) {
 		// We end up here because the link is expired.
 		assert.Contains(t, res.Request.URL.Path, "/recover", rl.RecoveryLink)
 
-		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, recoveryEmail)
+		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, recoveryEmail)
 		assert.NoError(t, err)
 		assert.False(t, addr.Verified)
 		assert.Nil(t, addr.VerifiedAt)
@@ -166,10 +165,10 @@ func TestAdminStrategy(t *testing.T) {
 		recoveryEmail := "recoverme@ory.sh"
 		id := identity.Identity{Traits: identity.Traits(fmt.Sprintf(`{"email":"%s"}`, recoveryEmail))}
 
-		require.NoError(t, reg.IdentityManager().Create(context.Background(),
+		require.NoError(t, reg.IdentityManager().Create(t.Context(),
 			&id, identity.ManagerAllowWriteProtectedTraits))
 
-		rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(context.Background()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
+		rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(t.Context()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
 			IdentityId: id.ID.String(),
 		}).Execute()
 		require.NoError(t, err)
@@ -182,13 +181,13 @@ func TestAdminStrategy(t *testing.T) {
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 		testhelpers.LogJSON(t, rl)
 
-		f, err := reg.SettingsFlowPersister().GetSettingsFlow(context.Background(), uuid.FromStringOrNil(res.Request.URL.Query().Get("flow")))
+		f, err := reg.SettingsFlowPersister().GetSettingsFlow(t.Context(), uuid.FromStringOrNil(res.Request.URL.Query().Get("flow")))
 		require.NoError(t, err, "%s", res.Request.URL.String())
 
 		require.Len(t, f.UI.Messages, 1)
 		assert.Equal(t, "You successfully recovered your account. Please change your password or set up an alternative login method (e.g. social sign in) within the next 60.00 minutes.", f.UI.Messages[0].Text)
 
-		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, recoveryEmail)
+		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, recoveryEmail)
 		assert.NoError(t, err)
 		assert.False(t, addr.Verified)
 		assert.Nil(t, addr.VerifiedAt)
@@ -200,7 +199,7 @@ func TestAdminStrategy(t *testing.T) {
 		id := createIdentityToRecover(t, reg, email)
 
 		rl1, _, err := adminSDK.IdentityAPI.
-			CreateRecoveryLinkForIdentity(context.Background()).
+			CreateRecoveryLinkForIdentity(t.Context()).
 			CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
 				IdentityId: id.ID.String(),
 			}).
@@ -210,7 +209,7 @@ func TestAdminStrategy(t *testing.T) {
 		checkLink(t, rl1, time.Now().Add(conf.SelfServiceFlowRecoveryRequestLifespan(ctx)+time.Second))
 
 		rl2, _, err := adminSDK.IdentityAPI.
-			CreateRecoveryLinkForIdentity(context.Background()).
+			CreateRecoveryLinkForIdentity(t.Context()).
 			CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
 				IdentityId: id.ID.String(),
 			}).
@@ -250,8 +249,8 @@ func TestAdminStrategy(t *testing.T) {
 }
 
 func TestRecovery(t *testing.T) {
-	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	ctx := t.Context()
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+".code.enabled", false)
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+".link.enabled", true)
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/default.schema.json")
@@ -329,7 +328,7 @@ func TestRecovery(t *testing.T) {
 	t.Run("description=should require a valid email to be sent", func(t *testing.T) {
 		check := func(t *testing.T, actual string, value string) {
 			assert.EqualValues(t, node.LinkGroup, gjson.Get(actual, "active").String(), "%s", actual)
-			assert.EqualValues(t, fmt.Sprintf("%q is not valid \"email\"", value),
+			assert.EqualValues(t, "Enter a valid email address",
 				gjson.Get(actual, "ui.nodes.#(attributes.name==email).messages.0.text").String(),
 				"%s", actual)
 		}
@@ -373,10 +372,9 @@ func TestRecovery(t *testing.T) {
 			v.Set("email", "some-email@example.org")
 			v.Set("method", "link")
 
-			authClient := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+			authClient := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 			if isAPI {
-				req := httptest.NewRequest("GET", "/sessions/whoami", nil)
-				req.WithContext(contextx.WithConfigValue(ctx, config.ViperKeySessionLifespan, time.Hour))
+				req := httptest.NewRequest("GET", "/sessions/whoami", nil).WithContext(contextx.WithConfigValue(ctx, config.ViperKeySessionLifespan, time.Hour))
 				s, err := testhelpers.NewActiveSession(req, reg,
 					&identity.Identity{ID: x.NewUUID(), State: identity.StateActive, NID: x.NewUUID()},
 					time.Now(),
@@ -384,17 +382,17 @@ func TestRecovery(t *testing.T) {
 					identity.AuthenticatorAssuranceLevel1,
 				)
 				require.NoError(t, err)
-				authClient = testhelpers.NewHTTPClientWithSessionCookieLocalhost(t, ctx, reg, s)
+				authClient = testhelpers.NewHTTPClientWithSessionCookieLocalhost(ctx, t, reg, s)
 			}
 
 			body, res := testhelpers.RecoveryMakeRequest(t, isAPI || isSPA, f, authClient, testhelpers.EncodeFormAsJSON(t, isAPI || isSPA, v))
 
 			if isAPI || isSPA {
-				assert.EqualValues(t, http.StatusBadRequest, res.StatusCode, "%s", body)
+				require.EqualValuesf(t, http.StatusBadRequest, res.StatusCode, "%s", body)
 				assert.Contains(t, res.Request.URL.String(), recovery.RouteSubmitFlow, "%+v\n\t%s", res.Request, body)
 				assertx.EqualAsJSONExcept(t, recovery.ErrAlreadyLoggedIn, json.RawMessage(gjson.Get(body, "error").Raw), nil)
 			} else {
-				assert.EqualValues(t, http.StatusOK, res.StatusCode, "%s", body)
+				assert.EqualValuesf(t, http.StatusOK, res.StatusCode, "%s", body)
 				assert.Contains(t, res.Request.URL.String(), conf.SelfServiceBrowserDefaultReturnTo(ctx).String(), "%+v\n\t%s", res.Request, body)
 			}
 		}
@@ -407,10 +405,10 @@ func TestRecovery(t *testing.T) {
 	})
 
 	t.Run("description=should try to recover an email that does not exist", func(t *testing.T) {
-		conf.Set(ctx, config.ViperKeySelfServiceRecoveryNotifyUnknownRecipients, true)
+		conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryNotifyUnknownRecipients, true)
 
 		t.Cleanup(func() {
-			conf.Set(ctx, config.ViperKeySelfServiceRecoveryNotifyUnknownRecipients, false)
+			conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryNotifyUnknownRecipients, false)
 		})
 		var email string
 		check := func(t *testing.T, actual string) {
@@ -444,14 +442,14 @@ func TestRecovery(t *testing.T) {
 
 	t.Run("description=should not be able to recover an inactive account", func(t *testing.T) {
 		check := func(t *testing.T, recoverySubmissionResponse, recoveryEmail string, isAPI bool) {
-			addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, recoveryEmail)
+			addr, err := reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, recoveryEmail)
 			assert.NoError(t, err)
 
 			recoveryLink := testhelpers.CourierExpectLinkInMessage(t, testhelpers.CourierExpectMessage(ctx, t, reg, recoveryEmail, "Recover access to your account"), 1)
 			cl := testhelpers.NewClientWithCookies(t)
 
 			// Deactivate the identity
-			require.NoError(t, reg.Persister().GetConnection(context.Background()).RawQuery("UPDATE identities SET state=? WHERE id = ?", identity.StateInactive, addr.IdentityID).Exec())
+			require.NoError(t, reg.Persister().GetConnection(t.Context()).RawQuery("UPDATE identities SET state=? WHERE id = ?", identity.StateInactive, addr.IdentityID).Exec())
 
 			res, err := cl.Get(recoveryLink)
 			require.NoError(t, err)
@@ -495,7 +493,7 @@ func TestRecovery(t *testing.T) {
 
 	t.Run("description=should recover an account", func(t *testing.T) {
 		check := func(t *testing.T, recoverySubmissionResponse, recoveryEmail, returnTo string) {
-			addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, recoveryEmail)
+			addr, err := reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, recoveryEmail)
 			assert.NoError(t, err)
 			assert.False(t, addr.Verified)
 			assert.Nil(t, addr.VerifiedAt)
@@ -527,7 +525,7 @@ func TestRecovery(t *testing.T) {
 				gjson.GetBytes(body, "ui.messages.0.text").String())
 			assert.Equal(t, returnTo, gjson.GetBytes(body, "return_to").String())
 
-			addr, err = reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, recoveryEmail)
+			addr, err = reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, recoveryEmail)
 			assert.NoError(t, err)
 			assert.True(t, addr.Verified)
 			assert.NotEqual(t, sqlxx.NullTime{}, addr.VerifiedAt)
@@ -562,7 +560,7 @@ func TestRecovery(t *testing.T) {
 
 		t.Run("description=should return browser to return url", func(t *testing.T) {
 			returnTo := public.URL + "/return-to"
-			conf.Set(ctx, config.ViperKeyURLsAllowedReturnToDomains, []string{returnTo})
+			conf.MustSet(ctx, config.ViperKeyURLsAllowedReturnToDomains, []string{returnTo})
 			for _, tc := range []struct {
 				desc     string
 				returnTo string
@@ -579,9 +577,9 @@ func TestRecovery(t *testing.T) {
 					desc:     "should use return_to from config",
 					returnTo: returnTo,
 					f: func(t *testing.T, client *http.Client) *kratos.RecoveryFlow {
-						conf.Set(ctx, config.ViperKeySelfServiceRecoveryBrowserDefaultReturnTo, returnTo)
+						conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryBrowserDefaultReturnTo, returnTo)
 						t.Cleanup(func() {
-							conf.Set(ctx, config.ViperKeySelfServiceRecoveryBrowserDefaultReturnTo, "")
+							conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryBrowserDefaultReturnTo, "")
 						})
 						return testhelpers.InitializeRecoveryFlowViaBrowser(t, client, false, public, nil)
 					},
@@ -690,7 +688,7 @@ func TestRecovery(t *testing.T) {
 				v.Set("email", email)
 			}
 
-			cl := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, id)
+			cl := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, id)
 			check(t, expectSuccess(t, nil, false, false, values), email, cl, func(_ *http.Client, req *http.Request) (*http.Response, error) {
 				_, res := testhelpers.MockMakeAuthenticatedRequestWithClientAndID(t, reg, conf, publicRouter, req, cl, id)
 				return res, nil
@@ -711,9 +709,9 @@ func TestRecovery(t *testing.T) {
 		req := httptest.NewRequest("GET", "/sessions/whoami", nil)
 		sess, err := testhelpers.NewActiveSession(req, reg, id, time.Now(), identity.CredentialsTypePassword, identity.AuthenticatorAssuranceLevel1)
 		require.NoError(t, err)
-		require.NoError(t, reg.SessionPersister().UpsertSession(context.Background(), sess))
+		require.NoError(t, reg.SessionPersister().UpsertSession(t.Context(), sess))
 
-		actualSession, err := reg.SessionPersister().GetSession(context.Background(), sess.ID, session.ExpandNothing)
+		actualSession, err := reg.SessionPersister().GetSession(t.Context(), sess.ID, session.ExpandNothing)
 		require.NoError(t, err)
 		assert.True(t, actualSession.IsActive())
 
@@ -733,7 +731,7 @@ func TestRecovery(t *testing.T) {
 			cookies := spew.Sdump(cl.Jar.Cookies(urlx.ParseOrPanic(public.URL)))
 			assert.Contains(t, cookies, "ory_kratos_session")
 
-			actualSession, err := reg.SessionPersister().GetSession(context.Background(), sess.ID, session.ExpandNothing)
+			actualSession, err := reg.SessionPersister().GetSession(t.Context(), sess.ID, session.ExpandNothing)
 			require.NoError(t, err)
 			assert.False(t, actualSession.IsActive())
 		}
@@ -753,7 +751,7 @@ func TestRecovery(t *testing.T) {
 		assert.Equal(t, http.StatusOK, res.StatusCode)
 		assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowRecoveryUI(ctx).String()+"?flow=")
 
-		rs, _, err := testhelpers.NewSDKCustomClient(public, c).FrontendAPI.GetRecoveryFlow(context.Background()).Id(res.Request.URL.Query().Get("flow")).Execute()
+		rs, _, err := testhelpers.NewSDKCustomClient(public, c).FrontendAPI.GetRecoveryFlow(t.Context()).Id(res.Request.URL.Query().Get("flow")).Execute()
 		require.NoError(t, err)
 
 		require.Len(t, rs.Ui.Messages, 1)
@@ -779,7 +777,7 @@ func TestRecovery(t *testing.T) {
 		assert.NotContains(t, res.Request.URL.String(), "flow="+rs.Id)
 		assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowRecoveryUI(ctx).String())
 
-		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, recoveryEmail)
+		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, recoveryEmail)
 		assert.NoError(t, err)
 		assert.False(t, addr.Verified)
 		assert.Nil(t, addr.VerifiedAt)
@@ -813,13 +811,13 @@ func TestRecovery(t *testing.T) {
 		assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowRecoveryUI(ctx).String())
 		assert.NotContains(t, res.Request.URL.String(), gjson.Get(body, "id").String())
 
-		rs, _, err := testhelpers.NewSDKCustomClient(public, c).FrontendAPI.GetRecoveryFlow(context.Background()).Id(res.Request.URL.Query().Get("flow")).Execute()
+		rs, _, err := testhelpers.NewSDKCustomClient(public, c).FrontendAPI.GetRecoveryFlow(t.Context()).Id(res.Request.URL.Query().Get("flow")).Execute()
 		require.NoError(t, err)
 
 		require.Len(t, rs.Ui.Messages, 1)
 		assert.Contains(t, rs.Ui.Messages[0].Text, "The recovery flow expired")
 
-		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, recoveryEmail)
+		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(t.Context(), identity.AddressTypeEmail, recoveryEmail)
 		assert.NoError(t, err)
 		assert.False(t, addr.Verified)
 		assert.Nil(t, addr.VerifiedAt)
@@ -894,8 +892,8 @@ func TestRecovery(t *testing.T) {
 }
 
 func TestDisabledEndpoint(t *testing.T) {
-	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	ctx := t.Context()
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	initViper(t, conf)
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+"."+string(recovery.RecoveryStrategyLink)+".enabled", false)
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+"."+string(recovery.RecoveryStrategyCode)+".enabled", false)
@@ -908,10 +906,10 @@ func TestDisabledEndpoint(t *testing.T) {
 		t.Run("description=can not create recovery link when link method is disabled", func(t *testing.T) {
 			id := identity.Identity{Traits: identity.Traits(`{"email":"recovery-endpoint-disabled@ory.sh"}`)}
 
-			require.NoError(t, reg.IdentityManager().Create(context.Background(),
+			require.NoError(t, reg.IdentityManager().Create(t.Context(),
 				&id, identity.ManagerAllowWriteProtectedTraits))
 
-			rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(context.Background()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
+			rl, _, err := adminSDK.IdentityAPI.CreateRecoveryLinkForIdentity(t.Context()).CreateRecoveryLinkForIdentityBody(kratos.CreateRecoveryLinkForIdentityBody{
 				IdentityId: id.ID.String(),
 			}).Execute()
 			assert.Nil(t, rl)

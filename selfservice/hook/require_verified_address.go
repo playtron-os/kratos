@@ -6,14 +6,18 @@ package hook
 import (
 	"net/http"
 
+	"github.com/gofrs/uuid"
+
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/verification"
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/x/httpx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/otelx/semconv"
+	"github.com/ory/x/sqlxx"
 
 	"github.com/pkg/errors"
 
@@ -36,8 +40,8 @@ type (
 		verification.StrategyProvider
 		verification.FlowPersistenceProvider
 		identity.PrivilegedPoolProvider
-		x.WriterProvider
-		x.TracingProvider
+		httpx.WriterProvider
+		otelx.Provider
 	}
 	AddressVerifier struct {
 		r addressVerifierDependencies
@@ -74,7 +78,7 @@ func (e *AddressVerifier) ExecuteLoginPostHook(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	strategy, err := e.r.GetActiveVerificationStrategy(ctx)
+	strategies, primaryStrategy, err := e.r.GetActiveVerificationStrategies(ctx)
 	if err != nil {
 		return err
 	}
@@ -95,15 +99,23 @@ func (e *AddressVerifier) ExecuteLoginPostHook(w http.ResponseWriter, r *http.Re
 
 		verificationFlow, err := verification.NewPostHookFlow(e.r.Config(),
 			e.r.Config().SelfServiceFlowVerificationRequestLifespan(ctx),
-			e.r.GenerateCSRFToken(r), r, strategy, f)
+			e.r.GenerateCSRFToken(r), r, strategies, f)
 		if err != nil {
 			return err
 		}
 
 		verificationFlow.State = flow.StateEmailSent
-		if err := strategy.PopulateVerificationMethod(r, verificationFlow); err != nil {
-			return err
+		for _, strategy := range strategies {
+			if ps, isPrimary := strategy.(verification.PrimaryStrategy); isPrimary {
+				verificationFlow.Active = sqlxx.NullString(ps.NodeGroup())
+			}
+			if err := strategy.PopulateVerificationMethod(r, verificationFlow); err != nil {
+				return err
+			}
 		}
+
+		verificationFlow.SessionID = uuid.NullUUID{UUID: s.ID, Valid: true}
+		verificationFlow.IdentityID = uuid.NullUUID{UUID: s.Identity.ID, Valid: true}
 
 		verificationFlow.UI.Nodes.Append(
 			node.NewInputField(address.Via, address.Value, node.CodeGroup, node.InputAttributeTypeSubmit).
@@ -114,7 +126,7 @@ func (e *AddressVerifier) ExecuteLoginPostHook(w http.ResponseWriter, r *http.Re
 			return err
 		}
 
-		if err := strategy.SendVerificationCode(ctx, verificationFlow, i, address); err != nil {
+		if err := primaryStrategy.SendVerificationCode(ctx, verificationFlow, i, address); err != nil {
 			return err
 		}
 

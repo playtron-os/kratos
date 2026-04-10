@@ -4,9 +4,10 @@
 package oidc
 
 import (
+	"cmp"
+
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/text"
-	"github.com/ory/x/stringsx"
 
 	"github.com/ory/kratos/ui/container"
 
@@ -24,7 +25,7 @@ func AddProviders(c *container.Container, providers []Configuration, message fun
 		if len(p.OrganizationID) > 0 {
 			continue
 		}
-		AddProvider(c, p.ID, message(stringsx.Coalesce(p.Label, p.ID), p.ID), credentialsType)
+		AddProvider(c, p.ID, message(cmp.Or(p.Label, p.ID), p.ID), credentialsType)
 	}
 }
 

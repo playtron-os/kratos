@@ -22,16 +22,17 @@ import (
 	"github.com/ory/kratos/selfservice/flow/settings"
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/ui/node"
-	"github.com/ory/kratos/x"
-	"github.com/ory/x/decoderx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
 )
 
-type strategyDependencies interface {
-	x.LoggingProvider
-	x.WriterProvider
+type dependencies interface {
+	logrusx.Provider
+	httpx.WriterProvider
 	nosurfx.CSRFTokenGeneratorProvider
 	nosurfx.CSRFProvider
-	x.TracingProvider
+	otelx.Provider
 
 	config.Provider
 
@@ -67,22 +68,14 @@ type strategyDependencies interface {
 }
 
 var (
-	_ login.Strategy                    = new(Strategy)
-	_ registration.Strategy             = new(Strategy)
-	_ identity.ActiveCredentialsCounter = new(Strategy)
+	_ login.Strategy                    = (*Strategy)(nil)
+	_ registration.Strategy             = (*Strategy)(nil)
+	_ identity.ActiveCredentialsCounter = (*Strategy)(nil)
 )
 
-type Strategy struct {
-	d  strategyDependencies
-	hd *decoderx.HTTP
-}
+type Strategy struct{ d dependencies }
 
-func NewStrategy(d strategyDependencies) *Strategy {
-	return &Strategy{
-		d:  d,
-		hd: decoderx.NewHTTP(),
-	}
-}
+func NewStrategy(d dependencies) *Strategy { return &Strategy{d: d} }
 
 func (*Strategy) ID() identity.CredentialsType {
 	return identity.CredentialsTypePasskey

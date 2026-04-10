@@ -8,10 +8,9 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
 	hydraclientgo "github.com/ory/hydra-client-go/v2"
@@ -30,6 +29,9 @@ import (
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
 	"github.com/ory/nosurf"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx/semconv"
 	"github.com/ory/x/sqlxx"
 	"github.com/ory/x/urlx"
@@ -51,7 +53,7 @@ type (
 		hydra.Provider
 		session.HandlerProvider
 		session.ManagementProvider
-		x.WriterProvider
+		httpx.WriterProvider
 		nosurfx.CSRFTokenGeneratorProvider
 		nosurfx.CSRFProvider
 		StrategyProvider
@@ -59,7 +61,7 @@ type (
 		FlowPersistenceProvider
 		ErrorHandlerProvider
 		sessiontokenexchange.PersistenceProvider
-		x.LoggingProvider
+		logrusx.Provider
 	}
 	HandlerProvider interface {
 		RegistrationHandler() *Handler
@@ -69,11 +71,9 @@ type (
 	}
 )
 
-func NewHandler(d handlerDependencies) *Handler {
-	return &Handler{d: d}
-}
+func NewHandler(d handlerDependencies) *Handler { return &Handler{d: d} }
 
-func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(public *httprouterx.RouterPublic) {
 	h.d.CSRFHandler().IgnorePath(RouteInitAPIFlow)
 	h.d.CSRFHandler().IgnorePath(RouteSubmitFlow)
 
@@ -96,7 +96,7 @@ func (h *Handler) onAuthenticated(w http.ResponseWriter, r *http.Request) {
 	handler(w, r)
 }
 
-func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(admin *httprouterx.RouterAdmin) {
 	admin.GET(RouteInitBrowserFlow, redir.RedirectToPublicRoute(h.d))
 	admin.GET(RouteInitAPIFlow, redir.RedirectToPublicRoute(h.d))
 	admin.GET(RouteGetFlow, redir.RedirectToPublicRoute(h.d))
@@ -224,6 +224,9 @@ func (h *Handler) FromOldFlow(w http.ResponseWriter, r *http.Request, of Flow) (
 //	  200: registrationFlow
 //	  400: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) createNativeRegistrationFlow(w http.ResponseWriter, r *http.Request) {
 	a, err := h.NewRegistrationFlow(w, r, flow.TypeAPI)
 	if err != nil {
@@ -348,6 +351,9 @@ type createBrowserRegistrationFlow struct {
 //	  200: registrationFlow
 //	  303: emptyResponse
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) createBrowserRegistrationFlow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -514,6 +520,9 @@ type getRegistrationFlow struct {
 //	  404: errorGeneric
 //	  410: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-low
 func (h *Handler) getRegistrationFlow(w http.ResponseWriter, r *http.Request) {
 	if !h.d.Config().SelfServiceFlowRegistrationEnabled(r.Context()) {
 		h.d.SelfServiceErrorManager().Forward(r.Context(), w, r, errors.WithStack(ErrRegistrationDisabled))
@@ -651,20 +660,26 @@ type updateRegistrationFlowBody struct{}
 //	  410: errorGeneric
 //	  422: errorBrowserLocationChangeRequired
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-high
 func (h *Handler) updateRegistrationFlow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ctx = semconv.ContextWithAttributes(ctx, attribute.String(events.AttributeKeySelfServiceStrategyUsed.String(), "registration"))
+	ctx = semconv.ContextWithAttributes(ctx,
+		attribute.String(events.AttributeKeySelfServiceStrategyUsed.String(), "registration"),
+		attribute.String(events.AttributeKeySelfServiceFlowName.String(), "registration"),
+	)
 	r = r.WithContext(ctx)
 
 	rid, err := flow.GetFlowID(r)
 	if err != nil {
-		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, nil, node.DefaultGroup, err)
+		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, nil, "", node.DefaultGroup, err)
 		return
 	}
 
 	f, err := h.d.RegistrationFlowPersister().GetRegistrationFlow(r.Context(), rid)
 	if err != nil {
-		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, nil, node.DefaultGroup, err)
+		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, nil, "", node.DefaultGroup, err)
 		return
 	}
 
@@ -679,7 +694,7 @@ func (h *Handler) updateRegistrationFlow(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := f.Valid(); err != nil {
-		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, err)
+		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, "", node.DefaultGroup, err)
 		return
 	}
 
@@ -692,7 +707,7 @@ func (h *Handler) updateRegistrationFlow(w http.ResponseWriter, r *http.Request)
 		} else if errors.Is(err, flow.ErrCompletedByStrategy) {
 			return
 		} else if err != nil {
-			h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, ss.NodeGroup(), err)
+			h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, ss.ID(), ss.NodeGroup(), err)
 			return
 		}
 
@@ -701,12 +716,12 @@ func (h *Handler) updateRegistrationFlow(w http.ResponseWriter, r *http.Request)
 	}
 
 	if s == nil {
-		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, node.DefaultGroup, errors.WithStack(schema.NewNoRegistrationStrategyResponsible()))
+		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, "", node.DefaultGroup, errors.WithStack(schema.NewNoRegistrationStrategyResponsible()))
 		return
 	}
 
 	if err := h.d.RegistrationExecutor().PostRegistrationHook(w, r, s.ID(), "", "", f, i); err != nil {
-		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, s.NodeGroup(), err)
+		h.d.RegistrationFlowErrorHandler().WriteFlowError(w, r, f, s.ID(), s.NodeGroup(), err)
 		return
 	}
 }

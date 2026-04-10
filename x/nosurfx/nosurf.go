@@ -4,12 +4,19 @@
 package nosurfx
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
+	"testing"
 
-	"github.com/ory/kratos/x"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
 
 	"github.com/ory/kratos/text"
 
@@ -20,7 +27,6 @@ import (
 	"github.com/ory/herodot"
 	"github.com/ory/nosurf"
 	"github.com/ory/x/randx"
-	"github.com/ory/x/stringsx"
 )
 
 var (
@@ -39,10 +45,12 @@ var (
 	}
 )
 
-const noCookie = "The HTTP Cookie Header is empty or not set."
-const cookieMissing = "The HTTP Cookie Header was set but did not include the anti-CSRF cookie."
-const tokenNotSent = "The anti-CSRF cookie was found but the CSRF token was not included in the HTTP request body (" + nosurf.CookieName + ") nor in the HTTP Header (" + nosurf.HeaderName + ")."
-const tokenMismatch = "The HTTP Cookie Header was set and a CSRF token was sent but they do not match. We recommend deleting all cookies for this domain and retrying the flow."
+const (
+	noCookie      = "The HTTP Cookie Header is empty or not set."
+	cookieMissing = "The HTTP Cookie Header was set but did not include the anti-CSRF cookie."
+	tokenNotSent  = "The anti-CSRF cookie was found but the CSRF token was not included in the HTTP request body (" + nosurf.CookieName + ") nor in the HTTP Header (" + nosurf.HeaderName + ")."
+	tokenMismatch = "The HTTP Cookie Header was set and a CSRF token was sent but they do not match. We recommend deleting all cookies for this domain and retrying the flow."
+)
 
 var (
 	ErrInvalidCSRFTokenAJAX = ErrInvalidCSRFToken.
@@ -61,7 +69,7 @@ var (
 	ErrInvalidCSRFTokenServerNoCookies     = ErrInvalidCSRFTokenServer.WithDetail("reject_reason", noCookie)
 	ErrInvalidCSRFTokenServerCookieMissing = ErrInvalidCSRFTokenServer.WithDetail("reject_reason", cookieMissing)
 	ErrInvalidCSRFTokenServerTokenNotSent  = ErrInvalidCSRFToken.WithDetail("hint", tokenNotSent)
-	ErrInvalidCSRFTokenServerTokenMismatch = ErrInvalidCSRFTokenAJAX.WithDetail("reject_reason", tokenMismatch)
+	ErrInvalidCSRFTokenServerTokenMismatch = ErrInvalidCSRFTokenServer.WithDetail("reject_reason", tokenMismatch)
 )
 
 type CSRFTokenGeneratorProvider interface {
@@ -90,11 +98,18 @@ func FakeCSRFTokenGeneratorWithToken(token string) func(r *http.Request) string 
 
 var _ nosurf.Handler = new(FakeCSRFHandler)
 
-type FakeCSRFHandler struct{ name string }
+type FakeCSRFHandler struct {
+	cookieNameFn func(r *http.Request) string
+}
 
-func NewFakeCSRFHandler(name string) *FakeCSRFHandler {
+func NewFakeCSRFHandler(reg interface {
+	config.Provider
+},
+) *FakeCSRFHandler {
 	return &FakeCSRFHandler{
-		name: name,
+		cookieNameFn: func(r *http.Request) string {
+			return CSRFCookieName(r.Context(), reg)
+		},
 	}
 }
 
@@ -113,32 +128,45 @@ func (f *FakeCSRFHandler) ExemptPath(s string) {
 func (f *FakeCSRFHandler) IgnorePath(s string) {
 }
 
-func (f *FakeCSRFHandler) IgnoreGlob(s string) {
+func (f *FakeCSRFHandler) IgnoreGlob(s string) {}
+
+func (f *FakeCSRFHandler) IgnoreGlobs(s ...string) {}
+
+func (f *FakeCSRFHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {}
+
+func (f *FakeCSRFHandler) RegenerateToken(_ http.ResponseWriter, _ *http.Request) string {
+	return FakeCSRFToken
 }
 
-func (f *FakeCSRFHandler) IgnoreGlobs(s ...string) {
-}
+func WithFakeCSRFCookie(t *testing.T, reg interface {
+	config.Provider
+}, urlStr string,
+) (*url.URL, []*http.Cookie) {
+	u, err := url.Parse(urlStr)
+	require.NoError(t, err)
 
-func (f *FakeCSRFHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-}
-
-func (f *FakeCSRFHandler) RegenerateToken(w http.ResponseWriter, r *http.Request) string {
-	return stringsx.Coalesce(f.name, FakeCSRFToken)
+	cookie := &http.Cookie{
+		Name:  CSRFCookieName(t.Context(), reg),
+		Value: FakeCSRFToken,
+	}
+	return u, []*http.Cookie{cookie}
 }
 
 type CSRFProvider interface {
 	CSRFHandler() nosurf.Handler
 }
 
-func CSRFCookieName(reg interface {
+func CSRFCookieName(ctx context.Context, reg interface {
 	config.Provider
-}, r *http.Request) string {
-	return "csrf_token_" + fmt.Sprintf("%x", sha256.Sum256([]byte(reg.Config().SelfPublicURL(r.Context()).String())))
+},
+) string {
+	return "csrf_token_" + fmt.Sprintf("%x", sha256.Sum256([]byte(reg.Config().SelfPublicURL(ctx).String())))
 }
 
 func NosurfBaseCookieHandler(reg interface {
 	config.Provider
-}) func(w http.ResponseWriter, r *http.Request) http.Cookie {
+},
+) func(w http.ResponseWriter, r *http.Request) http.Cookie {
 	return func(w http.ResponseWriter, r *http.Request) http.Cookie {
 		secure := reg.Config().CookieSecure(r.Context())
 
@@ -152,7 +180,7 @@ func NosurfBaseCookieHandler(reg interface {
 			domain = d
 		}
 
-		name := CSRFCookieName(reg, r)
+		name := CSRFCookieName(r.Context(), reg)
 		cookie := http.Cookie{
 			Name:     name,
 			MaxAge:   nosurf.MaxAge,
@@ -175,25 +203,33 @@ func NosurfBaseCookieHandler(reg interface {
 
 func CSRFErrorReason(r *http.Request, reg interface {
 	config.Provider
-}) error {
+},
+) error {
 	// Is it an AJAX request?
-	isAjax := len(r.Header.Get("Origin")) == 0
+	secFetchMode := r.Header.Get("Sec-Fetch-Mode")
+	isAjax := secFetchMode == "cors" || secFetchMode == "same-origin"
 
 	if len(r.Header.Get("Cookie")) == 0 {
 		if isAjax {
 			return errors.WithStack(ErrInvalidCSRFTokenAJAXNoCookies)
 		}
 		return errors.WithStack(ErrInvalidCSRFTokenServerNoCookies)
-	} else if _, err := r.Cookie(CSRFCookieName(reg, r)); errors.Is(err, http.ErrNoCookie) {
+	} else if _, err := r.Cookie(CSRFCookieName(r.Context(), reg)); errors.Is(err, http.ErrNoCookie) {
 		if isAjax {
 			return errors.WithStack(ErrInvalidCSRFTokenAJAXCookieMissing)
 		}
 		return errors.WithStack(ErrInvalidCSRFTokenServerCookieMissing)
-	} else if len(r.Form.Get("csrf_token")+r.Header.Get(nosurf.HeaderName)) == 0 {
-		if isAjax {
-			return errors.WithStack(ErrInvalidCSRFTokenAJAXTokenNotSent)
+	}
+
+	// We can't parse the request body here, so we check if the content type is JSON,
+	// as we can't return a meaningful error in that case.
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		if len(r.Form.Get("csrf_token")+r.Header.Get(nosurf.HeaderName)) == 0 {
+			if isAjax {
+				return errors.WithStack(ErrInvalidCSRFTokenAJAXTokenNotSent)
+			}
+			return errors.WithStack(ErrInvalidCSRFTokenServerTokenNotSent)
 		}
-		return errors.WithStack(ErrInvalidCSRFTokenServerTokenNotSent)
 	}
 
 	if isAjax {
@@ -204,9 +240,10 @@ func CSRFErrorReason(r *http.Request, reg interface {
 
 func CSRFFailureHandler(reg interface {
 	config.Provider
-	x.LoggingProvider
-	x.WriterProvider
-}) http.HandlerFunc {
+	logrusx.Provider
+	httpx.WriterProvider
+},
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := CSRFErrorReason(r, reg)
 		reg.Logger().
@@ -227,9 +264,10 @@ func NewCSRFHandler(
 	router http.Handler,
 	reg interface {
 		config.Provider
-		x.LoggingProvider
-		x.WriterProvider
-	}) *nosurf.CSRFHandler {
+		logrusx.Provider
+		httpx.WriterProvider
+	},
+) *nosurf.CSRFHandler {
 	n := nosurf.New(router)
 
 	n.SetBaseCookieFunc(NosurfBaseCookieHandler(reg))
@@ -240,10 +278,11 @@ func NewCSRFHandler(
 func NewTestCSRFHandler(router http.Handler, reg interface {
 	WithCSRFHandler(handler nosurf.Handler)
 	WithCSRFTokenGenerator(CSRFToken)
-	x.WriterProvider
-	x.LoggingProvider
+	httpx.WriterProvider
+	logrusx.Provider
 	config.Provider
-}) *nosurf.CSRFHandler {
+},
+) *nosurf.CSRFHandler {
 	n := NewCSRFHandler(router, reg)
 	reg.WithCSRFHandler(n)
 	reg.WithCSRFTokenGenerator(nosurf.Token)

@@ -28,8 +28,8 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/verification"
 	"github.com/ory/kratos/text"
@@ -41,7 +41,7 @@ import (
 
 func TestVerification(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	initViper(t, conf)
 
 	identityToVerify := &identity.Identity{
@@ -145,7 +145,7 @@ func TestVerification(t *testing.T) {
 	t.Run("description=should require a valid email to be sent", func(t *testing.T) {
 		check := func(t *testing.T, actual string, value string) {
 			assert.EqualValues(t, string(node.LinkGroup), gjson.Get(actual, "active").String(), "%s", actual)
-			assert.EqualValues(t, fmt.Sprintf("%q is not valid \"email\"", value),
+			assert.EqualValues(t, "Enter a valid email address",
 				gjson.Get(actual, "ui.nodes.#(attributes.name==email).messages.0.text").String(),
 				"%s", actual)
 		}
@@ -170,10 +170,10 @@ func TestVerification(t *testing.T) {
 	})
 
 	t.Run("description=should try to verify an email that does not exist", func(t *testing.T) {
-		conf.Set(ctx, config.ViperKeySelfServiceVerificationNotifyUnknownRecipients, true)
+		conf.MustSet(ctx, config.ViperKeySelfServiceVerificationNotifyUnknownRecipients, true)
 
 		t.Cleanup(func() {
-			conf.Set(ctx, config.ViperKeySelfServiceVerificationNotifyUnknownRecipients, false)
+			conf.MustSet(ctx, config.ViperKeySelfServiceVerificationNotifyUnknownRecipients, false)
 		})
 		var email string
 		check := func(t *testing.T, actual string) {
@@ -295,7 +295,7 @@ func TestVerification(t *testing.T) {
 			cl := testhelpers.NewClientWithCookies(t)
 			res, err := cl.Get(verificationLink)
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 
 			assert.Equal(t, http.StatusOK, res.StatusCode)
 			assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowVerificationUI(ctx).String())

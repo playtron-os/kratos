@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -51,11 +52,13 @@ import (
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/kratos/x/webauthnx"
 	"github.com/ory/nosurf"
 	"github.com/ory/pop/v6"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/dbal"
 	"github.com/ory/x/healthx"
+	"github.com/ory/x/httprouterx"
 	"github.com/ory/x/httpx"
 	"github.com/ory/x/jsonnetsecure"
 	"github.com/ory/x/jwksx"
@@ -65,26 +68,24 @@ import (
 	"github.com/ory/x/prometheusx"
 	"github.com/ory/x/servicelocatorx"
 	"github.com/ory/x/sqlcon"
+	"github.com/ory/x/sqlxx"
 )
 
 type RegistryDefault struct {
-	rwl sync.RWMutex
-	l   *logrusx.Logger
-	c   *config.Config
+	l *logrusx.Logger
+	c *config.Config
 
 	ctxer contextx.Contextualizer
 
 	injectedSelfserviceHooks map[string]func(config.SelfServiceHook) interface{}
-	extraHandlerFactories    []NewHandlerRegistrar
-	extraHandlers            []x.HandlerRegistrar
+	extraHandlerFactories    []NewHandler
+	extraHandlers            []x.Handler
 	slOptions                *servicelocatorx.Options
 
 	nosurf         nosurf.Handler
 	trc            *otelx.Tracer
-	pmm            *prometheusx.MetricsManager
 	writer         herodot.Writer
 	healthxHandler *healthx.Handler
-	metricsHandler *prometheusx.Handler
 
 	persister       persistence.Persister
 	migrationStatus popx.MigrationStatuses
@@ -108,12 +109,12 @@ type RegistryDefault struct {
 
 	sessionHandler   *session.Handler
 	sessionManager   session.Manager
-	sessionTokenizer *session.Tokenizer
+	sessionTokenizer initOnce[*session.Tokenizer]
 
-	passwordHasher    hash.Hasher
-	passwordValidator password.Validator
+	passwordHasher    initOnce[hash.Hasher]
+	passwordValidator initOnce[password.Validator]
 
-	crypter cipher.Cipher
+	crypter initOnce[cipher.Cipher]
 
 	errorHandler *errorx.Handler
 	errorManager *errorx.Manager
@@ -150,31 +151,26 @@ type RegistryDefault struct {
 	selfserviceStrategies            []any
 	replacementSelfserviceStrategies []NewStrategy
 
-	hydra hydra.Hydra
-
-	buildVersion string
-	buildHash    string
-	buildDate    string
+	hydra initOnce[hydra.Hydra]
 
 	csrfTokenGenerator nosurfx.CSRFToken
 
-	jsonnetVMProvider jsonnetsecure.VMProvider
+	jsonnetVMProvider initOnce[jsonnetsecure.VMProvider]
 	jsonnetPool       jsonnetsecure.Pool
-	jwkFetcher        *jwksx.FetcherNext
+	jwkFetcher        initOnce[*jwksx.FetcherNext]
 }
 
 func (m *RegistryDefault) JsonnetVM(ctx context.Context) (jsonnetsecure.VM, error) {
-	if m.jsonnetVMProvider == nil {
-		m.jsonnetVMProvider = &jsonnetsecure.DefaultProvider{Subcommand: "jsonnet", Pool: m.jsonnetPool}
-	}
-	return m.jsonnetVMProvider.JsonnetVM(ctx)
+	return m.jsonnetVMProvider.Get(func() jsonnetsecure.VMProvider {
+		return &jsonnetsecure.DefaultProvider{Subcommand: "jsonnet", Pool: m.jsonnetPool}
+	}).JsonnetVM(ctx)
 }
 
 func (m *RegistryDefault) Audit() *logrusx.Logger {
 	return m.Logger().WithField("audience", "audit")
 }
 
-func (m *RegistryDefault) RegisterPublicRoutes(ctx context.Context, router *x.RouterPublic) {
+func (m *RegistryDefault) RegisterPublicRoutes(ctx context.Context, router *httprouterx.RouterPublic) {
 	for _, h := range m.ExtraHandlers() {
 		h.RegisterPublicRoutes(router)
 	}
@@ -184,25 +180,28 @@ func (m *RegistryDefault) RegisterPublicRoutes(ctx context.Context, router *x.Ro
 	m.SettingsHandler().RegisterPublicRoutes(router)
 	m.IdentityHandler().RegisterPublicRoutes(router)
 	m.CourierHandler().RegisterPublicRoutes(router)
-	m.AllLoginStrategies().RegisterPublicRoutes(router)
-	m.AllSettingsStrategies().RegisterPublicRoutes(router)
-	m.AllRegistrationStrategies().RegisterPublicRoutes(router)
 	m.SessionHandler().RegisterPublicRoutes(router)
 	m.SelfServiceErrorHandler().RegisterPublicRoutes(router)
 	m.SchemaHandler().RegisterPublicRoutes(router)
 
-	m.AllRecoveryStrategies().RegisterPublicRoutes(router)
 	m.RecoveryHandler().RegisterPublicRoutes(router)
 
 	m.VerificationHandler().RegisterPublicRoutes(router)
-	m.AllVerificationStrategies().RegisterPublicRoutes(router)
 
 	m.HydraHandler().RegisterPublicRoutes(router)
 
 	m.HealthHandler(ctx).SetHealthRoutes(router, false)
+	webauthnx.RegisterWebauthnRoute(router)
+
+	for _, s := range m.selfServiceStrategies() {
+		s, ok := s.(x.PublicHandler)
+		if ok {
+			s.RegisterPublicRoutes(router)
+		}
+	}
 }
 
-func (m *RegistryDefault) RegisterAdminRoutes(ctx context.Context, router *x.RouterAdmin) {
+func (m *RegistryDefault) RegisterAdminRoutes(ctx context.Context, router *httprouterx.RouterAdmin) {
 	for _, h := range m.ExtraHandlers() {
 		h.RegisterAdminRoutes(router)
 	}
@@ -216,22 +215,21 @@ func (m *RegistryDefault) RegisterAdminRoutes(ctx context.Context, router *x.Rou
 	m.SelfServiceErrorHandler().RegisterAdminRoutes(router)
 
 	m.RecoveryHandler().RegisterAdminRoutes(router)
-	m.AllRecoveryStrategies().RegisterAdminRoutes(router)
 	m.SessionHandler().RegisterAdminRoutes(router)
 
 	m.VerificationHandler().RegisterAdminRoutes(router)
-	m.AllVerificationStrategies().RegisterAdminRoutes(router)
 
 	m.HealthHandler(ctx).SetHealthRoutes(router, true)
 	m.HealthHandler(ctx).SetVersionRoutes(router)
-	m.MetricsHandler().SetMuxRoutes(router)
+	prometheusx.SetMuxRoutes(router)
+	config.RegisterConfigHashRoute(m, router)
 
-	config.NewConfigHashHandler(m, router)
-}
-
-func (m *RegistryDefault) RegisterRoutes(ctx context.Context, public *x.RouterPublic, admin *x.RouterAdmin) {
-	m.RegisterAdminRoutes(ctx, admin)
-	m.RegisterPublicRoutes(ctx, public)
+	for _, s := range m.selfServiceStrategies() {
+		s, ok := s.(x.AdminHandler)
+		if ok {
+			s.RegisterAdminRoutes(router)
+		}
+	}
 }
 
 func (m *RegistryDefault) HTTPMiddlewares() []negroni.Handler {
@@ -239,9 +237,13 @@ func (m *RegistryDefault) HTTPMiddlewares() []negroni.Handler {
 }
 
 func NewRegistryDefault() *RegistryDefault {
-	return &RegistryDefault{
-		trc: otelx.NewNoop(nil, new(otelx.Config)),
+	r := &RegistryDefault{
+		trc:       otelx.NewNoop(),
+		slOptions: &servicelocatorx.Options{},
 	}
+	r.initCheapMembers()
+
+	return r
 }
 
 func (m *RegistryDefault) SetLogger(l *logrusx.Logger) {
@@ -249,7 +251,7 @@ func (m *RegistryDefault) SetLogger(l *logrusx.Logger) {
 }
 
 func (m *RegistryDefault) SetJSONNetVMProvider(p jsonnetsecure.VMProvider) {
-	m.jsonnetVMProvider = p
+	m.jsonnetVMProvider.Set(p)
 }
 
 func (m *RegistryDefault) LogoutHandler() *logout.Handler {
@@ -287,14 +289,6 @@ func (m *RegistryDefault) HealthHandler(_ context.Context) *healthx.Handler {
 	}
 
 	return m.healthxHandler
-}
-
-func (m *RegistryDefault) MetricsHandler() *prometheusx.Handler {
-	if m.metricsHandler == nil {
-		m.metricsHandler = prometheusx.NewHandler(m.Writer(), config.Version)
-	}
-
-	return m.metricsHandler
 }
 
 func (m *RegistryDefault) WithCSRFHandler(c nosurf.Handler) {
@@ -423,9 +417,6 @@ func (m *RegistryDefault) ActiveCredentialsCounterStrategies(_ context.Context) 
 }
 
 func (m *RegistryDefault) IdentityValidator() *identity.Validator {
-	if m.identityValidator == nil {
-		m.identityValidator = identity.NewValidator(m)
-	}
 	return m.identityValidator
 }
 
@@ -487,40 +478,37 @@ func (m *RegistryDefault) SessionHandler() *session.Handler {
 }
 
 func (m *RegistryDefault) Cipher(ctx context.Context) cipher.Cipher {
-	if m.crypter == nil {
+	return m.crypter.Get(func() cipher.Cipher {
 		switch m.c.CipherAlgorithm(ctx) {
 		case "xchacha20-poly1305":
-			m.crypter = cipher.NewCryptChaCha20(m.Config())
+			return cipher.NewCryptChaCha20(m.Config())
 		case "aes":
-			m.crypter = cipher.NewCryptAES(m.Config())
+			return cipher.NewCryptAES(m.Config())
 		default:
-			m.crypter = cipher.NewNoop()
 			m.l.Logger.Warning("No encryption configuration found. The default algorithm (noop) will be used, resulting in sensitive data being stored in plaintext")
+			return cipher.NewNoop()
 		}
-	}
-	return m.crypter
+	})
 }
 
 func (m *RegistryDefault) Hasher(ctx context.Context) hash.Hasher {
-	if m.passwordHasher == nil {
+	return m.passwordHasher.Get(func() hash.Hasher {
 		if m.c.HasherPasswordHashingAlgorithm(ctx) == "bcrypt" {
-			m.passwordHasher = hash.NewHasherBcrypt(m)
-		} else {
-			m.passwordHasher = hash.NewHasherArgon2(m)
+			return hash.NewHasherBcrypt(m)
 		}
-	}
-	return m.passwordHasher
+		return hash.NewHasherArgon2(m)
+	})
 }
 
 func (m *RegistryDefault) PasswordValidator() password.Validator {
-	if m.passwordValidator == nil {
-		var err error
-		m.passwordValidator, err = password.NewDefaultPasswordValidatorStrategy(m)
+	m.passwordValidator.Get(func() password.Validator {
+		val, err := password.NewDefaultPasswordValidatorStrategy(m)
 		if err != nil {
 			m.Logger().WithError(err).Fatal("could not initialize DefaultPasswordValidator")
 		}
-	}
-	return m.passwordValidator
+		return val
+	})
+	return m.passwordValidator.value
 }
 
 func (m *RegistryDefault) SelfServiceErrorHandler() *errorx.Handler {
@@ -570,9 +558,9 @@ func (m *RegistryDefault) ContinuityCookieManager(ctx context.Context) sessions.
 	return cs
 }
 
-func (m *RegistryDefault) Tracer(ctx context.Context) *otelx.Tracer {
+func (m *RegistryDefault) Tracer(context.Context) *otelx.Tracer {
 	if m.trc == nil {
-		return otelx.NewNoop(m.l, m.Config().Tracing(ctx))
+		return otelx.NewNoop()
 	}
 	return m.trc
 }
@@ -582,27 +570,20 @@ func (m *RegistryDefault) SetTracer(t *otelx.Tracer) {
 }
 
 func (m *RegistryDefault) SessionManager() session.Manager {
-	if m.sessionManager == nil {
-		m.sessionManager = session.NewManagerHTTP(m)
-	}
 	return m.sessionManager
 }
 
 func (m *RegistryDefault) Hydra() hydra.Hydra {
-	if m.hydra == nil {
-		m.hydra = hydra.NewDefaultHydra(m)
-	}
-	return m.hydra
+	return m.hydra.Get(func() hydra.Hydra {
+		return hydra.NewDefaultHydra(m)
+	})
 }
 
 func (m *RegistryDefault) SetHydra(h hydra.Hydra) {
-	m.hydra = h
+	m.hydra.Set(h)
 }
 
 func (m *RegistryDefault) SelfServiceErrorManager() *errorx.Manager {
-	if m.errorManager == nil {
-		m.errorManager = errorx.NewManager(m)
-	}
 	return m.errorManager
 }
 
@@ -642,19 +623,35 @@ func (m *RegistryDefault) Init(ctx context.Context, ctxer contextx.Contextualize
 		m.SetContextualizer(ctxer)
 
 		pool, idlePool, connMaxLifetime, connMaxIdleTime, cleanedDSN := sqlcon.ParseConnectionOptions(m.l, m.Config().DSN(ctx))
-		m.Logger().
-			WithField("pool", pool).
-			WithField("idlePool", idlePool).
-			WithField("connMaxLifetime", connMaxLifetime).
-			Debug("Connecting to SQL Database")
-		c, err := pop.NewConnection(&pop.ConnectionDetails{
+		dbOpts := &pop.ConnectionDetails{
 			URL:             sqlcon.FinalizeDSN(m.l, cleanedDSN),
 			IdlePool:        idlePool,
 			ConnMaxLifetime: connMaxLifetime,
 			ConnMaxIdleTime: connMaxIdleTime,
 			Pool:            pool,
 			TracerProvider:  m.Tracer(ctx).Provider(),
-		})
+		}
+
+		for _, f := range o.dbOpts {
+			f(dbOpts)
+		}
+
+		scheme, _, _ := sqlxx.ExtractSchemeFromDSN(dbOpts.URL)
+		if !dbOpts.AllowMinPool && scheme == "postgres" && strings.Contains(dbOpts.URL, "pool_min_conns=") {
+			err := errors.Errorf("attempting to use the option 'pool_min_conns' with Postgres, but the pgxpool connection pool is disabled, this will be rejected by the database: dsn=%s dbOpts.AllowMinPool=%v", dbOpts.URL, dbOpts.AllowMinPool)
+			return backoff.Permanent(err)
+		}
+		if (scheme == "sqlite" || scheme == "mysql") && strings.Contains(dbOpts.URL, "pool_min_conns=") {
+			err := errors.Errorf("attempting to use the option 'pool_min_conns' with %s, but connection pooling is not supported for this case: dsn=%s", scheme, dbOpts.URL)
+			return backoff.Permanent(err)
+		}
+
+		m.Logger().
+			WithField("pool", pool).
+			WithField("idlePool", idlePool).
+			WithField("connMaxLifetime", connMaxLifetime).
+			Debug("Connecting to SQL Database")
+		c, err := pop.NewConnection(dbOpts)
 		if err != nil {
 			m.Logger().WithError(err).Warnf("Unable to connect to database, retrying.")
 			return errors.WithStack(err)
@@ -672,9 +669,9 @@ func (m *RegistryDefault) Init(ctx context.Context, ctxer contextx.Contextualize
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		if err := c.Store.SQLDB().PingContext(ctx); err != nil {
+		if err := c.Store.SQLDB().PingContext(pingCtx); err != nil {
 			m.Logger().WithError(err).Warnf("Unable to ping database, retrying.")
 			return err
 		}
@@ -711,6 +708,7 @@ func (m *RegistryDefault) Init(ctx context.Context, ctxer contextx.Contextualize
 			return errors.WithStack(err)
 		}
 	}
+
 	return nil
 }
 
@@ -723,81 +721,33 @@ func (m *RegistryDefault) Courier(ctx context.Context) (courier.Courier, error) 
 }
 
 func (m *RegistryDefault) ContinuityManager() continuity.Manager {
-	if m.continuityManager == nil {
-		m.continuityManager = continuity.NewManagerCookie(m)
-	}
 	return m.continuityManager
 }
 
-func (m *RegistryDefault) ContinuityPersister() continuity.Persister {
-	return m.persister
-}
-
-func (m *RegistryDefault) IdentityPool() identity.Pool {
-	return m.persister
-}
-
-func (m *RegistryDefault) PrivilegedIdentityPool() identity.PrivilegedPool {
-	return m.persister
-}
-
-func (m *RegistryDefault) RegistrationFlowPersister() registration.FlowPersister {
-	return m.persister
-}
-
-func (m *RegistryDefault) RecoveryFlowPersister() recovery.FlowPersister {
-	return m.persister
-}
-
-func (m *RegistryDefault) LoginFlowPersister() login.FlowPersister {
-	return m.persister
-}
-
-func (m *RegistryDefault) SettingsFlowPersister() settings.FlowPersister {
-	return m.persister
-}
-
-func (m *RegistryDefault) SelfServiceErrorPersister() errorx.Persister {
-	return m.persister
-}
-
-func (m *RegistryDefault) SessionPersister() session.Persister {
-	return m.persister
-}
-
-func (m *RegistryDefault) CourierPersister() courier.Persister {
-	return m.persister
-}
-
-func (m *RegistryDefault) RecoveryTokenPersister() link.RecoveryTokenPersister {
-	return m.Persister()
-}
-
-func (m *RegistryDefault) RecoveryCodePersister() code.RecoveryCodePersister {
-	return m.Persister()
-}
-
+func (m *RegistryDefault) Persister() persistence.Persister                      { return m.persister }
+func (m *RegistryDefault) ContinuityPersister() continuity.Persister             { return m.persister }
+func (m *RegistryDefault) IdentityPool() identity.Pool                           { return m.persister }
+func (m *RegistryDefault) PrivilegedIdentityPool() identity.PrivilegedPool       { return m.persister }
+func (m *RegistryDefault) RegistrationFlowPersister() registration.FlowPersister { return m.persister }
+func (m *RegistryDefault) RecoveryFlowPersister() recovery.FlowPersister         { return m.persister }
+func (m *RegistryDefault) LoginFlowPersister() login.FlowPersister               { return m.persister }
+func (m *RegistryDefault) SettingsFlowPersister() settings.FlowPersister         { return m.persister }
+func (m *RegistryDefault) SelfServiceErrorPersister() errorx.Persister           { return m.persister }
+func (m *RegistryDefault) SessionPersister() session.Persister                   { return m.persister }
+func (m *RegistryDefault) CourierPersister() courier.Persister                   { return m.persister }
+func (m *RegistryDefault) RecoveryTokenPersister() link.RecoveryTokenPersister   { return m.persister }
+func (m *RegistryDefault) RecoveryCodePersister() code.RecoveryCodePersister     { return m.persister }
+func (m *RegistryDefault) LoginCodePersister() code.LoginCodePersister           { return m.persister }
 func (m *RegistryDefault) VerificationTokenPersister() link.VerificationTokenPersister {
-	return m.Persister()
+	return m.persister
 }
-
 func (m *RegistryDefault) VerificationCodePersister() code.VerificationCodePersister {
-	return m.Persister()
+	return m.persister
 }
-
 func (m *RegistryDefault) RegistrationCodePersister() code.RegistrationCodePersister {
-	return m.Persister()
+	return m.persister
 }
-
-func (m *RegistryDefault) LoginCodePersister() code.LoginCodePersister {
-	return m.Persister()
-}
-
 func (m *RegistryDefault) TransactionalPersisterProvider() x.TransactionalPersister {
-	return m.Persister()
-}
-
-func (m *RegistryDefault) Persister() persistence.Persister {
 	return m.persister
 }
 
@@ -821,27 +771,15 @@ func (m *RegistryDefault) GenerateCSRFToken(r *http.Request) string {
 }
 
 func (m *RegistryDefault) IdentityManager() *identity.Manager {
-	if m.identityManager == nil {
-		m.identityManager = identity.NewManager(m)
-	}
 	return m.identityManager
 }
 
-func (m *RegistryDefault) PrometheusManager() *prometheusx.MetricsManager {
-	m.rwl.Lock()
-	defer m.rwl.Unlock()
-	if m.pmm == nil {
-		m.pmm = prometheusx.NewMetricsManagerWithPrefix("kratos", prometheusx.HTTPMetrics, m.buildVersion, m.buildHash, m.buildDate)
-	}
-	return m.pmm
-}
-
 func (m *RegistryDefault) HTTPClient(_ context.Context, opts ...httpx.ResilientOptions) *retryablehttp.Client {
-	opts = append(opts,
+	opts = append([]httpx.ResilientOptions{
 		httpx.ResilientClientWithLogger(m.Logger()),
 		httpx.ResilientClientWithMaxRetry(2),
-		httpx.ResilientClientWithConnectionTimeout(30*time.Second),
-	)
+		httpx.ResilientClientWithConnectionTimeout(30 * time.Second),
+	}, opts...)
 
 	// One of the few exceptions, this usually should not be hot reloaded.
 	if m.Config().ClientHTTPNoPrivateIPRanges(contextx.RootContext) {
@@ -867,8 +805,8 @@ func (m *RegistryDefault) Contextualizer() contextx.Contextualizer {
 }
 
 func (m *RegistryDefault) JWKSFetcher() *jwksx.FetcherNext {
-	if m.jwkFetcher == nil {
-		maxItems := int64(10000000)
+	return m.jwkFetcher.Get(func() *jwksx.FetcherNext {
+		maxItems := int64(10_000_000)
 		cache, _ := ristretto.NewCache(&ristretto.Config[[]byte, jwk.Set]{
 			NumCounters:        maxItems * 10,
 			MaxCost:            maxItems,
@@ -879,24 +817,49 @@ func (m *RegistryDefault) JWKSFetcher() *jwksx.FetcherNext {
 				return 1
 			},
 		})
-
-		m.jwkFetcher = jwksx.NewFetcherNext(cache)
-	}
-	return m.jwkFetcher
+		return jwksx.NewFetcherNext(cache)
+	})
 }
 
 func (m *RegistryDefault) SessionTokenizer() *session.Tokenizer {
-	if m.sessionTokenizer == nil {
-		m.sessionTokenizer = session.NewTokenizer(m)
-	}
-	return m.sessionTokenizer
+	return m.sessionTokenizer.Get(func() *session.Tokenizer { return session.NewTokenizer(m) })
 }
 
-func (m *RegistryDefault) ExtraHandlers() []x.HandlerRegistrar {
+func (m *RegistryDefault) ExtraHandlers() []x.Handler {
 	if m.extraHandlers == nil {
 		for _, newHandler := range m.extraHandlerFactories {
 			m.extraHandlers = append(m.extraHandlers, newHandler(m))
 		}
 	}
 	return m.extraHandlers
+}
+
+// initCheapMembers initializes members that are cheap to initialize.
+func (m *RegistryDefault) initCheapMembers() {
+	m.identityValidator = identity.NewValidator(m)
+	m.identityManager = identity.NewManager(m)
+	m.sessionManager = session.NewManagerHTTP(m)
+	m.errorManager = errorx.NewManager(m)
+	m.continuityManager = continuity.NewManagerCookie(m)
+}
+
+type initOnce[T any] struct {
+	value T
+	init  sync.Once
+}
+
+// Set sets the value of the initOnce, marking it as initialized.
+func (o *initOnce[T]) Set(val T) {
+	// We need to both set the value and run the init function to mark the value as
+	// initialized.
+	o.init.Do(func() { o.value = val })
+	o.value = val
+}
+
+// Get returns the value of the initOnce, initializing it with newT if it has not
+// been initialized yet. `newT` is only called once, even if Get is called
+// concurrently from multiple goroutines or with different `newT` functions.
+func (o *initOnce[T]) Get(newT func() T) T {
+	o.init.Do(func() { o.value = newT() })
+	return o.value
 }

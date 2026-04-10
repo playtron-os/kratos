@@ -10,21 +10,25 @@ import (
 
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ory/kratos/identity"
+	"github.com/ory/kratos/session"
+	"github.com/ory/kratos/x/events"
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/selfservice/errorx"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/login"
-	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
-	"github.com/ory/kratos/x/events"
 	"github.com/ory/kratos/x/swagger"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/urlx"
 )
@@ -35,9 +39,9 @@ type (
 	errorHandlerDependencies interface {
 		config.Provider
 		errorx.ManagementProvider
-		x.WriterProvider
-		x.LoggingProvider
-		x.TracingProvider
+		httpx.WriterProvider
+		logrusx.Provider
+		otelx.Provider
 
 		HandlerProvider
 		FlowPersistenceProvider
@@ -112,14 +116,14 @@ func (s *ErrorHandler) reauthenticate(
 	http.Redirect(w, r, redirectTo, http.StatusSeeOther)
 }
 
-func (s *ErrorHandler) PrepareReplacementForExpiredFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, f *Flow, id *identity.Identity, err error) (*flow.ExpiredError, error) {
+func (s *ErrorHandler) PrepareReplacementForExpiredFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, f *Flow, id *identity.Identity, sess *session.Session, err error) (*flow.ExpiredError, error) {
 	e := new(flow.ExpiredError)
 	if !errors.As(err, &e) {
 		return nil, nil
 	}
 
 	// create new flow because the old one is not valid
-	a, err := s.d.SettingsHandler().FromOldFlow(ctx, w, r, id, *f)
+	a, err := s.d.SettingsHandler().FromOldFlow(ctx, w, r, id, sess, *f)
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +143,17 @@ func (s *ErrorHandler) WriteFlowError(
 	group node.UiNodeGroup,
 	f *Flow,
 	id *identity.Identity,
+	sess *session.Session,
 	err error,
 ) {
-	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.flow.settings.ErrorHandler.WriteFlowError")
+	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.flow.settings.ErrorHandler.WriteFlowError",
+		trace.WithAttributes(
+			attribute.String("error", err.Error()),
+		))
+	r = r.WithContext(ctx)
 	defer otelx.End(span, &err)
 
-	logger := s.d.Audit().
+	logger := s.d.Logger().
 		WithError(err).
 		WithRequest(r).
 		WithField("settings_flow", f.ToLoggerField())
@@ -152,8 +161,11 @@ func (s *ErrorHandler) WriteFlowError(
 	logger.Info("Encountered self-service settings error.")
 
 	shouldRespondWithJSON := x.IsJSONRequest(r)
-	if f != nil && f.Type == flow.TypeAPI {
-		shouldRespondWithJSON = true
+	if f != nil {
+		span.SetAttributes(attribute.String("flow_id", f.ID.String()))
+		if f.Type == flow.TypeAPI {
+			shouldRespondWithJSON = true
+		}
 	}
 
 	if e := new(session.ErrNoActiveSessionFound); errors.As(err, &e) {
@@ -182,7 +194,7 @@ func (s *ErrorHandler) WriteFlowError(
 	}
 	trace.SpanFromContext(ctx).AddEvent(events.NewSettingsFailed(ctx, f.ID, string(f.Type), f.Active.String(), err))
 
-	if expired, inner := s.PrepareReplacementForExpiredFlow(ctx, w, r, f, id, err); inner != nil {
+	if expired, inner := s.PrepareReplacementForExpiredFlow(ctx, w, r, f, id, sess, err); inner != nil {
 		s.forward(ctx, w, r, f, err)
 		return
 	} else if expired != nil {

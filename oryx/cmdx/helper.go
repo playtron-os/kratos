@@ -146,8 +146,16 @@ var _ io.Writer = (*CallbackWriter)(nil)
 
 func prepareCmd(cmd *cobra.Command, stdIn io.Reader, stdOut, stdErr io.Writer, args []string) {
 	cmd.SetIn(stdIn)
-	cmd.SetOut(io.MultiWriter(stdOut, debugStdout))
-	cmd.SetErr(io.MultiWriter(stdErr, debugStderr))
+	outs := []io.Writer{debugStdout}
+	if stdOut != nil {
+		outs = append(outs, stdOut)
+	}
+	cmd.SetOut(io.MultiWriter(outs...))
+	errs := []io.Writer{debugStderr}
+	if stdErr != nil {
+		errs = append(errs, stdErr)
+	}
+	cmd.SetErr(io.MultiWriter(errs...))
 
 	if args == nil {
 		args = []string{}
@@ -171,10 +179,7 @@ func ExecBackgroundCtx(ctx context.Context, cmd *cobra.Command, stdIn io.Reader,
 // Exec runs the provided cobra command with the given reader as STD_IN and the given args.
 // Returns STD_OUT, STD_ERR and the error from the execution.
 func Exec(t testing.TB, cmd *cobra.Command, stdIn io.Reader, args ...string) (string, string, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	return ExecCtx(ctx, cmd, stdIn, args...)
+	return ExecCtx(t.Context(), cmd, stdIn, args...)
 }
 
 func ExecCtx(ctx context.Context, cmd *cobra.Command, stdIn io.Reader, args ...string) (string, string, error) {
@@ -182,7 +187,7 @@ func ExecCtx(ctx context.Context, cmd *cobra.Command, stdIn io.Reader, args ...s
 
 	prepareCmd(cmd, stdIn, stdOut, stdErr, args)
 
-	// needs to be on a separate line to ensure that the ouput buffers are read AFTER the command ran
+	// needs to be on a separate line to ensure that the output buffers are read AFTER the command ran
 	err := cmd.ExecuteContext(ctx)
 
 	return stdOut.String(), stdErr.String(), err
@@ -191,26 +196,23 @@ func ExecCtx(ctx context.Context, cmd *cobra.Command, stdIn io.Reader, args ...s
 // ExecNoErr is a helper that assumes a successful run from Exec.
 // Returns STD_OUT.
 func ExecNoErr(t testing.TB, cmd *cobra.Command, args ...string) string {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	return ExecNoErrCtx(ctx, t, cmd, args...)
+	return ExecNoErrCtx(t.Context(), t, cmd, args...)
 }
 
 func ExecNoErrCtx(ctx context.Context, t require.TestingT, cmd *cobra.Command, args ...string) string {
 	stdOut, stdErr, err := ExecCtx(ctx, cmd, nil, args...)
-	require.NoError(t, err, "std_out: %s\nstd_err: %s", stdOut, stdErr)
-	require.Len(t, stdErr, 0, stdOut)
+	if err == nil {
+		require.Len(t, stdErr, 0, "std_out: %s\nstd_err: %s", stdOut, stdErr)
+	} else {
+		require.ErrorIsf(t, err, context.Canceled, "std_out: %s\nstd_err: %s", stdOut, stdErr)
+	}
 	return stdOut
 }
 
 // ExecExpectedErr is a helper that assumes a failing run from Exec returning ErrNoPrintButFail
 // Returns STD_ERR.
 func ExecExpectedErr(t testing.TB, cmd *cobra.Command, args ...string) string {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	return ExecExpectedErrCtx(ctx, t, cmd, args...)
+	return ExecExpectedErrCtx(t.Context(), t, cmd, args...)
 }
 
 func ExecExpectedErrCtx(ctx context.Context, t require.TestingT, cmd *cobra.Command, args ...string) string {

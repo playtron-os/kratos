@@ -15,6 +15,9 @@ import (
 
 	"github.com/ory/kratos/x/events"
 
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx/semconv"
 	"github.com/ory/x/sqlxx"
 
 	"github.com/ory/kratos/ui/node"
@@ -39,8 +42,8 @@ var (
 type (
 	errorHandlerDependencies interface {
 		errorx.ManagementProvider
-		x.WriterProvider
-		x.LoggingProvider
+		httpx.WriterProvider
+		logrusx.Provider
 		nosurfx.CSRFTokenGeneratorProvider
 		config.Provider
 		StrategyProvider
@@ -68,7 +71,7 @@ func (s *ErrorHandler) WriteFlowError(
 	group node.UiNodeGroup,
 	recoveryErr error,
 ) {
-	logger := s.d.Audit().
+	logger := s.d.Logger().
 		WithError(recoveryErr).
 		WithRequest(r).
 		WithField("recovery_flow", f.ToLoggerField())
@@ -85,17 +88,17 @@ func (s *ErrorHandler) WriteFlowError(
 	trace.SpanFromContext(r.Context()).AddEvent(events.NewRecoveryFailed(r.Context(), f.ID, string(f.Type), f.Active.String(), recoveryErr))
 
 	if expiredError := new(flow.ExpiredError); errors.As(recoveryErr, &expiredError) {
-		strategy, err := s.d.RecoveryStrategies(r.Context()).Strategy(f.Active.String())
+		strategies, _, err := s.d.RecoveryStrategies(r.Context()).ActiveStrategies(f.Active.String())
 		if err != nil {
-			strategy, err = s.d.GetActiveRecoveryStrategy(r.Context())
-			// Can't retry the recovery if no strategy has been set
+			strategies, _, err = s.d.GetActiveRecoveryStrategies(r.Context())
+			// Can't retry the recovery if no primary strategy has been set
 			if err != nil {
 				s.d.SelfServiceErrorManager().Forward(r.Context(), w, r, err)
 				return
 			}
 		}
 		// create new flow because the old one is not valid
-		newFlow, err := FromOldFlow(s.d.Config(), s.d.Config().SelfServiceFlowRecoveryRequestLifespan(r.Context()), s.d.GenerateCSRFToken(r), r, strategy, *f)
+		newFlow, err := FromOldFlow(s.d.Config(), s.d.Config().SelfServiceFlowRecoveryRequestLifespan(r.Context()), s.d.GenerateCSRFToken(r), r, strategies, *f)
 		if err != nil {
 			// failed to create a new session and redirect to it, handle that error as a new one
 			s.WriteFlowError(w, r, f, group, err)
@@ -122,6 +125,8 @@ func (s *ErrorHandler) WriteFlowError(
 				http.Redirect(w, r, newFlow.AppendTo(s.d.Config().SelfServiceFlowRecoveryUI(r.Context())).String(), http.StatusSeeOther)
 			}
 		} else {
+			trace.SpanFromContext(r.Context()).AddEvent(semconv.NewDeprecatedFeatureUsedEvent(r.Context(), "no_continue_with_transition_recovery_error_handler"))
+
 			// We need to use the new flow, as that flow will be a browser flow. Bug fix for:
 			//
 			// https://github.com/ory/kratos/issues/2049!!
@@ -155,6 +160,7 @@ func (s *ErrorHandler) WriteFlowError(
 	updatedFlow, innerErr := s.d.RecoveryFlowPersister().GetRecoveryFlow(r.Context(), f.ID)
 	if innerErr != nil {
 		s.forward(w, r, updatedFlow, innerErr)
+		return
 	}
 
 	s.d.Writer().WriteCode(w, r, x.RecoverStatusCode(recoveryErr, http.StatusBadRequest), updatedFlow)

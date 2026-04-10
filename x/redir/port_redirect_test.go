@@ -15,20 +15,21 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/redir"
 	"github.com/ory/x/configx"
+	"github.com/ory/x/httprouterx"
 )
 
 func TestRedirectToPublicAdminRoute(t *testing.T) {
-	pub := x.NewTestRouterPublic(t)
-	adm := x.NewTestRouterAdmin(t)
+	pub, adm := httprouterx.NewTestRouterPublic(t), httprouterx.NewTestRouterAdminWithPrefix(t)
+
 	adminTS := httptest.NewServer(adm)
 	pubTS := httptest.NewServer(pub)
 	t.Cleanup(pubTS.Close)
 	t.Cleanup(adminTS.Close)
-	_, reg := internal.NewFastRegistryWithMocks(t, configx.WithValues(map[string]any{
+	_, reg := pkg.NewFastRegistryWithMocks(t, configx.WithValues(map[string]any{
 		config.ViperKeyAdminBaseURL:  adminTS.URL,
 		config.ViperKeyPublicBaseURL: pubTS.URL,
 	}))

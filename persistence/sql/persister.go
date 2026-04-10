@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"io/fs"
+	"slices"
 	"time"
 
 	"github.com/gofrs/uuid"
@@ -18,12 +19,13 @@ import (
 	"github.com/ory/kratos/persistence"
 	"github.com/ory/kratos/persistence/sql/devices"
 	idpersistence "github.com/ory/kratos/persistence/sql/identity"
+	gomigrations "github.com/ory/kratos/persistence/sql/migrations/go"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/session"
-	"github.com/ory/kratos/x"
 	"github.com/ory/pop/v6"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/fsx"
+	"github.com/ory/x/logrusx"
 	"github.com/ory/x/networkx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/popx"
@@ -32,14 +34,14 @@ import (
 var _ persistence.Persister = new(Persister)
 
 //go:embed migrations/sql/*.sql
-var migrations embed.FS
+var Migrations embed.FS
 
 type (
 	persisterDependencies interface {
-		x.LoggingProvider
+		logrusx.Provider
 		config.Provider
 		contextx.Provider
-		x.TracingProvider
+		otelx.Provider
 		schema.IdentitySchemaProvider
 		identity.ValidationProvider
 	}
@@ -49,7 +51,6 @@ type (
 		mb  *popx.MigrationBox
 		mbs popx.MigrationStatuses
 		r   persisterDependencies
-		p   *networkx.Manager
 
 		identity.PrivilegedPool
 		session.DevicePersister
@@ -92,9 +93,9 @@ func NewPersister(r persisterDependencies, c *pop.Connection, opts ...Option) (*
 		logger.Logrus().SetLevel(logrus.WarnLevel)
 	}
 	m, err := popx.NewMigrationBox(
-		fsx.Merge(append([]fs.FS{migrations, networkx.Migrations}, o.extraMigrations...)...),
+		fsx.Merge(append([]fs.FS{Migrations, networkx.Migrations}, o.extraMigrations...)...),
 		c, logger,
-		popx.WithGoMigrations(o.extraGoMigrations),
+		popx.WithGoMigrations(slices.Concat(gomigrations.All, o.extraGoMigrations)),
 	)
 	if err != nil {
 		return nil, err
@@ -106,7 +107,6 @@ func NewPersister(r persisterDependencies, c *pop.Connection, opts ...Option) (*
 		r:               r,
 		PrivilegedPool:  idpersistence.NewPersister(r, c),
 		DevicePersister: devices.NewPersister(r, c),
-		p:               networkx.NewManager(c, r.Logger()),
 	}, nil
 }
 
@@ -130,7 +130,7 @@ func (p Persister) WithNetworkID(nid uuid.UUID) persistence.Persister {
 }
 
 func (p *Persister) DetermineNetwork(ctx context.Context) (*networkx.Network, error) {
-	return p.p.Determine(ctx)
+	return networkx.Determine(p.Connection(ctx))
 }
 
 func (p *Persister) Connection(ctx context.Context) *pop.Connection {
@@ -205,7 +205,7 @@ func (p *Persister) CleanupDatabase(ctx context.Context, wait time.Duration, old
 	}
 	time.Sleep(wait)
 
-	p.r.Logger().Println("Cleaning up expired registation flows")
+	p.r.Logger().Println("Cleaning up expired registration flows")
 	if err := p.DeleteExpiredRegistrationFlows(ctx, currentTime, batchSize); err != nil {
 		return err
 	}

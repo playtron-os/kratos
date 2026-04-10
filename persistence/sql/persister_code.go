@@ -84,7 +84,7 @@ func useOneTimeCode[P any, U interface {
 
 	secrets:
 		for _, secret := range p.r.Config().SecretsSession(ctx) {
-			suppliedCode := []byte(hmacValueWithSecret(ctx, userProvidedCode, secret))
+			suppliedCode := []byte(hmacValueWithSecret(userProvidedCode, secret))
 			for i := range codes {
 				c := codes[i]
 				if subtle.ConstantTimeCompare([]byte(c.GetHMACCode()), suppliedCode) == 0 {

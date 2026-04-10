@@ -47,7 +47,7 @@ func (l *logRegistryOnly) Audit() *logrusx.Logger {
 }
 
 func (l *logRegistryOnly) Tracer(context.Context) *otelx.Tracer {
-	return otelx.NewNoop(l.l, new(otelx.Config))
+	return otelx.NewNoop()
 }
 
 func (l *logRegistryOnly) IdentityTraitsSchemas(context.Context) (schema.IdentitySchemaList, error) {
@@ -74,9 +74,9 @@ func TestPersisterHMAC(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("case=behaves deterministically", func(t *testing.T) {
-		assert.Equal(t, hmacValueWithSecret(ctx, "hashme", baseSecretBytes), p.hmacValue(ctx, "hashme"))
-		assert.NotEqual(t, hmacValueWithSecret(ctx, "notme", baseSecretBytes), p.hmacValue(ctx, "hashme"))
-		assert.NotEqual(t, hmacValueWithSecret(ctx, "hashme", baseSecretBytes), p.hmacValue(ctx, "notme"))
+		assert.Equal(t, hmacValueWithSecret("hashme", baseSecretBytes), p.hmacValue(ctx, "hashme"))
+		assert.NotEqual(t, hmacValueWithSecret("notme", baseSecretBytes), p.hmacValue(ctx, "hashme"))
+		assert.NotEqual(t, hmacValueWithSecret("hashme", baseSecretBytes), p.hmacValue(ctx, "notme"))
 	})
 
 	hash := p.hmacValue(ctx, "hashme")
@@ -84,13 +84,13 @@ func TestPersisterHMAC(t *testing.T) {
 
 	t.Run("case=with only new sectet", func(t *testing.T) {
 		ctx = contextx.WithConfigValue(ctx, config.ViperKeySecretsDefault, []string{newSecret})
-		assert.NotEqual(t, hmacValueWithSecret(ctx, "hashme", baseSecretBytes), p.hmacValue(ctx, "hashme"))
-		assert.Equal(t, hmacValueWithSecret(ctx, "hashme", []byte(newSecret)), p.hmacValue(ctx, "hashme"))
+		assert.NotEqual(t, hmacValueWithSecret("hashme", baseSecretBytes), p.hmacValue(ctx, "hashme"))
+		assert.Equal(t, hmacValueWithSecret("hashme", []byte(newSecret)), p.hmacValue(ctx, "hashme"))
 	})
 
 	t.Run("case=with new and old secret", func(t *testing.T) {
 		ctx = contextx.WithConfigValue(ctx, config.ViperKeySecretsDefault, []string{newSecret, baseSecret})
-		assert.Equal(t, hmacValueWithSecret(ctx, "hashme", []byte(newSecret)), p.hmacValue(ctx, "hashme"))
+		assert.Equal(t, hmacValueWithSecret("hashme", []byte(newSecret)), p.hmacValue(ctx, "hashme"))
 		assert.NotEqual(t, hash, p.hmacValue(ctx, "hashme"))
 	})
 }

@@ -5,11 +5,10 @@ package oidc
 
 import (
 	"context"
+	"slices"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
-
-	"github.com/ory/x/stringslice"
 )
 
 var _ OAuth2Provider = (*ProviderGoogle)(nil)
@@ -35,11 +34,11 @@ func NewProviderGoogle(
 
 func (g *ProviderGoogle) oauth2ConfigFromEndpoint(ctx context.Context, endpoint oauth2.Endpoint) *oauth2.Config {
 	scope := g.config.Scope
-	if !stringslice.Has(scope, gooidc.ScopeOpenID) {
+	if !slices.Contains(scope, gooidc.ScopeOpenID) {
 		scope = append(scope, gooidc.ScopeOpenID)
 	}
 
-	scope = stringslice.Filter(scope, func(s string) bool { return s == gooidc.ScopeOfflineAccess })
+	scope = slices.DeleteFunc(slices.Clone(scope), func(s string) bool { return s == gooidc.ScopeOfflineAccess })
 
 	return &oauth2.Config{
 		ClientID:     g.config.ClientID,
@@ -64,7 +63,7 @@ func (g *ProviderGoogle) AuthCodeURLOptions(r ider) []oauth2.AuthCodeOption {
 	scope := g.config.Scope
 	options := g.ProviderGenericOIDC.AuthCodeURLOptions(r)
 
-	if stringslice.Has(scope, gooidc.ScopeOfflineAccess) {
+	if slices.Contains(scope, gooidc.ScopeOfflineAccess) {
 		options = append(options, oauth2.AccessTypeOffline)
 	}
 
@@ -73,18 +72,18 @@ func (g *ProviderGoogle) AuthCodeURLOptions(r ider) []oauth2.AuthCodeOption {
 
 var _ IDTokenVerifier = new(ProviderGoogle)
 
-const issuerUrlGoogle = "https://accounts.google.com"
+const issuerURLGoogle = "https://accounts.google.com"
 
-func (p *ProviderGoogle) Verify(ctx context.Context, rawIDToken string) (*Claims, error) {
-	keySet := gooidc.NewRemoteKeySet(ctx, p.JWKSUrl)
-	ctx = gooidc.ClientContext(ctx, p.reg.HTTPClient(ctx).HTTPClient)
+func (g *ProviderGoogle) Verify(ctx context.Context, rawIDToken string) (*Claims, error) {
+	keySet := gooidc.NewRemoteKeySet(ctx, g.JWKSUrl)
+	ctx = gooidc.ClientContext(ctx, g.reg.HTTPClient(ctx).HTTPClient)
 
-	return verifyToken(ctx, keySet, p.config, rawIDToken, issuerUrlGoogle)
+	return verifyToken(ctx, keySet, g.config, rawIDToken, issuerURLGoogle)
 }
 
 var _ NonceValidationSkipper = new(ProviderGoogle)
 
-func (a *ProviderGoogle) CanSkipNonce(c *Claims) bool {
+func (g *ProviderGoogle) CanSkipNonce(c *Claims) bool {
 	// Not all SDKs support nonce validation, so we skip it if no nonce is present in the claims of the ID Token.
 	return c.Nonce == ""
 }

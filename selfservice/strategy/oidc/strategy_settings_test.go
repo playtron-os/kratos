@@ -24,9 +24,9 @@ import (
 	"github.com/ory/kratos/driver"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	kratos "github.com/ory/kratos/internal/httpclient"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	kratos "github.com/ory/kratos/pkg/httpclient"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/settings"
 	"github.com/ory/kratos/selfservice/strategy/oidc"
@@ -34,6 +34,7 @@ import (
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/x/assertx"
 	"github.com/ory/x/configx"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/snapshotx"
@@ -45,14 +46,15 @@ func init() {
 }
 
 func TestSettingsStrategy(t *testing.T) {
-	ctx := context.Background()
-	if testing.Short() {
-		t.Skip()
-	}
+	t.Parallel()
 
-	conf, reg := internal.NewFastRegistryWithMocks(t,
+	normalPrivilegedSessionFor := 5 * time.Minute
+	conf, reg := pkg.NewFastRegistryWithMocks(t,
 		configx.WithValues(testhelpers.DefaultIdentitySchemaConfig("file://./stub/settings.schema.json")),
-		configx.WithValue(config.ViperKeySelfServiceBrowserDefaultReturnTo, "https://www.ory.sh/kratos"),
+		configx.WithValues(map[string]any{
+			config.ViperKeySelfServiceBrowserDefaultReturnTo:                "https://www.ory.sh/kratos",
+			config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter: normalPrivilegedSessionFor,
+		}),
 	)
 
 	var (
@@ -78,60 +80,68 @@ func TestSettingsStrategy(t *testing.T) {
 		newOIDCProvider(t, publicTS, remotePublic, remoteAdmin, "github"),
 	)
 
-	// Make test data for this test run unique
-	testID := x.NewUUID().String()
-	users := map[string]*identity.Identity{
-		"password": {
-			ID: x.NewUUID(), Traits: identity.Traits(`{"email":"john` + testID + `@doe.com"}`),
+	type userDataFunc = func() (string, *identity.Identity)
+	passwordIdentity := func() (string, *identity.Identity) {
+		e := testhelpers.RandomEmail()
+		return e, &identity.Identity{
+			Traits:   identity.Traits(fmt.Sprintf(`{"email":"%s"}`, e)),
 			SchemaID: config.DefaultIdentityTraitsSchemaID,
 			Credentials: map[identity.CredentialsType]identity.Credentials{
 				"password": {
 					Type:        "password",
-					Identifiers: []string{"john+" + testID + "@doe.com"},
+					Identifiers: []string{e},
 					Config:      sqlxx.JSONRawMessage(`{"hashed_password":"$argon2id$iammocked...."}`),
 				},
 			},
-		},
-		"oryer": {
-			ID: x.NewUUID(), Traits: identity.Traits(`{"email":"hackerman+` + testID + `@ory.sh"}`),
-			SchemaID: config.DefaultIdentityTraitsSchemaID,
-			Credentials: map[identity.CredentialsType]identity.Credentials{
-				identity.CredentialsTypeOIDC: {
-					Type:        identity.CredentialsTypeOIDC,
-					Identifiers: []string{"ory:hackerman+" + testID},
-					Config:      sqlxx.JSONRawMessage(`{"providers":[{"provider":"ory","subject":"hackerman+` + testID + `"}]}`),
-				},
-			},
-		},
-		"githuber": {
-			ID: x.NewUUID(), Traits: identity.Traits(`{"email":"hackerman+github+` + testID + `@ory.sh"}`),
-			Credentials: map[identity.CredentialsType]identity.Credentials{
-				identity.CredentialsTypeOIDC: {
-					Type:        identity.CredentialsTypeOIDC,
-					Identifiers: []string{"ory:hackerman+github+" + testID, "github:hackerman+github+" + testID},
-					Config:      sqlxx.JSONRawMessage(`{"providers":[{"provider":"ory","subject":"hackerman+github+` + testID + `"},{"provider":"github","subject":"hackerman+github+` + testID + `"}]}`),
-				},
-			},
-			SchemaID: config.DefaultIdentityTraitsSchemaID,
-		},
-		"multiuser": {
-			ID: x.NewUUID(), Traits: identity.Traits(`{"email":"hackerman+multiuser+` + testID + `@ory.sh"}`),
-			Credentials: map[identity.CredentialsType]identity.Credentials{
-				"password": {
-					Type:        "password",
-					Identifiers: []string{"hackerman+multiuser+" + testID + "@ory.sh"},
-					Config:      sqlxx.JSONRawMessage(`{"hashed_password":"$argon2id$iammocked...."}`),
-				},
-				identity.CredentialsTypeOIDC: {
-					Type:        identity.CredentialsTypeOIDC,
-					Identifiers: []string{"ory:hackerman+multiuser+" + testID, "google:hackerman+multiuser+" + testID},
-					Config:      sqlxx.JSONRawMessage(`{"providers":[{"provider":"ory","subject":"hackerman+multiuser+` + testID + `"},{"provider":"google","subject":"hackerman+multiuser+` + testID + `"}]}`),
-				},
-			},
-			SchemaID: config.DefaultIdentityTraitsSchemaID,
-		},
+		}
 	}
-	agents := testhelpers.AddAndLoginIdentities(t, reg, publicTS, users)
+	singleOIDCIdentity := func() (string, *identity.Identity) {
+		e := testhelpers.RandomEmail()
+		return e, &identity.Identity{
+			Traits:   identity.Traits(fmt.Sprintf(`{"email":"%s"}`, e)),
+			SchemaID: config.DefaultIdentityTraitsSchemaID,
+			Credentials: map[identity.CredentialsType]identity.Credentials{
+				identity.CredentialsTypeOIDC: {
+					Type:        identity.CredentialsTypeOIDC,
+					Identifiers: []string{"ory:" + e},
+					Config:      sqlxx.JSONRawMessage(fmt.Sprintf(`{"providers":[{"provider":"ory","subject":"%s"}]}`, e)),
+				},
+			},
+		}
+	}
+	multiOIDCIdentity := func() (string, *identity.Identity) {
+		e := testhelpers.RandomEmail()
+		return e, &identity.Identity{
+			Traits: identity.Traits(fmt.Sprintf(`{"email":"%s"}`, e)),
+			Credentials: map[identity.CredentialsType]identity.Credentials{
+				identity.CredentialsTypeOIDC: {
+					Type:        identity.CredentialsTypeOIDC,
+					Identifiers: []string{"ory:" + e, "github:" + e},
+					Config:      sqlxx.JSONRawMessage(fmt.Sprintf(`{"providers":[{"provider":"ory","subject":"%s"},{"provider":"github","subject":"%s"}]}`, e, e)),
+				},
+			},
+			SchemaID: config.DefaultIdentityTraitsSchemaID,
+		}
+	}
+	multiCredentialIdentity := func() (string, *identity.Identity) {
+		e := testhelpers.RandomEmail()
+		return e, &identity.Identity{
+			Traits: identity.Traits(fmt.Sprintf(`{"email":"%s"}`, e)),
+			Credentials: map[identity.CredentialsType]identity.Credentials{
+				"password": {
+					Type:        "password",
+					Identifiers: []string{e},
+					Config:      sqlxx.JSONRawMessage(`{"hashed_password":"$argon2id$iammocked...."}`),
+				},
+				identity.CredentialsTypeOIDC: {
+					Type:        identity.CredentialsTypeOIDC,
+					Identifiers: []string{"ory:" + e, "google:" + e},
+					Config:      sqlxx.JSONRawMessage(fmt.Sprintf(`{"providers":[{"provider":"ory","subject":"%s"},{"provider":"google","subject":"%s"}]}`, e, e)),
+				},
+			},
+			SchemaID: config.DefaultIdentityTraitsSchemaID,
+		}
+	}
 
 	newProfileFlow := func(t *testing.T, client *http.Client, redirectTo string, exp time.Duration) *settings.Flow {
 		req, err := reg.SettingsFlowPersister().GetSettingsFlow(t.Context(),
@@ -143,10 +153,10 @@ func TestSettingsStrategy(t *testing.T) {
 			req.RequestURL = redirectTo
 		}
 		req.ExpiresAt = time.Now().Add(exp)
-		require.NoError(t, reg.SettingsFlowPersister().UpdateSettingsFlow(context.Background(), req))
+		require.NoError(t, reg.SettingsFlowPersister().UpdateSettingsFlow(t.Context(), req))
 
 		// sanity check
-		got, err := reg.SettingsFlowPersister().GetSettingsFlow(context.Background(), req.ID)
+		got, err := reg.SettingsFlowPersister().GetSettingsFlow(t.Context(), req.ID)
 		require.NoError(t, err)
 		require.Len(t, got.UI.Nodes, len(req.UI.Nodes))
 
@@ -154,28 +164,31 @@ func TestSettingsStrategy(t *testing.T) {
 	}
 
 	// does the same as new profile request but uses the SDK
-	nprSDK := func(t *testing.T, client *http.Client, redirectTo string, exp time.Duration) *kratos.SettingsFlow {
+	nprSDK := func(t *testing.T, client *http.Client) *kratos.SettingsFlow {
 		return testhelpers.InitializeSettingsFlowViaBrowser(t, client, false, publicTS)
 	}
 
+	_, sharedPasswordUser := passwordIdentity()
+	sharedUserID, sharedUserClient := testhelpers.AddAndLoginIdentity(t, reg, sharedPasswordUser)
+
 	t.Run("case=should not be able to continue a flow with a malformed ID", func(t *testing.T) {
-		body, res := testhelpers.HTTPPostForm(t, agents["password"], publicTS.URL+settings.RouteSubmitFlow+"?flow=i-am-not-a-uuid", nil)
+		body, res := testhelpers.HTTPPostForm(t, sharedUserClient, publicTS.URL+settings.RouteSubmitFlow+"?flow=i-am-not-a-uuid", nil)
 		AssertSystemError(t, errTS, res, body, 400, "malformed")
 	})
 
 	t.Run("case=should not be able to continue a flow without the flow query parameter", func(t *testing.T) {
-		body, res := testhelpers.HTTPPostForm(t, agents["password"], publicTS.URL+settings.RouteSubmitFlow, nil)
+		body, res := testhelpers.HTTPPostForm(t, sharedUserClient, publicTS.URL+settings.RouteSubmitFlow, nil)
 		AssertSystemError(t, errTS, res, body, 400, "query parameter is missing")
 	})
 
 	t.Run("case=should not be able to continue a flow with a non-existing ID", func(t *testing.T) {
-		body, res := testhelpers.HTTPPostForm(t, agents["password"], publicTS.URL+settings.RouteSubmitFlow+"?flow="+x.NewUUID().String(), nil)
+		body, res := testhelpers.HTTPPostForm(t, sharedUserClient, publicTS.URL+settings.RouteSubmitFlow+"?flow="+x.NewUUID().String(), nil)
 		AssertSystemError(t, errTS, res, body, 404, "not be found")
 	})
 
 	t.Run("case=should not be able to continue a flow that is expired", func(t *testing.T) {
-		req := newProfileFlow(t, agents["password"], "", -time.Hour)
-		body, res := testhelpers.HTTPPostForm(t, agents["password"], publicTS.URL+settings.RouteSubmitFlow+"?flow="+req.ID.String(), nil)
+		req := newProfileFlow(t, sharedUserClient, "", -time.Hour)
+		body, res := testhelpers.HTTPPostForm(t, sharedUserClient, publicTS.URL+settings.RouteSubmitFlow+"?flow="+req.ID.String(), nil)
 
 		require.Contains(t, res.Request.URL.String(), uiTS.URL+"/settings?flow=")
 		assert.NotContains(t, res.Request.URL.String(), req.ID.String(), "should initialize a new flow")
@@ -183,26 +196,29 @@ func TestSettingsStrategy(t *testing.T) {
 	})
 
 	t.Run("case=should not be able to fetch another user's data", func(t *testing.T) {
-		req := newProfileFlow(t, agents["password"], "", time.Hour)
+		_, otherUserData := passwordIdentity()
+		_, otherUserClient := testhelpers.AddAndLoginIdentity(t, reg, otherUserData)
 
-		_, _, err := testhelpers.NewSDKCustomClient(publicTS, agents["oryer"]).FrontendAPI.GetSettingsFlow(context.Background()).Id(req.ID.String()).Execute()
+		req := newProfileFlow(t, sharedUserClient, "", time.Hour)
+
+		_, _, err := testhelpers.NewSDKCustomClient(publicTS, otherUserClient).FrontendAPI.GetSettingsFlow(t.Context()).Id(req.ID.String()).Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "403")
 	})
 
 	t.Run("case=should fetch the settings request and expect data to be set appropriately", func(t *testing.T) {
-		req := newProfileFlow(t, agents["password"], "", time.Hour)
+		req := newProfileFlow(t, sharedUserClient, "", time.Hour)
 
-		rs, _, err := testhelpers.NewSDKCustomClient(publicTS, agents["password"]).FrontendAPI.GetSettingsFlow(context.Background()).Id(req.ID.String()).Execute()
+		rs, _, err := testhelpers.NewSDKCustomClient(publicTS, sharedUserClient).FrontendAPI.GetSettingsFlow(t.Context()).Id(req.ID.String()).Execute()
 		require.NoError(t, err)
 
 		// Check our sanity. Does the SDK relay the same info that we expect and got from the store?
 		assert.Equal(t, publicTS.URL+"/self-service/settings/browser", req.RequestURL)
 		assert.Empty(t, req.Active)
 		assert.NotEmpty(t, req.IssuedAt)
-		assert.EqualValues(t, users["password"].ID, req.Identity.ID)
-		assert.EqualValues(t, users["password"].Traits, req.Identity.Traits)
-		assert.EqualValues(t, users["password"].SchemaID, req.Identity.SchemaID)
+		assert.EqualValues(t, sharedUserID, req.Identity.ID)
+		assert.EqualValues(t, sharedPasswordUser.Traits, req.Identity.Traits)
+		assert.EqualValues(t, sharedPasswordUser.SchemaID, req.Identity.SchemaID)
 
 		assert.EqualValues(t, req.ID.String(), rs.Id)
 		assert.EqualValues(t, req.RequestURL, rs.RequestUrl)
@@ -216,16 +232,20 @@ func TestSettingsStrategy(t *testing.T) {
 	})
 
 	t.Run("case=should adjust linkable providers based on linked credentials", func(t *testing.T) {
-		for _, tc := range []struct {
-			agent string
-		}{
-			{agent: "password"},
-			{agent: "oryer"},
-			{agent: "githuber"},
-			{agent: "multiuser"},
-		} {
-			t.Run("agent="+tc.agent, func(t *testing.T) {
-				rs := nprSDK(t, agents[tc.agent], "", time.Hour)
+		_, pw := passwordIdentity()
+		_, ory := singleOIDCIdentity()
+		_, gh := multiOIDCIdentity()
+		_, multi := multiCredentialIdentity()
+		userData := map[string]*identity.Identity{
+			"password":  pw,
+			"oryer":     ory,
+			"githuber":  gh,
+			"multiuser": multi,
+		}
+		users := testhelpers.AddAndLoginIdentities(t, reg, userData)
+		for name, user := range users {
+			t.Run("agent="+name, func(t *testing.T) {
+				rs := nprSDK(t, user.Client)
 				snapshotx.SnapshotT(t, rs.Ui.Nodes, snapshotx.ExceptPaths("0.attributes.value", "1.attributes.value"))
 			})
 		}
@@ -236,7 +256,7 @@ func TestSettingsStrategy(t *testing.T) {
 	}
 
 	checkCredentials := func(t *testing.T, shouldExist bool, iid uuid.UUID, provider, subject string, expectTokens bool) {
-		actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(context.Background(), iid)
+		actual, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(t.Context(), iid)
 		require.NoError(t, err)
 
 		var cc identity.CredentialsOIDC
@@ -265,24 +285,20 @@ func TestSettingsStrategy(t *testing.T) {
 		require.EqualValues(t, shouldExist, found)
 	}
 
-	reset := func(t *testing.T) func() {
-		return func() {
-			conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Minute*5)
-			agents = testhelpers.AddAndLoginIdentities(t, reg, publicTS, users)
-		}
-	}
-
 	t.Run("suite=unlink", func(t *testing.T) {
-		unlink := func(t *testing.T, agent, provider string) (body []byte, res *http.Response, req *kratos.SettingsFlow) {
-			req = nprSDK(t, agents[agent], "", time.Hour)
-			body, res = testhelpers.HTTPPostForm(t, agents[agent], action(req),
+		unlink := func(t *testing.T, agent *http.Client, provider string) (body []byte, res *http.Response, req *kratos.SettingsFlow) {
+			req = nprSDK(t, agent)
+			body, res = testhelpers.HTTPPostForm(t, agent, action(req),
 				&url.Values{"csrf_token": {nosurfx.FakeCSRFToken}, "unlink": {provider}})
 			return
 		}
 
-		unlinkInvalid := func(agent, provider, errorMessage string) func(t *testing.T) {
+		unlinkInvalid := func(userData userDataFunc, provider, errorMessage string) func(t *testing.T) {
 			return func(t *testing.T) {
-				body, res, req := unlink(t, agent, provider)
+				_, identityData := userData()
+				_, client := testhelpers.AddAndLoginIdentity(t, reg, identityData)
+
+				body, res, req := unlink(t, client, provider)
 
 				assert.Contains(t, res.Request.URL.String(), uiTS.URL+"/settings?flow="+req.Id)
 
@@ -303,37 +319,43 @@ func TestSettingsStrategy(t *testing.T) {
 		}
 
 		t.Run("case=should not be able to unlink the last remaining connection",
-			unlinkInvalid("oryer", "ory", "can not unlink OpenID Connect connection because it is the last remaining first factor credential"))
+			unlinkInvalid(singleOIDCIdentity, "ory", "can not unlink OpenID Connect connection because it is the last remaining first factor credential"))
 
 		t.Run("case=should not be able to unlink an non-existing connection",
-			unlinkInvalid("githuber", "i-do-not-exist", "can not unlink non-existing OpenID Connect connection"))
+			unlinkInvalid(multiOIDCIdentity, "i-do-not-exist", "can not unlink non-existing OpenID Connect connection"))
 
 		t.Run("case=should not be able to unlink a connection not yet linked",
-			unlinkInvalid("githuber", "google", "can not unlink non-existing OpenID Connect connection"))
+			unlinkInvalid(multiOIDCIdentity, "google", "can not unlink non-existing OpenID Connect connection"))
 
 		t.Run("case=should unlink a connection", func(t *testing.T) {
-			agent, provider := "githuber", "github"
-			t.Cleanup(reset(t))
+			email, userData := multiOIDCIdentity()
+			// only keep the relevant identity
+			userID, client := testhelpers.AddAndLoginIdentity(t, reg, userData)
+			provider := "github"
 
-			body, res, req := unlink(t, agent, provider)
+			body, res, req := unlink(t, client, provider)
 			assert.Contains(t, res.Request.URL.String(), uiTS.URL+"/settings?flow="+req.Id)
-			require.Equal(t, "success", gjson.GetBytes(body, "state").String(), "%s", body)
+			require.Equalf(t, "success", gjson.GetBytes(body, "state").String(), "%s", body)
 
-			checkCredentials(t, false, users[agent].ID, provider, "hackerman+github+"+testID, false)
+			checkCredentials(t, false, userID, provider, email, false)
+			checkCredentials(t, true, userID, "ory", email, false)
 		})
 
 		t.Run("case=should not be able to unlink a connection without a privileged session", func(t *testing.T) {
-			agent, provider := "githuber", "github"
+			userEmail, userData := multiOIDCIdentity()
+			userID, client := testhelpers.AddAndLoginIdentity(t, reg, userData)
+			provider := "github"
 
 			runUnauthed := func(t *testing.T) *kratos.SettingsFlow {
-				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Millisecond)
-				time.Sleep(time.Millisecond)
-				t.Cleanup(reset(t))
-				_, res, req := unlink(t, agent, provider)
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Millisecond)
+				t.Cleanup(func() {
+					conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, normalPrivilegedSessionFor)
+				})
+				_, res, req := unlink(t, client, provider)
 				assert.Contains(t, res.Request.URL.String(), uiTS.URL+"/login")
 
-				fa := testhelpers.NewSDKCustomClient(publicTS, agents[agent]).FrontendAPI
-				lf, _, err := fa.GetLoginFlow(context.Background()).Id(res.Request.URL.Query()["flow"][0]).Execute()
+				fa := testhelpers.NewSDKCustomClient(publicTS, client).FrontendAPI
+				lf, _, err := fa.GetLoginFlow(t.Context()).Id(res.Request.URL.Query()["flow"][0]).Execute()
 				require.NoError(t, err)
 
 				for _, n := range lf.Ui.Nodes {
@@ -342,11 +364,11 @@ func TestSettingsStrategy(t *testing.T) {
 					}
 				}
 
-				rs, _, err := fa.GetSettingsFlow(context.Background()).Id(req.Id).Execute()
+				rs, _, err := fa.GetSettingsFlow(t.Context()).Id(req.Id).Execute()
 				require.NoError(t, err)
 				require.EqualValues(t, flow.StateShowForm, rs.State)
 
-				checkCredentials(t, true, users[agent].ID, provider, "hackerman+github+"+testID, false)
+				checkCredentials(t, true, userID, provider, userEmail, false)
 
 				return req
 			}
@@ -359,37 +381,44 @@ func TestSettingsStrategy(t *testing.T) {
 				req := runUnauthed(t)
 
 				// fake login by allowing longer sessions...
-				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Minute*5)
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, normalPrivilegedSessionFor)
 
-				body, res := testhelpers.HTTPPostForm(t, agents[agent], action(req),
+				body, res := testhelpers.HTTPPostForm(t, client, action(req),
 					&url.Values{"csrf_token": {nosurfx.FakeCSRFToken}, "unlink": {provider}})
 				assert.Contains(t, res.Request.URL.String(), uiTS.URL+"/settings?flow="+req.Id)
 
 				assert.Equal(t, "success", gjson.GetBytes(body, "state").String())
 
-				checkCredentials(t, false, users[agent].ID, provider, "hackerman+github+"+testID, false)
+				checkCredentials(t, false, userID, provider, userEmail, false)
+				checkCredentials(t, true, userID, "ory", userEmail, false)
 			})
 		})
 	})
 
 	t.Run("suite=link", func(t *testing.T) {
-		link := func(t *testing.T, agent, provider string) (body []byte, res *http.Response, req *kratos.SettingsFlow) {
-			req = nprSDK(t, agents[agent], "", time.Hour)
-			body, res = testhelpers.HTTPPostForm(t, agents[agent], action(req),
+		userEmail, userData := multiOIDCIdentity()
+		_, client := testhelpers.AddAndLoginIdentity(t, reg, userData)
+
+		link := func(t *testing.T, client *http.Client, provider string) (body []byte, res *http.Response, req *kratos.SettingsFlow) {
+			req = nprSDK(t, client)
+			body, res = testhelpers.HTTPPostForm(t, client, action(req),
 				&url.Values{"csrf_token": {nosurfx.FakeCSRFToken}, "link": {provider}})
 			return
 		}
 
-		linkInvalid := func(agent, provider string) func(t *testing.T) {
+		linkInvalid := func(userData userDataFunc, provider string) func(t *testing.T) {
 			return func(t *testing.T) {
-				body, res, req := link(t, agent, provider)
+				_, identityData := userData()
+				_, client := testhelpers.AddAndLoginIdentity(t, reg, identityData)
+
+				body, res, req := link(t, client, provider)
 				assert.Contains(t, res.Request.URL.String(), uiTS.URL+"/settings?flow="+req.Id)
 
 				// assert.EqualValues(t, identity.CredentialsTypeOIDC.String(), gjson.GetBytes(body, "active").String())
 				assert.Contains(t, gjson.GetBytes(body, "ui.action").String(), publicTS.URL+settings.RouteSubmitFlow+"?flow=")
 
 				// The original options to link google and github are still there
-				snapshotx.SnapshotT(t, json.RawMessage(gjson.GetBytes(body, `ui.nodes`).Raw), snapshotx.ExceptPaths("0.attributes.value", "1.attributes.value"))
+				snapshotx.SnapshotT(t, json.RawMessage(gjson.GetBytes(body, "ui.nodes").Raw), snapshotx.ExceptPaths("0.attributes.value", "1.attributes.value"))
 
 				assert.Contains(t, gjson.GetBytes(body, `ui.messages.0.text`).String(),
 					"can not link unknown or already existing OpenID Connect connection")
@@ -397,51 +426,45 @@ func TestSettingsStrategy(t *testing.T) {
 		}
 
 		t.Run("case=should not be able to link an non-existing connection",
-			linkInvalid("oryer", "i-do-not-exist"))
+			linkInvalid(singleOIDCIdentity, "i-do-not-exist"))
 
 		t.Run("case=should not be able to link a connection which already exists",
-			linkInvalid("githuber", "github"))
+			linkInvalid(multiOIDCIdentity, "github"))
 
 		t.Run("case=should not be able to link a connection already linked by another identity", func(t *testing.T) {
 			// While this theoretically allows for account enumeration - because we see an error indicator if an
 			// OIDC connection is being linked that exists already - it would require the attacker to already
 			// have control over the social profile, in which case account enumeration is the least of our worries.
 			// Instead of using the OIDC profile for enumeration, the attacker would use it for account takeover.
+			_, otherUserData := singleOIDCIdentity()
+			_, otherClient := testhelpers.AddAndLoginIdentity(t, reg, otherUserData)
 
-			// This is the multiuser login id for google
-			subject = "hackerman+multiuser+" + testID
+			subject = userEmail
 			scope = []string{"openid"}
 
-			agent, provider := "githuber", "google"
-			body, res, _ := link(t, agent, provider)
+			body, res, _ := link(t, otherClient, "github")
 
 			assert.Contains(t, res.Request.URL.String(), uiTS.URL)
-			assert.Contains(t, gjson.GetBytes(body, "ui.messages.0.text").String(), "An account with the same identifier (email, phone, username, ...) exists already.", "%s", body)
+			assert.Containsf(t, gjson.GetBytes(body, "ui.messages.0.text").String(), "An account with the same identifier (email, phone, username, ...) exists already.", "%s", body)
 		})
 
 		t.Run("case=should not be able to link a connection which is missing the ID token", func(t *testing.T) {
-			t.Cleanup(reset(t))
-
-			subject = "hackerman+scope-missing+" + testID
+			subject = "hackerman+scope-missing"
 			scope = []string{}
 
-			agent, provider := "githuber", "google"
-			body, res, _ := link(t, agent, provider)
+			body, res, _ := link(t, client, "google")
 			assert.Contains(t, res.Request.URL.String(), uiTS.URL)
 
-			t.Logf("%s", body)
-			assert.Contains(t, gjson.GetBytes(body, `ui.messages.0.text`).String(),
-				"no id_token was returned")
+			assert.Containsf(t, gjson.GetBytes(body, `ui.messages.0.text`).String(),
+				"no id_token was returned",
+				"%s", body)
 		})
 
 		t.Run("case=should not be able to link a connection which is missing the ID token", func(t *testing.T) {
-			t.Cleanup(reset(t))
-
-			subject = "hackerman+scope-missing+" + testID
+			subject = "hackerman+scope-missing"
 			scope = []string{}
 
-			agent, provider := "githuber", "google"
-			body, res, _ := link(t, agent, provider)
+			body, res, _ := link(t, client, "google")
 			assert.Contains(t, res.Request.URL.String(), uiTS.URL)
 
 			assert.Contains(t, gjson.GetBytes(body, `ui.messages.0.text`).String(),
@@ -449,16 +472,17 @@ func TestSettingsStrategy(t *testing.T) {
 		})
 
 		t.Run("case=should link a connection", func(t *testing.T) {
-			t.Cleanup(reset(t))
-
-			subject = "hackerman+new-connection+" + testID
+			subject = testhelpers.RandomEmail()
 			scope = []string{"openid", "offline"}
+			provider := "google"
 
-			agent, provider := "githuber", "google"
-			updatedFlow, res, originalFlow := link(t, agent, provider)
+			_, userData := multiOIDCIdentity()
+			userID, client := testhelpers.AddAndLoginIdentity(t, reg, userData)
+
+			updatedFlow, res, originalFlow := link(t, client, provider)
 			assert.Contains(t, res.Request.URL.String(), uiTS.URL)
 
-			updatedFlowSDK, _, err := testhelpers.NewSDKCustomClient(publicTS, agents[agent]).FrontendAPI.GetSettingsFlow(context.Background()).Id(originalFlow.Id).Execute()
+			updatedFlowSDK, _, err := testhelpers.NewSDKCustomClient(publicTS, client).FrontendAPI.GetSettingsFlow(t.Context()).Id(originalFlow.Id).Execute()
 			require.NoError(t, err)
 			require.EqualValues(t, flow.StateSuccess, updatedFlowSDK.State)
 
@@ -472,22 +496,24 @@ func TestSettingsStrategy(t *testing.T) {
 				snapshotx.SnapshotT(t, updatedFlowSDK.Ui.Nodes, snapshotx.ExceptPaths("0.attributes.value", "1.attributes.value"))
 			})
 
-			checkCredentials(t, true, users[agent].ID, provider, subject, true)
+			checkCredentials(t, true, userID, provider, subject, true)
 		})
 
 		t.Run("case=should link a connection and add auth method to session", func(t *testing.T) {
-			t.Cleanup(reset(t))
+			_, userData := multiOIDCIdentity()
+			_, client := testhelpers.AddAndLoginIdentity(t, reg, userData)
+			provider := "google"
 
+			subject = testhelpers.RandomEmail()
 			scope = []string{"openid", "offline"}
 
-			agent, provider := "githuber", "google"
-			_, res, _ := link(t, agent, provider)
+			_, res, _ := link(t, client, provider)
 			assert.Contains(t, res.Request.URL.String(), uiTS.URL)
 
 			// Get the specific session for this agent using SDK
-			sess, _, err := testhelpers.NewSDKCustomClient(publicTS, agents[agent]).
+			sess, _, err := testhelpers.NewSDKCustomClient(publicTS, client).
 				FrontendAPI.
-				ToSession(context.Background()).
+				ToSession(t.Context()).
 				Execute()
 			require.NoError(t, err)
 			require.NotNil(t, sess)
@@ -504,38 +530,34 @@ func TestSettingsStrategy(t *testing.T) {
 		})
 
 		t.Run("case=should link a connection even if user does not have oidc credentials yet", func(t *testing.T) {
-			t.Cleanup(reset(t))
+			_, userData := passwordIdentity()
+			userID, client := testhelpers.AddAndLoginIdentity(t, reg, userData)
+			provider := "google"
 
-			subject = "hackerman+new-connection-new-oidc+" + testID
+			subject = testhelpers.RandomEmail()
 			scope = []string{"openid", "offline"}
 
-			agent, provider := "password", "google"
-			_, res, req := link(t, agent, provider)
+			_, res, req := link(t, client, provider)
 			assert.Contains(t, res.Request.URL.String(), uiTS.URL)
 
-			rs, _, err := testhelpers.NewSDKCustomClient(publicTS, agents[agent]).FrontendAPI.GetSettingsFlow(context.Background()).Id(req.Id).Execute()
+			rs, _, err := testhelpers.NewSDKCustomClient(publicTS, client).FrontendAPI.GetSettingsFlow(t.Context()).Id(req.Id).Execute()
 			require.NoError(t, err)
 			require.EqualValues(t, flow.StateSuccess, rs.State)
 
 			snapshotx.SnapshotT(t, rs.Ui.Nodes, snapshotx.ExceptPaths("0.attributes.value", "1.attributes.value"))
 
-			checkCredentials(t, true, users[agent].ID, provider, subject, true)
+			checkCredentials(t, true, userID, provider, subject, true)
 		})
 
 		t.Run("case=upstream parameters", func(t *testing.T) {
-			t.Cleanup(reset(t))
-
-			subject = "hackerman+new-connection-new-oidc-with-parameters+" + testID
-			scope = []string{"openid", "offline"}
-			agent, provider := "password", "google"
-
-			a := agents[agent]
+			subject = ""
+			scope = nil
+			provider := "google"
 
 			t.Run("case=should be able to pass upstream paramters when linking a connection", func(t *testing.T) {
-				c := &http.Client{}
-				req := nprSDK(t, a, "", time.Hour)
+				req := nprSDK(t, client)
 				// copy over the client so we can disable redirects
-				*c = *a
+				c := *client
 				// We need to disable redirects because the upstream parameters are only passed on to the provider
 				c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 					return http.ErrUseLastResponse
@@ -561,10 +583,9 @@ func TestSettingsStrategy(t *testing.T) {
 			})
 
 			t.Run("case=invalid query parameters should be ignored", func(t *testing.T) {
-				c := &http.Client{}
-				req := nprSDK(t, a, "", time.Hour)
+				req := nprSDK(t, client)
 				// copy over the client so we can disable redirects
-				*c = *a
+				c := *client
 				// We need to disable redirects because the upstream parameters are only passed on to the provider
 				c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 					return http.ErrUseLastResponse
@@ -587,18 +608,23 @@ func TestSettingsStrategy(t *testing.T) {
 		})
 
 		t.Run("case=should not be able to link a connection without a privileged session", func(t *testing.T) {
-			agent, provider := "githuber", "google"
-			subject = "hackerman+new+google+" + testID
+			_, userData := singleOIDCIdentity()
+			userID, client := testhelpers.AddAndLoginIdentity(t, reg, userData)
+			provider := "google"
+
+			subject = testhelpers.RandomEmail()
+			scope = []string{"openid", "offline"}
 
 			runUnauthed := func(t *testing.T) *kratos.SettingsFlow {
-				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Millisecond)
-				time.Sleep(time.Millisecond)
-				t.Cleanup(reset(t))
-				_, res, req := link(t, agent, provider)
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Millisecond)
+				t.Cleanup(func() {
+					conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, normalPrivilegedSessionFor)
+				})
+				_, res, req := link(t, client, provider)
 				assert.Contains(t, res.Request.URL.String(), uiTS.URL+"/login")
 
-				fa := testhelpers.NewSDKCustomClient(publicTS, agents[agent]).FrontendAPI
-				lf, _, err := fa.GetLoginFlow(context.Background()).Id(res.Request.URL.Query()["flow"][0]).Execute()
+				fa := testhelpers.NewSDKCustomClient(publicTS, client).FrontendAPI
+				lf, _, err := fa.GetLoginFlow(t.Context()).Id(res.Request.URL.Query()["flow"][0]).Execute()
 				require.NoError(t, err)
 
 				for _, n := range lf.Ui.Nodes {
@@ -607,11 +633,11 @@ func TestSettingsStrategy(t *testing.T) {
 					}
 				}
 
-				rs, _, err := fa.GetSettingsFlow(context.Background()).Id(req.Id).Execute()
+				rs, _, err := fa.GetSettingsFlow(t.Context()).Id(req.Id).Execute()
 				require.NoError(t, err)
 				require.EqualValues(t, flow.StateShowForm, rs.State)
 
-				checkCredentials(t, false, users[agent].ID, provider, subject, true)
+				checkCredentials(t, false, userID, provider, subject, true)
 
 				return req
 			}
@@ -624,16 +650,194 @@ func TestSettingsStrategy(t *testing.T) {
 				req := runUnauthed(t)
 
 				// fake login by allowing longer sessions...
-				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Minute*5)
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, normalPrivilegedSessionFor)
 
-				body, res := testhelpers.HTTPPostForm(t, agents[agent], action(req),
+				body, res := testhelpers.HTTPPostForm(t, client, action(req),
 					&url.Values{"csrf_token": {nosurfx.FakeCSRFToken}, "unlink": {provider}})
 				assert.Contains(t, res.Request.URL.String(), uiTS.URL+"/settings?flow="+req.Id)
 
 				assert.Equal(t, "success", gjson.GetBytes(body, "state").String())
 
-				checkCredentials(t, true, users[agent].ID, provider, subject, true)
+				checkCredentials(t, true, userID, provider, subject, true)
 			})
+		})
+	})
+
+	t.Run("suite=api", func(t *testing.T) {
+		newAPIClient := func(t *testing.T, userData userDataFunc) (uuid.UUID, *http.Client) {
+			_, id := userData()
+			id.State = identity.StateActive
+			return id.ID, testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, id)
+		}
+
+		nprAPISDK := func(t *testing.T, client *http.Client) *kratos.SettingsFlow {
+			return testhelpers.InitializeSettingsFlowViaAPI(t, client, publicTS)
+		}
+
+		t.Run("case=API flow populates link and unlink nodes", func(t *testing.T) {
+			for name, userData := range map[string]userDataFunc{
+				"password_only":     passwordIdentity,
+				"single_oidc":       singleOIDCIdentity,
+				"multi_oidc":        multiOIDCIdentity,
+				"multi_credentials": multiCredentialIdentity,
+			} {
+				t.Run("identity="+name, func(t *testing.T) {
+					_, client := newAPIClient(t, userData)
+					rs := nprAPISDK(t, client)
+					snapshotx.SnapshotT(t, rs.Ui.Nodes, snapshotx.ExceptPaths("0.attributes.value", "1.attributes.value"))
+				})
+			}
+		})
+
+		makeOIDCPayload := func(rs *kratos.SettingsFlow, key, provider string) string {
+			values := url.Values{
+				"csrf_token": {nosurfx.FakeCSRFToken},
+				key:          {provider},
+			}
+			return testhelpers.EncodeFormAsJSON(t, true, values)
+		}
+
+		t.Run("case=API flow link returns 422 BrowserLocationChangeRequired", func(t *testing.T) {
+			_, client := newAPIClient(t, multiOIDCIdentity)
+			provider := "google"
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "link", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			require.Equal(t, http.StatusUnprocessableEntity, res.StatusCode, "%s", actual)
+			assert.NotEmpty(t, gjson.Get(actual, "redirect_browser_to").String(), "%s", actual)
+
+			var changeLocation flow.BrowserLocationChangeRequiredError
+			require.NoError(t, json.Unmarshal([]byte(actual), &changeLocation))
+			assert.Contains(t, changeLocation.RedirectBrowserTo, "oauth2/auth")
+		})
+
+		t.Run("case=API flow unlink succeeds", func(t *testing.T) {
+			email, id := multiOIDCIdentity()
+			id.State = identity.StateActive
+			client := testhelpers.NewHTTPClientWithIdentitySessionToken(t.Context(), t, reg, id)
+			provider := "github"
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "unlink", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
+			assert.EqualValues(t, "success", gjson.Get(actual, "state").String(), "%s", actual)
+
+			// id.ID is set by NewHTTPClientWithIdentitySessionToken after persistence
+			checkCredentials(t, false, id.ID, provider, email, false)
+			checkCredentials(t, true, id.ID, "ory", email, false)
+		})
+
+		t.Run("case=API flow unlink last connection fails", func(t *testing.T) {
+			_, client := newAPIClient(t, singleOIDCIdentity)
+			provider := "ory"
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "unlink", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			require.Equal(t, http.StatusBadRequest, res.StatusCode, "%s", actual)
+			assert.Contains(t, gjson.Get(actual, "ui.messages.0.text").String(),
+				"can not unlink OpenID Connect connection because it is the last remaining first factor credential", "%s", actual)
+		})
+
+		t.Run("case=API flow unlink non-existing connection fails", func(t *testing.T) {
+			_, client := newAPIClient(t, multiOIDCIdentity)
+			provider := "i-do-not-exist"
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "unlink", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			require.Equal(t, http.StatusBadRequest, res.StatusCode, "%s", actual)
+			assert.Contains(t, gjson.Get(actual, "ui.messages.0.text").String(),
+				"can not unlink non-existing OpenID Connect connection", "%s", actual)
+		})
+
+		t.Run("case=API flow unlink connection not yet linked fails", func(t *testing.T) {
+			_, client := newAPIClient(t, multiOIDCIdentity)
+			provider := "google"
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "unlink", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			require.Equal(t, http.StatusBadRequest, res.StatusCode, "%s", actual)
+			assert.Contains(t, gjson.Get(actual, "ui.messages.0.text").String(),
+				"can not unlink non-existing OpenID Connect connection", "%s", actual)
+		})
+
+		t.Run("case=API flow link non-existing provider fails", func(t *testing.T) {
+			_, client := newAPIClient(t, singleOIDCIdentity)
+			provider := "i-do-not-exist"
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "link", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			require.Equal(t, http.StatusBadRequest, res.StatusCode, "%s", actual)
+			assert.Contains(t, gjson.Get(actual, "ui.messages.0.text").String(),
+				"can not link unknown or already existing OpenID Connect connection", "%s", actual)
+		})
+
+		t.Run("case=API flow link already linked provider fails", func(t *testing.T) {
+			_, client := newAPIClient(t, multiOIDCIdentity)
+			provider := "github"
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "link", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			require.Equal(t, http.StatusBadRequest, res.StatusCode, "%s", actual)
+			assert.Contains(t, gjson.Get(actual, "ui.messages.0.text").String(),
+				"can not link unknown or already existing OpenID Connect connection", "%s", actual)
+		})
+
+		t.Run("case=API flow privileged session requirement for unlink returns 403", func(t *testing.T) {
+			conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Nanosecond)
+			t.Cleanup(func() {
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, normalPrivilegedSessionFor)
+			})
+
+			_, client := newAPIClient(t, multiOIDCIdentity)
+			provider := "github"
+
+			// Ensure the privileged session window has expired.
+			time.Sleep(time.Millisecond)
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "unlink", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			assert.Equal(t, http.StatusForbidden, res.StatusCode, "%s", actual)
+			assert.Contains(t, gjson.Get(actual, "redirect_browser_to").String(),
+				publicTS.URL+"/self-service/login/browser?refresh=true&return_to=")
+			assertx.EqualAsJSONExcept(t, settings.NewFlowNeedsReAuth(), json.RawMessage(actual), []string{"redirect_browser_to"})
+		})
+
+		t.Run("case=API flow privileged session requirement for link returns 403", func(t *testing.T) {
+			conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, time.Nanosecond)
+			t.Cleanup(func() {
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, normalPrivilegedSessionFor)
+			})
+
+			_, client := newAPIClient(t, multiOIDCIdentity)
+			provider := "google"
+
+			// Ensure the privileged session window has expired.
+			time.Sleep(time.Millisecond)
+
+			rs := nprAPISDK(t, client)
+			payload := makeOIDCPayload(rs, "link", provider)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, true, false, rs, client, payload)
+			assert.Equal(t, http.StatusForbidden, res.StatusCode, "%s", actual)
+			assert.Contains(t, gjson.Get(actual, "redirect_browser_to").String(),
+				publicTS.URL+"/self-service/login/browser?refresh=true&return_to=")
+			assertx.EqualAsJSONExcept(t, settings.NewFlowNeedsReAuth(), json.RawMessage(actual), []string{"redirect_browser_to"})
 		})
 	})
 }
@@ -641,7 +845,7 @@ func TestSettingsStrategy(t *testing.T) {
 func TestPopulateSettingsMethod(t *testing.T) {
 	t.Parallel()
 	nCtx := func(t *testing.T, conf *oidc.ConfigurationCollection) (*driver.RegistryDefault, context.Context) {
-		_, reg := internal.NewFastRegistryWithMocks(t)
+		_, reg := pkg.NewFastRegistryWithMocks(t)
 		ctx := context.Background()
 		ctx = testhelpers.WithDefaultIdentitySchema(ctx, "file://stub/registration.schema.json")
 		ctx = contextx.WithConfigValue(ctx, config.ViperKeyPublicBaseURL, "https://www.ory.sh/")
@@ -684,7 +888,7 @@ func TestPopulateSettingsMethod(t *testing.T) {
 		{Provider: "generic", ID: "github"},
 	}
 
-	t.Run("case=should not populate non-browser flow", func(t *testing.T) {
+	t.Run("case=should populate API flow with link nodes", func(t *testing.T) {
 		t.Parallel()
 		reg, ctx := nCtx(t, &oidc.ConfigurationCollection{Providers: []oidc.Configuration{{Provider: "generic", ID: "github"}}})
 		i := &identity.Identity{Traits: []byte(`{"subject":"foo@bar.com"}`)}
@@ -692,7 +896,11 @@ func TestPopulateSettingsMethod(t *testing.T) {
 		f := &settings.Flow{Type: flow.TypeAPI, ID: x.NewUUID(), UI: container.New("")}
 		req := new(http.Request)
 		require.NoError(t, ns(t, reg, ctx).PopulateSettingsMethod(ctx, req, i, f))
-		require.Empty(t, f.UI.Nodes)
+		require.NotEmpty(t, f.UI.Nodes)
+		assert.EqualValues(t, node.Nodes{
+			node.NewCSRFNode(nosurfx.FakeCSRFToken),
+			oidc.NewLinkNode("github", "github"),
+		}, f.UI.Nodes)
 	})
 
 	for k, tc := range []struct {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,19 +23,23 @@ import (
 	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
+	"github.com/ory/x/errorsx"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/pagination/migrationpagination"
 )
 
 type (
 	handlerDependencies interface {
-		x.WriterProvider
-		x.LoggingProvider
+		httpx.WriterProvider
+		logrusx.Provider
 		IdentitySchemaProvider
 		nosurfx.CSRFProvider
 		config.Provider
-		x.TracingProvider
-		x.HTTPClientProvider
+		otelx.Provider
+		httpx.ClientProvider
 	}
 	Handler struct {
 		r handlerDependencies
@@ -53,18 +58,18 @@ const (
 	maxSchemaSize        = 1024 * 1024 // 1 MB
 )
 
-func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(public *httprouterx.RouterPublic) {
 	h.r.CSRFHandler().IgnoreGlobs(
 		"/"+SchemasPath+"/*",
-		x.AdminPrefix+"/"+SchemasPath+"/*",
+		httprouterx.AdminPrefix+"/"+SchemasPath+"/*",
 	)
 	public.GET(fmt.Sprintf("/%s/{id}", SchemasPath), h.getIdentitySchema)
 	public.GET(fmt.Sprintf("/%s", SchemasPath), h.getAll)
-	public.GET(fmt.Sprintf("%s/%s/{id}", x.AdminPrefix, SchemasPath), h.getIdentitySchema)
-	public.GET(fmt.Sprintf("%s/%s", x.AdminPrefix, SchemasPath), h.getAll)
+	public.GET(fmt.Sprintf("%s/%s/{id}", httprouterx.AdminPrefix, SchemasPath), h.getIdentitySchema)
+	public.GET(fmt.Sprintf("%s/%s", httprouterx.AdminPrefix, SchemasPath), h.getAll)
 }
 
-func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(admin *httprouterx.RouterAdmin) {
 	admin.GET(fmt.Sprintf("/%s/{id}", SchemasPath), redir.RedirectToPublicRoute(h.r))
 	admin.GET(fmt.Sprintf("/%s", SchemasPath), redir.RedirectToPublicRoute(h.r))
 }
@@ -100,34 +105,37 @@ type _ struct {
 //	  200: identitySchema
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-medium
 func (h *Handler) getIdentitySchema(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.r.Tracer(r.Context()).Tracer().Start(r.Context(), "schema.Handler.getIdentitySchema")
 	defer span.End()
 
 	ss, err := h.r.IdentityTraitsSchemas(ctx)
 	if err != nil {
-		h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrInternalServerError.WithWrap(err)))
+		h.r.Writer().WriteError(w, r, err)
 		return
 	}
 
 	id := r.PathValue("id")
 	s, err := ss.GetByID(id)
 	if err != nil {
-		// Maybe it is a base64 encoded ID?
-		if dec, err := base64.RawURLEncoding.DecodeString(id); err == nil {
-			id = string(dec)
-		}
-
-		s, err = ss.GetByID(id)
-		if err != nil {
-			h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrNotFound.WithReasonf("Identity schema `%s` could not be found.", id)))
-			return
-		}
+		h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrNotFound.WithReasonf("Identity schema `%s` could not be found.", id)))
+		return
 	}
 
 	raw, err := h.ReadSchema(ctx, s.URL)
 	if err != nil {
-		h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("The file for this JSON Schema ID could not be found or opened. This is a configuration issue.").WithDebugf("%+v", err)))
+		code, ok := errorsx.GetCodeFromHerodotError(err)
+
+		if errors.Is(err, fs.ErrNotExist) || (ok && code == http.StatusNotFound) {
+			h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrMisconfiguration.WithReason("The file for this JSON Schema ID could not be found/fetched. This is a configuration issue.").WithDebugf("%+v", err)))
+		} else if ok && code == http.StatusBadGateway {
+			h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrUpstreamError.WithReason("The file for this JSON Schema ID could not be fetched. This is an upstream issue.").WithDebugf("%+v", err)))
+		} else {
+			h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrInternalServerError.WithReason("The file for this JSON Schema ID could not be read. This is an I/O issue.").WithDebugf("%+v", err)))
+		}
 		return
 	}
 
@@ -183,6 +191,9 @@ type _ struct {
 //	Responses:
 //	  200: identitySchemas
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-medium
 func (h *Handler) getAll(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.r.Tracer(r.Context()).Tracer().Start(r.Context(), "schema.Handler.getAll")
 	defer span.End()
@@ -191,7 +202,7 @@ func (h *Handler) getAll(w http.ResponseWriter, r *http.Request) {
 
 	allSchemas, err := h.r.IdentityTraitsSchemas(r.Context())
 	if err != nil {
-		h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to load identity schemas").WithWrap(err)))
+		h.r.Writer().WriteError(w, r, err)
 		return
 	}
 	total := allSchemas.Total()
@@ -201,7 +212,7 @@ func (h *Handler) getAll(w http.ResponseWriter, r *http.Request) {
 	for i, schema := range schemas {
 		raw, err := h.ReadSchema(ctx, schema.URL)
 		if err != nil {
-			h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("The file for a JSON Schema ID could not be found or opened. This is a configuration issue.").WithDebugf("%+v", err)))
+			h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrMisconfiguration.WithReasonf("The file for a JSON Schema ID could not be found or opened. This is a configuration issue.").WithWrap(err)))
 			return
 		}
 		ss[i] = identitySchemaContainer{
@@ -220,7 +231,7 @@ func (h *Handler) ReadSchema(ctx context.Context, uri *url.URL) (data []byte, er
 
 	switch uri.Scheme {
 	case "file":
-		data, err = os.ReadFile(uri.Host + uri.Path)
+		data, err = os.ReadFile(uri.Host + uri.Path) //nolint:gosec
 		if err != nil {
 			return nil, errors.WithStack(fmt.Errorf("could not read schema file: %w", err))
 		}
@@ -236,15 +247,18 @@ func (h *Handler) ReadSchema(ctx context.Context, uri *url.URL) (data []byte, er
 		}
 		resp, err := h.r.HTTPClient(ctx).Do(req)
 		if err != nil {
-			return nil, errors.WithStack(fmt.Errorf("could not fetch schema: %w", err))
+			return nil, errors.WithStack(herodot.ErrUpstreamError.WithReason("could not fetch schema").WithError(err.Error()).WithDetail("uri", uri))
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
-			return nil, errors.Errorf("unexpected status code: %d", resp.StatusCode)
+			if resp.StatusCode == http.StatusNotFound {
+				return nil, herodot.ErrNotFound.WithDetail("url", uri)
+			}
+			return nil, errors.WithStack(herodot.ErrUpstreamError.WithError("upstream error").WithDetail("status_code", resp.StatusCode).WithDetail("uri", uri))
 		}
 		data, err = io.ReadAll(io.LimitReader(resp.Body, maxSchemaSize))
 		if err != nil {
-			return nil, errors.WithStack(fmt.Errorf("could not read schema response: %w", err))
+			return nil, errors.WithStack(herodot.ErrUpstreamError.WithReason("could not read schema response").WithError(err.Error()).WithDetail("uri", uri))
 		}
 	}
 	return data, nil

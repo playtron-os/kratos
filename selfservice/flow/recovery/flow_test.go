@@ -11,26 +11,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tidwall/gjson"
-
-	"github.com/ory/x/jsonx"
-
-	"github.com/ory/kratos/internal"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
-	"github.com/ory/x/urlx"
-
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/strategy/code"
 	"github.com/ory/kratos/selfservice/strategy/link"
+	"github.com/ory/x/jsonx"
+	"github.com/ory/x/urlx"
 )
 
 func TestFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, _ := internal.NewFastRegistryWithMocks(t)
+	conf := pkg.NewConfigurationWithDefaults(t)
 
 	must := func(r *recovery.Flow, err error) *recovery.Flow {
 		require.NoError(t, err)
@@ -94,7 +90,7 @@ func TestFlowEncodeJSON(t *testing.T) {
 
 func TestFromOldFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewVeryFastRegistryWithoutDB(t)
+	conf, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 	r := http.Request{URL: &url.URL{Path: "/", RawQuery: "return_to=" + urlx.AppendPaths(conf.SelfPublicURL(ctx), "/self-service/login/browser").String()}, Host: "ory.sh"}
 	t.Run("strategy=code", func(t *testing.T) {
 		for _, ft := range []flow.Type{
@@ -102,7 +98,7 @@ func TestFromOldFlow(t *testing.T) {
 			flow.TypeBrowser,
 		} {
 			t.Run(fmt.Sprintf("case=original flow is %s", ft), func(t *testing.T) {
-				f, err := recovery.NewFlow(conf, 0, "csrf", &r, code.NewStrategy(reg), ft)
+				f, err := recovery.NewFlow(conf, 0, "csrf", &r, recovery.Strategies{code.NewStrategy(reg)}, ft)
 				require.NoError(t, err)
 				nF, err := recovery.FromOldFlow(conf, time.Duration(time.Hour), f.CSRFToken, &r, nil, *f)
 				require.NoError(t, err)
@@ -117,7 +113,7 @@ func TestFromOldFlow(t *testing.T) {
 			flow.TypeBrowser,
 		} {
 			t.Run(fmt.Sprintf("case=original flow is %s", ft), func(t *testing.T) {
-				f, err := recovery.NewFlow(conf, 0, "csrf", &r, link.NewStrategy(reg), ft)
+				f, err := recovery.NewFlow(conf, 0, "csrf", &r, recovery.Strategies{link.NewStrategy(reg)}, ft)
 				require.NoError(t, err)
 				nF, err := recovery.FromOldFlow(conf, time.Duration(time.Hour), f.CSRFToken, &r, nil, *f)
 				require.NoError(t, err)

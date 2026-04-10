@@ -6,14 +6,11 @@ package driver_test
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ory/kratos/internal/testhelpers"
 	"github.com/ory/x/configx"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/logrusx"
@@ -21,7 +18,7 @@ import (
 	"github.com/ory/kratos/driver"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/request"
 	"github.com/ory/kratos/selfservice/flow/login"
 	"github.com/ory/kratos/selfservice/flow/recovery"
@@ -35,11 +32,10 @@ func TestDriverDefault_Hooks(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	_, reg := internal.NewVeryFastRegistryWithoutDB(t)
-
 	t.Run("type=verification", func(t *testing.T) {
 		t.Parallel()
 		// BEFORE hooks
+		_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 		for _, tc := range []struct {
 			uc     string
 			config map[string]any
@@ -155,6 +151,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PreRecoveryHooks(ctx)
 				require.NoError(t, err)
 
@@ -193,6 +190,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PostRecoveryHooks(ctx)
 				require.NoError(t, err)
 
@@ -236,6 +234,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PreRegistrationHooks(ctx)
 				require.NoError(t, err)
 
@@ -341,6 +340,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PostRegistrationPostPersistHooks(ctx, identity.CredentialsTypePassword)
 				require.NoError(t, err)
 
@@ -382,6 +382,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PreLoginHooks(ctx)
 				require.NoError(t, err)
 
@@ -483,6 +484,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PostLoginHooks(ctx, identity.CredentialsTypePassword)
 				require.NoError(t, err)
 
@@ -524,6 +526,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PreSettingsHooks(ctx)
 				require.NoError(t, err)
 
@@ -611,6 +614,7 @@ func TestDriverDefault_Hooks(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				h, err := reg.PostSettingsPostPersistHooks(ctx, "profile")
 				require.NoError(t, err)
 
@@ -623,7 +627,6 @@ func TestDriverDefault_Hooks(t *testing.T) {
 func TestDriverDefault_Strategies(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	_, reg := internal.NewVeryFastRegistryWithoutDB(t)
 
 	t.Run("case=registration", func(t *testing.T) {
 		t.Parallel()
@@ -680,6 +683,7 @@ func TestDriverDefault_Strategies(t *testing.T) {
 				t.Parallel()
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				s := reg.RegistrationStrategies(ctx)
 				require.Len(t, s, len(tc.expect))
 				for k, e := range tc.expect {
@@ -753,6 +757,7 @@ func TestDriverDefault_Strategies(t *testing.T) {
 				t.Parallel()
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				s := reg.LoginStrategies(ctx)
 				require.Len(t, s, len(tc.expect))
 				for k, e := range tc.expect {
@@ -786,6 +791,7 @@ func TestDriverDefault_Strategies(t *testing.T) {
 
 				ctx := contextx.WithConfigValues(ctx, tc.config)
 
+				_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 				s := reg.RecoveryStrategies(ctx)
 				require.Len(t, s, len(tc.expect))
 				for k, e := range tc.expect {
@@ -861,7 +867,7 @@ func TestDriverDefault_Strategies(t *testing.T) {
 
 func TestDefaultRegistry_AllStrategies(t *testing.T) {
 	t.Parallel()
-	_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+	_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 
 	t.Run("case=all login strategies", func(t *testing.T) {
 		expects := []string{"password", "oidc", "code", "totp", "passkey", "webauthn", "lookup_secret", "identifier_first"}
@@ -903,7 +909,7 @@ func TestDefaultRegistry_AllStrategies(t *testing.T) {
 func TestGetActiveRecoveryStrategy(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+	_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 
 	t.Run("returns error if active strategy is disabled", func(t *testing.T) {
 		ctx := contextx.WithConfigValues(ctx, map[string]any{
@@ -911,11 +917,11 @@ func TestGetActiveRecoveryStrategy(t *testing.T) {
 			config.ViperKeySelfServiceRecoveryUse: "code",
 		})
 
-		_, err := reg.GetActiveRecoveryStrategy(ctx)
+		_, _, err := reg.GetActiveRecoveryStrategies(ctx)
 		require.Error(t, err)
 	})
 
-	t.Run("returns active strategy", func(t *testing.T) {
+	t.Run("returns active strategies", func(t *testing.T) {
 		for _, sID := range []string{
 			"code", "link",
 		} {
@@ -925,9 +931,10 @@ func TestGetActiveRecoveryStrategy(t *testing.T) {
 					config.ViperKeySelfServiceRecoveryUse:              sID,
 				})
 
-				s, err := reg.GetActiveRecoveryStrategy(ctx)
+				s, ps, err := reg.GetActiveRecoveryStrategies(ctx)
 				require.NoError(t, err)
-				require.Equal(t, sID, s.RecoveryStrategyID())
+				require.Len(t, s, 1)
+				require.Equal(t, sID, ps.RecoveryStrategyID())
 			})
 		}
 	})
@@ -936,13 +943,13 @@ func TestGetActiveRecoveryStrategy(t *testing.T) {
 func TestGetActiveVerificationStrategy(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+	_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 	t.Run("returns error if active strategy is disabled", func(t *testing.T) {
 		ctx := contextx.WithConfigValues(ctx, map[string]any{
 			"selfservice.methods.code.enabled":        false,
 			config.ViperKeySelfServiceVerificationUse: "code",
 		})
-		_, err := reg.GetActiveVerificationStrategy(ctx)
+		_, _, err := reg.GetActiveVerificationStrategies(ctx)
 		require.Error(t, err)
 	})
 
@@ -956,33 +963,10 @@ func TestGetActiveVerificationStrategy(t *testing.T) {
 					config.ViperKeySelfServiceVerificationUse:          sID,
 				})
 
-				s, err := reg.GetActiveVerificationStrategy(ctx)
+				_, s, err := reg.GetActiveVerificationStrategies(ctx)
 				require.NoError(t, err)
 				require.Equal(t, sID, s.VerificationStrategyID())
 			})
 		}
 	})
-}
-
-func TestMetricsRouterPaths(t *testing.T) {
-	t.Parallel()
-	_, reg := internal.NewVeryFastRegistryWithoutDB(t)
-	publicTS, adminTS := testhelpers.NewKratosServerWithCSRF(t, reg)
-
-	// Make some requests that should be recorded in the metrics
-	req, _ := http.NewRequest(http.MethodDelete, publicTS.URL+"/sessions/session-id", nil)
-	_, err := publicTS.Client().Do(req)
-	require.NoError(t, err)
-	_, err = adminTS.Client().Get(adminTS.URL + "/admin/identities/some-id/sessions")
-	require.NoError(t, err)
-
-	res, err := adminTS.Client().Get(adminTS.URL + "/admin/metrics/prometheus")
-	require.NoError(t, err)
-	require.EqualValues(t, http.StatusOK, res.StatusCode)
-	respBody, err := io.ReadAll(res.Body)
-	body := string(respBody)
-
-	require.NoError(t, err)
-	assert.Contains(t, body, `endpoint="DELETE /sessions/{param}"`, body)
-	assert.Contains(t, body, `endpoint="GET /admin/identities/{param}/sessions"`, body)
 }

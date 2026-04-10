@@ -7,19 +7,19 @@ import (
 	"context"
 	"net/url"
 
-	"github.com/ory/kratos/courier/template/email"
-
 	"github.com/pkg/errors"
 
-	"github.com/ory/x/sqlcon"
-	"github.com/ory/x/urlx"
-
 	"github.com/ory/kratos/courier"
+	"github.com/ory/kratos/courier/template/email"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/flow/verification"
 	"github.com/ory/kratos/x"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/sqlcon"
+	"github.com/ory/x/urlx"
 )
 
 type (
@@ -30,13 +30,13 @@ type (
 		identity.PoolProvider
 		identity.ManagementProvider
 		identity.PrivilegedPoolProvider
-		x.LoggingProvider
+		logrusx.Provider
 		config.Provider
 
 		VerificationTokenPersistenceProvider
 		RecoveryTokenPersistenceProvider
 
-		x.HTTPClientProvider
+		httpx.ClientProvider
 	}
 	SenderProvider interface {
 		LinkSender() *Sender
@@ -58,16 +58,16 @@ func NewSender(r senderDependencies) *Sender {
 // If the address does not exist in the store and dispatching invalid emails is enabled (CourierEnableInvalidDispatch is
 // true), an email is still being sent to prevent account enumeration attacks. In that case, this function returns the
 // ErrUnknownAddress error.
-func (s *Sender) SendRecoveryLink(ctx context.Context, f *recovery.Flow, via identity.VerifiableAddressType, to string) error {
+func (s *Sender) SendRecoveryLink(ctx context.Context, f *recovery.Flow, via, to string) error {
 	s.r.Logger().
 		WithField("via", via).
 		WithSensitiveField("address", to).
 		Debug("Preparing recovery link.")
 
-	address, err := s.r.IdentityPool().FindRecoveryAddressByValue(ctx, identity.RecoveryAddressTypeEmail, to)
+	address, err := s.r.IdentityPool().FindRecoveryAddressByValue(ctx, via, to)
 	if errors.Is(err, sqlcon.ErrNoRows) {
 		notifyUnknownRecipients := s.r.Config().SelfServiceFlowRecoveryNotifyUnknownRecipients(ctx)
-		s.r.Audit().
+		s.r.Logger().
 			WithField("via", via).
 			WithField("strategy", "link").
 			WithSensitiveField("email_address", address).
@@ -116,7 +116,7 @@ func (s *Sender) SendRecoveryLink(ctx context.Context, f *recovery.Flow, via ide
 // If the address does not exist in the store and dispatching invalid emails is enabled (CourierEnableInvalidDispatch is
 // true), an email is still being sent to prevent account enumeration attacks. In that case, this function returns the
 // ErrUnknownAddress error.
-func (s *Sender) SendVerificationLink(ctx context.Context, f *verification.Flow, via identity.VerifiableAddressType, to string) error {
+func (s *Sender) SendVerificationLink(ctx context.Context, f *verification.Flow, via, to string) error {
 	s.r.Logger().
 		WithField("via", via).
 		WithSensitiveField("address", to).
@@ -125,7 +125,7 @@ func (s *Sender) SendVerificationLink(ctx context.Context, f *verification.Flow,
 	address, err := s.r.IdentityPool().FindVerifiableAddressByValue(ctx, via, to)
 	if errors.Is(err, sqlcon.ErrNoRows) {
 		notifyUnknownRecipients := s.r.Config().SelfServiceFlowVerificationNotifyUnknownRecipients(ctx)
-		s.r.Audit().
+		s.r.Logger().
 			WithField("via", via).
 			WithField("strategy", "link").
 			WithSensitiveField("email_address", to).
@@ -169,7 +169,7 @@ func (s *Sender) SendVerificationLink(ctx context.Context, f *verification.Flow,
 }
 
 func (s *Sender) SendRecoveryTokenTo(ctx context.Context, f *recovery.Flow, i *identity.Identity, address *identity.RecoveryAddress, token *RecoveryToken) error {
-	s.r.Audit().
+	s.r.Logger().
 		WithField("via", address.Via).
 		WithField("identity_id", address.IdentityID).
 		WithField("recovery_link_id", token.ID).
@@ -207,7 +207,7 @@ func (s *Sender) SendRecoveryTokenTo(ctx context.Context, f *recovery.Flow, i *i
 }
 
 func (s *Sender) SendVerificationTokenTo(ctx context.Context, f *verification.Flow, i *identity.Identity, address *identity.VerifiableAddress, token *VerificationToken) error {
-	s.r.Audit().
+	s.r.Logger().
 		WithField("via", address.Via).
 		WithField("identity_id", address.IdentityID).
 		WithField("verification_link_id", token.ID).

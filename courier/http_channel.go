@@ -5,14 +5,18 @@ package courier
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+
 	"github.com/ory/kratos/courier/template"
 	"github.com/ory/kratos/request"
-	"github.com/ory/kratos/x"
 	"github.com/ory/x/jsonnetsecure"
 	"github.com/ory/x/otelx"
 )
@@ -24,9 +28,9 @@ type (
 		d             channelDependencies
 	}
 	channelDependencies interface {
-		x.TracingProvider
-		x.LoggingProvider
-		x.HTTPClientProvider
+		otelx.Provider
+		logrusx.Provider
+		httpx.ClientProvider
 		jsonnetsecure.VMProvider
 		ConfigProvider
 	}
@@ -50,11 +54,12 @@ type httpDataModel struct {
 	Recipient string `json:"recipient"`
 	Subject   string `json:"subject"`
 	Body      string `json:"body"`
-	// Optional HTMLBody contains the HTML version of an email template when available.
-	HTMLBody     string                `json:"html_body,omitempty"`
-	TemplateType template.TemplateType `json:"template_type"`
-	TemplateData Template              `json:"template_data"`
-	MessageType  string                `json:"message_type"`
+	// HTMLBody optionally contains the HTML version of an email template when available.
+	HTMLBody       string                `json:"html_body,omitempty"`
+	TemplateType   template.TemplateType `json:"template_type"`
+	TemplateData   Template              `json:"template_data"`
+	MessageType    string                `json:"message_type"`
+	RequestHeaders json.RawMessage       `json:"request_headers"`
 }
 
 func (c *httpChannel) Dispatch(ctx context.Context, msg Message) (err error) {
@@ -72,12 +77,13 @@ func (c *httpChannel) Dispatch(ctx context.Context, msg Message) (err error) {
 	}
 
 	td := httpDataModel{
-		Recipient:    msg.Recipient,
-		Subject:      msg.Subject,
-		Body:         msg.Body,
-		TemplateType: msg.TemplateType,
-		TemplateData: tmpl,
-		MessageType:  msg.Type.String(),
+		Recipient:      msg.Recipient,
+		Subject:        msg.Subject,
+		Body:           msg.Body,
+		TemplateType:   msg.TemplateType,
+		TemplateData:   tmpl,
+		RequestHeaders: msg.RequestHeaders,
+		MessageType:    msg.Type.String(),
 	}
 
 	c.tryPopulateHTMLBody(ctx, tmpl, &td)
@@ -88,11 +94,15 @@ func (c *httpChannel) Dispatch(ctx context.Context, msg Message) (err error) {
 	}
 	req = req.WithContext(ctx)
 
-	res, err := c.d.HTTPClient(ctx).Do(req)
+	res, err := c.d.HTTPClient(ctx,
+		// fail fast and let the courier retry if needed instead of blocking the queue
+		httpx.ResilientClientWithMaxRetry(0),
+		httpx.ResilientClientWithConnectionTimeout(10*time.Second),
+	).Do(req)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	res.Body = io.NopCloser(io.LimitReader(res.Body, 1024))
 
 	logger := c.d.Logger().

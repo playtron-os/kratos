@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/selfservice/strategy/oidc"
 )
 
@@ -53,12 +53,12 @@ func TestDecodeQuery(t *testing.T) {
 func TestAppleVerify(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write(publicJWKS)
+		_, _ = w.Write(publicJWKS)
 	}))
 
 	tsOtherJWKS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write(publicJWKS2)
+		_, _ = w.Write(publicJWKS2)
 	}))
 	makeClaims := func(aud string) jwt.RegisteredClaims {
 		return jwt.RegisteredClaims{
@@ -69,12 +69,12 @@ func TestAppleVerify(t *testing.T) {
 		}
 	}
 	t.Run("case=successful verification", func(t *testing.T) {
-		_, reg := internal.NewFastRegistryWithMocks(t)
+		_, reg := pkg.NewFastRegistryWithMocks(t)
 		apple := oidc.NewProviderApple(&oidc.Configuration{
 			ClientID: "com.example.app",
 		}, reg).(*oidc.ProviderApple)
 		apple.JWKSUrl = ts.URL
-		token := createIdToken(t, makeClaims("com.example.app"))
+		token := createIDToken(t, makeClaims("com.example.app"))
 
 		c, err := apple.Verify(context.Background(), token)
 		require.NoError(t, err)
@@ -84,12 +84,12 @@ func TestAppleVerify(t *testing.T) {
 	})
 
 	t.Run("case=fails due to client_id mismatch", func(t *testing.T) {
-		_, reg := internal.NewFastRegistryWithMocks(t)
+		_, reg := pkg.NewFastRegistryWithMocks(t)
 		apple := oidc.NewProviderApple(&oidc.Configuration{
 			ClientID: "com.example.app",
 		}, reg).(*oidc.ProviderApple)
 		apple.JWKSUrl = ts.URL
-		token := createIdToken(t, makeClaims("com.different-example.app"))
+		token := createIDToken(t, makeClaims("com.different-example.app"))
 
 		_, err := apple.Verify(context.Background(), token)
 		require.Error(t, err)
@@ -97,12 +97,12 @@ func TestAppleVerify(t *testing.T) {
 	})
 
 	t.Run("case=fails due to jwks mismatch", func(t *testing.T) {
-		_, reg := internal.NewFastRegistryWithMocks(t)
+		_, reg := pkg.NewFastRegistryWithMocks(t)
 		apple := oidc.NewProviderApple(&oidc.Configuration{
 			ClientID: "com.example.app",
 		}, reg).(*oidc.ProviderApple)
 		apple.JWKSUrl = tsOtherJWKS.URL
-		token := createIdToken(t, makeClaims("com.example.app"))
+		token := createIDToken(t, makeClaims("com.example.app"))
 
 		_, err := apple.Verify(context.Background(), token)
 		require.Error(t, err)
@@ -110,13 +110,13 @@ func TestAppleVerify(t *testing.T) {
 	})
 
 	t.Run("case=succeedes with additional id token audience", func(t *testing.T) {
-		_, reg := internal.NewFastRegistryWithMocks(t)
+		_, reg := pkg.NewFastRegistryWithMocks(t)
 		apple := oidc.NewProviderApple(&oidc.Configuration{
 			ClientID:                   "something.else.app",
 			AdditionalIDTokenAudiences: []string{"com.example.app"},
 		}, reg).(*oidc.ProviderApple)
 		apple.JWKSUrl = ts.URL
-		token := createIdToken(t, makeClaims("com.example.app"))
+		token := createIDToken(t, makeClaims("com.example.app"))
 
 		_, err := apple.Verify(context.Background(), token)
 		require.NoError(t, err)

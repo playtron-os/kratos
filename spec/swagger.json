@@ -40,7 +40,8 @@
               "$ref": "#/definitions/webAuthnJavaScript"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "hydra-public-low"
       }
     },
     "/admin/courier/messages": {
@@ -110,7 +111,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/courier/messages/{id}": {
@@ -161,7 +163,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-medium"
       }
     },
     "/admin/identities": {
@@ -213,9 +216,7 @@
             "in": "query"
           },
           {
-            "minimum": 1,
             "type": "string",
-            "default": "1",
             "description": "Next Page Token\n\nThe next page token. For details on pagination please head over to the\n[pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
             "name": "page_token",
             "in": "query"
@@ -279,7 +280,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-medium"
       },
       "post": {
         "security": [
@@ -337,7 +339,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       },
       "patch": {
         "security": [
@@ -345,7 +348,7 @@
             "oryAccessToken": []
           }
         ],
-        "description": "Creates multiple [identities](https://www.ory.sh/docs/kratos/concepts/identity-user-model).\n\nYou can also use this endpoint to [import credentials](https://www.ory.sh/docs/kratos/manage-identities/import-user-accounts-identities),\nincluding passwords, social sign-in settings, and multi-factor authentication methods.\n\nYou can import:\nUp to 1,000 identities per request\nUp to 200 identities per request if including plaintext passwords\n\nAvoid importing large batches with plaintext passwords. They can cause timeouts as the passwords need to be hashed before they are stored.\n\nIf at least one identity is imported successfully, the response status is 200 OK.\nIf all imports fail, the response is one of the following 4xx errors:\n400 Bad Request: The request payload is invalid or improperly formatted.\n409 Conflict: Duplicate identities or conflicting data were detected.\n\nIf you get a 504 Gateway Timeout:\nReduce the batch size\nAvoid duplicate identities\nPre-hash passwords with BCrypt\n\nIf the issue persists, contact support.",
+        "description": "Creates multiple [identities](https://www.ory.com/docs/kratos/concepts/identity-user-model).\n\nYou can also use this endpoint to [import credentials](https://www.ory.com/docs/kratos/manage-identities/import-user-accounts-identities),\nincluding passwords, social sign-in settings, and multi-factor authentication methods.\n\nIf the patch includes hashed passwords you can import up to 1,000 identities per request.\n\nIf the patch includes at least one plaintext password you can import up to 200 identities per request.\n\nAvoid importing large batches with plaintext passwords. They can cause timeouts as the passwords need to be hashed before they are stored.\n\nIf at least one identity is imported successfully, the response status is 200 OK.\nIf all imports fail, the response is one of the following 4xx errors:\n400 Bad Request: The request payload is invalid or improperly formatted.\n409 Conflict: Duplicate identities or conflicting data were detected.\n\nIf you get a 504 Gateway Timeout:\nReduce the batch size\nAvoid duplicate identities\nPre-hash passwords with BCrypt\n\nIf the issue persists, contact support.",
         "consumes": [
           "application/json"
         ],
@@ -395,7 +398,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/identities/by/external/{externalID}": {
@@ -471,7 +475,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-medium"
       }
     },
     "/admin/identities/{id}": {
@@ -547,7 +552,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-low"
       },
       "put": {
         "security": [
@@ -618,7 +624,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       },
       "delete": {
         "security": [
@@ -664,7 +671,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       },
       "patch": {
         "security": [
@@ -735,7 +743,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/identities/{id}/credentials/{type}": {
@@ -813,7 +822,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/identities/{id}/sessions": {
@@ -862,9 +872,7 @@
             "in": "query"
           },
           {
-            "minimum": 1,
             "type": "string",
-            "default": "1",
             "description": "Next Page Token\n\nThe next page token. For details on pagination please head over to the\n[pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
             "name": "page_token",
             "in": "query"
@@ -905,7 +913,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-medium"
       },
       "delete": {
         "security": [
@@ -960,7 +969,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/recovery/code": {
@@ -1020,7 +1030,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/recovery/link": {
@@ -1085,7 +1096,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/sessions": {
@@ -1158,7 +1170,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-medium"
       }
     },
     "/admin/sessions/{id}": {
@@ -1219,7 +1232,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-low"
       },
       "delete": {
         "security": [
@@ -1268,7 +1282,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/admin/sessions/{id}/extend": {
@@ -1325,7 +1340,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-high"
       }
     },
     "/health/alive": {
@@ -1434,9 +1450,7 @@
             "in": "query"
           },
           {
-            "minimum": 1,
             "type": "string",
-            "default": "1",
             "description": "Next Page Token\n\nThe next page token. For details on pagination please head over to the\n[pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
             "name": "page_token",
             "in": "query"
@@ -1452,7 +1466,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-medium"
       }
     },
     "/schemas/{id}": {
@@ -1498,7 +1513,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-admin-medium"
       }
     },
     "/self-service/errors": {
@@ -1550,7 +1566,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/self-service/fed-cm/parameters": {
@@ -1590,7 +1607,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/self-service/fed-cm/token": {
@@ -1656,7 +1674,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/self-service/login": {
@@ -1743,7 +1762,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/self-service/login/api": {
@@ -1806,7 +1826,7 @@
           },
           {
             "type": "string",
-            "description": "An optional identity schema to use for the registration flow.",
+            "description": "An optional identity schema to use for the login flow.",
             "name": "identity_schema",
             "in": "query"
           }
@@ -1830,7 +1850,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/login/browser": {
@@ -1893,7 +1914,7 @@
           },
           {
             "type": "string",
-            "description": "An optional identity schema to use for the registration flow.",
+            "description": "An optional identity schema to use for the login flow.",
             "name": "identity_schema",
             "in": "query"
           }
@@ -1920,7 +1941,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/login/flows": {
@@ -1984,7 +2006,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/self-service/logout": {
@@ -2035,7 +2058,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/self-service/logout/api": {
@@ -2082,7 +2106,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/logout/browser": {
@@ -2139,7 +2164,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/recovery": {
@@ -2224,7 +2250,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/self-service/recovery/api": {
@@ -2258,7 +2285,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/recovery/browser": {
@@ -2303,7 +2331,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/recovery/flows": {
@@ -2361,7 +2390,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/self-service/registration": {
@@ -2440,7 +2470,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/self-service/registration/api": {
@@ -2500,7 +2531,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/registration/browser": {
@@ -2566,7 +2598,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/registration/flows": {
@@ -2630,7 +2663,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/self-service/settings": {
@@ -2732,7 +2766,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/self-service/settings/api": {
@@ -2774,7 +2809,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/settings/browser": {
@@ -2837,7 +2873,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/settings/flows": {
@@ -2913,7 +2950,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/self-service/verification": {
@@ -2992,7 +3030,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/self-service/verification/api": {
@@ -3034,7 +3073,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/verification/browser": {
@@ -3073,7 +3113,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/self-service/verification/flows": {
@@ -3131,7 +3172,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/sessions": {
@@ -3175,9 +3217,7 @@
             "in": "query"
           },
           {
-            "minimum": 1,
             "type": "string",
-            "default": "1",
             "description": "Next Page Token\n\nThe next page token. For details on pagination please head over to the\n[pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
             "name": "page_token",
             "in": "query"
@@ -3217,7 +3257,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       },
       "delete": {
         "description": "Calling this endpoint invalidates all except the current session that belong to the logged-in user.\nSession data are not deleted.",
@@ -3269,7 +3310,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/sessions/token-exchange": {
@@ -3333,7 +3375,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-medium"
       }
     },
     "/sessions/whoami": {
@@ -3396,7 +3439,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-low"
       }
     },
     "/sessions/{id}": {
@@ -3454,7 +3498,8 @@
               "$ref": "#/definitions/errorGeneric"
             }
           }
-        }
+        },
+        "x-ory-ratelimit-bucket": "kratos-public-high"
       }
     },
     "/version": {
@@ -3854,10 +3899,6 @@
           }
         }
       }
-    },
-    "RecoveryAddressType": {
-      "type": "string",
-      "title": "RecoveryAddressType must not exceed 16 characters as that is the limitation in the SQL Schema."
     },
     "UUID": {"type": "string", "format": "uuid4"},
     "UpdateFedcmFlowBody": {
@@ -4474,7 +4515,7 @@
           "format": "date-time"
         },
         "identifiers": {
-          "description": "Identifiers represents a list of unique identifiers this credential type matches.",
+          "description": "Identifiers represent a list of unique identifiers this credential type matches.",
           "type": "array",
           "items": {
             "type": "string"
@@ -5220,7 +5261,6 @@
     "recoveryIdentityAddress": {
       "type": "object",
       "required": [
-        "id",
         "value",
         "via"
       ],
@@ -5243,7 +5283,7 @@
           "type": "string"
         },
         "via": {
-          "$ref": "#/definitions/RecoveryAddressType"
+          "type": "string"
         }
       }
     },
@@ -5652,9 +5692,7 @@
         },
         "page_token": {
           "description": "Next Page Token\n\nThe next page token.\nFor details on pagination please head over to the [pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
-          "type": "string",
-          "default": "1",
-          "minimum": 1
+          "type": "string"
         }
       }
     },
@@ -6312,7 +6350,7 @@
           "type": "object"
         },
         "upstream_parameters": {
-          "description": "UpstreamParameters are the parameters that are passed to the upstream identity provider.\n\nThese parameters are optional and depend on what the upstream identity provider supports.\nSupported parameters are:\n`login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.\n`hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.\n`prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.",
+          "description": "UpstreamParameters are the parameters that are passed to the upstream identity provider.\n\nThese parameters are optional and depend on what the upstream identity provider supports.\nSupported parameters are:\n`login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.\n`hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.\n`prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.\n`acr_values` (string): The `acr_values` specifies the Authentication Context Class Reference values for the authorization request.",
           "type": "object"
         }
       }
@@ -6522,7 +6560,7 @@
           "type": "string"
         },
         "email": {
-          "description": "Email to Recover\n\nNeeds to be set when initiating the flow. If the email is a registered\nrecovery email, a recovery link will be sent. If the email is not known,\na email with details on what happened will be sent instead.\n\nformat: email",
+          "description": "Email to Recover\n\nNeeds to be set when initiating the flow. If the email is a registered\nrecovery email, a recovery link will be sent. If the email is not known,\nan email with details on what happened will be sent instead.\n\nformat: email",
           "type": "string"
         },
         "method": {
@@ -6615,7 +6653,7 @@
           "type": "object"
         },
         "upstream_parameters": {
-          "description": "UpstreamParameters are the parameters that are passed to the upstream identity provider.\n\nThese parameters are optional and depend on what the upstream identity provider supports.\nSupported parameters are:\n`login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.\n`hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.\n`prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.",
+          "description": "UpstreamParameters are the parameters that are passed to the upstream identity provider.\n\nThese parameters are optional and depend on what the upstream identity provider supports.\nSupported parameters are:\n`login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.\n`hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.\n`prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.\n`acr_values` (string): The `acr_values` specifies the Authentication Context Class Reference values for the authorization request.",
           "type": "object"
         }
       }
@@ -6853,7 +6891,7 @@
           "type": "string"
         },
         "upstream_parameters": {
-          "description": "UpstreamParameters are the parameters that are passed to the upstream identity provider.\n\nThese parameters are optional and depend on what the upstream identity provider supports.\nSupported parameters are:\n`login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.\n`hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.\n`prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.",
+          "description": "UpstreamParameters are the parameters that are passed to the upstream identity provider.\n\nThese parameters are optional and depend on what the upstream identity provider supports.\nSupported parameters are:\n`login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.\n`hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.\n`prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.\n`acr_values` (string): The `acr_values` specifies the Authentication Context Class Reference values for the authorization request.",
           "type": "object"
         }
       }
@@ -7253,12 +7291,7 @@
       "headers": {
         "link": {
           "type": "string",
-          "description": "The Link HTTP Header\n\nThe `Link` header contains a comma-delimited list of links to the following pages:\n\nfirst: The first page of results.\nnext: The next page of results.\nprev: The previous page of results.\nlast: The last page of results.\n\nPages are omitted if they do not exist. For example, if there is no next page, the `next` link is omitted.\n\nThe header value may look like follows:\n\n\u003c/clients?limit=5\u0026offset=0\u003e; rel=\"first\",\u003c/clients?limit=5\u0026offset=15\u003e; rel=\"next\",\u003c/clients?limit=5\u0026offset=5\u003e; rel=\"prev\",\u003c/clients?limit=5\u0026offset=20\u003e; rel=\"last\""
-        },
-        "x-total-count": {
-          "type": "integer",
-          "format": "int64",
-          "description": "The X-Total-Count HTTP Header\n\nThe `X-Total-Count` header contains the total number of items in the collection.\n\nDEPRECATED: This header will be removed eventually. Please use the `Link` header\ninstead to check whether you are on the last page."
+          "description": "The Link HTTP Header\n\nThe `Link` header contains a comma-delimited list of links to the following pages:\n\nfirst: The first page of results.\nnext: The next page of results.\n\nPages are omitted if they do not exist. For example, if there is no next page, the `next` link is omitted. Examples:\n\n\u003c/admin/sessions?page_size=250\u0026page_token={last_item_uuid}; rel=\"first\",/admin/sessions?page_size=250\u0026page_token=\u003e; rel=\"next\""
         }
       }
     },

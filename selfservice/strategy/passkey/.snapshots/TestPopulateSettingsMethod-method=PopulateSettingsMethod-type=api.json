@@ -1,0 +1,59 @@
+[
+  {
+    "type": "input",
+    "group": "default",
+    "attributes": {
+      "name": "csrf_token",
+      "type": "hidden",
+      "required": true,
+      "disabled": false,
+      "node_type": "input"
+    },
+    "messages": [],
+    "meta": {}
+  },
+  {
+    "type": "input",
+    "group": "passkey",
+    "attributes": {
+      "name": "passkey_register_trigger",
+      "type": "button",
+      "value": "",
+      "disabled": false,
+      "onclickTrigger": "oryPasskeySettingsRegistration",
+      "node_type": "input"
+    },
+    "messages": [],
+    "meta": {
+      "label": {
+        "id": 1050019,
+        "text": "Add passkey",
+        "type": "info"
+      }
+    }
+  },
+  {
+    "type": "input",
+    "group": "passkey",
+    "attributes": {
+      "name": "passkey_settings_register",
+      "type": "hidden",
+      "disabled": false,
+      "node_type": "input"
+    },
+    "messages": [],
+    "meta": {}
+  },
+  {
+    "type": "input",
+    "group": "passkey",
+    "attributes": {
+      "name": "passkey_create_data",
+      "type": "hidden",
+      "disabled": false,
+      "node_type": "input"
+    },
+    "messages": [],
+    "meta": {}
+  }
+]

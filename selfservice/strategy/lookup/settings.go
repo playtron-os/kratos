@@ -33,9 +33,6 @@ import (
 	"github.com/ory/x/decoderx"
 )
 
-func (s *Strategy) RegisterSettingsRoutes(_ *x.RouterPublic) {
-}
-
 func (s *Strategy) SettingsStrategyID() string {
 	return identity.CredentialsTypeLookup.String()
 }
@@ -143,7 +140,7 @@ func (s *Strategy) decodeSettingsFlow(r *http.Request, dest interface{}) error {
 		return errors.WithStack(err)
 	}
 
-	return decoderx.NewHTTP().Decode(r, dest, compiler,
+	return decoderx.Decode(r, dest, compiler,
 		decoderx.HTTPDecoderSetValidatePayloads(true),
 		decoderx.HTTPDecoderJSONFollowsFormFormat(),
 	)

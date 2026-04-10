@@ -42,11 +42,10 @@ import (
 	"github.com/ory/x/decoderx"
 )
 
-var _ login.FormHydrator = new(Strategy)
-
-func (s *Strategy) RegisterLoginRoutes(r *x.RouterPublic) {
-	webauthnx.RegisterWebauthnRoute(r)
-}
+var (
+	_ login.AAL1FormHydrator = new(Strategy)
+	_ login.AAL2FormHydrator = new(Strategy)
+)
 
 func (s *Strategy) populateLoginMethodForPasswordless(r *http.Request, sr *login.Flow) error {
 	sr.UI.SetCSRF(s.d.GenerateCSRFToken(r))
@@ -160,7 +159,7 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 	}
 
 	var p updateLoginFlowWithWebAuthnMethod
-	if err := s.hd.Decode(r, &p,
+	if err := decoderx.Decode(r, &p,
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderSetValidatePayloads(true),
 		decoderx.MustHTTPRawJSONSchemaCompiler(loginSchema),

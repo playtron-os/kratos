@@ -11,31 +11,29 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/go-faker/faker/v4"
 	"github.com/gofrs/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
 	"github.com/ory/kratos/courier"
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
-	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
+	"github.com/ory/x/httprouterx"
 	"github.com/ory/x/ioutilx"
-	"github.com/ory/x/pagination/keysetpagination"
 	"github.com/ory/x/snapshotx"
 	"github.com/ory/x/urlx"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/ory/x/uuidx"
 )
 
-var defaultPageToken = new(courier.Message).DefaultPageToken().Encode()
+var defaultPageToken = courier.Message{}.DefaultPageToken().Encrypt(nil)
 
 func TestHandler(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	// Start kratos server
 	publicTS, adminTS := testhelpers.NewKratosServerWithCSRF(t, reg)
 
@@ -75,7 +73,7 @@ func TestHandler(t *testing.T) {
 		ts := adminTS
 
 		if tsName == "public" {
-			href = x.AdminPrefix + href
+			href = httprouterx.AdminPrefix + href
 			ts = publicTS
 		}
 
@@ -125,17 +123,13 @@ func TestHandler(t *testing.T) {
 				}
 			})
 			t.Run("case=should error with random page token", func(t *testing.T) {
-				token := keysetpagination.MapPageToken{
-					"id":         "1232",
-					"created_at": time.Now().Add(time.Duration(-10) * time.Hour).Format("2006-01-02 15:04:05.99999-07:00"),
-				}
-				qs := fmt.Sprintf(`?page_token=%s&page_size=%s`, token.Encode(), "250")
+				qs := fmt.Sprintf(`?page_token=%s&page_size=%s`, uuidx.NewV4().String(), "250")
 
 				for _, tc := range tss {
 					t.Run("endpoint="+tc.name, func(t *testing.T) {
 						path := courier.AdminRouteListMessages + qs
 						if tc.name == "public" {
-							path = x.AdminPrefix + path
+							path = httprouterx.AdminPrefix + path
 						}
 						resp, err := tc.s.Client().Get(tc.s.URL + path)
 						require.NoError(t, err)
@@ -197,6 +191,7 @@ func TestHandler(t *testing.T) {
 
 					for _, item := range parsed.Array() {
 						assert.Equal(t, "<redacted-unless-dev-mode>", item.Get("body").String())
+						assert.Equal(t, "<redacted-unless-dev-mode>", item.Get("subject").String())
 					}
 				})
 			}
@@ -210,6 +205,7 @@ func TestHandler(t *testing.T) {
 
 					for _, item := range parsed.Array() {
 						assert.Equal(t, "body content", item.Get("body").String())
+						assert.NotEqual(t, "<redacted-unless-dev-mode>", item.Get("subject").String())
 					}
 				})
 			}
@@ -249,6 +245,7 @@ func TestHandler(t *testing.T) {
 					assert.Equal(t, message.ID.String(), body.Get("id").String())
 					assert.Equal(t, message.Recipient, body.Get("recipient").String())
 					assert.Equal(t, message.Body, body.Get("body").String())
+					assert.Equal(t, message.Subject, body.Get("subject").String())
 
 					// assert Eager works
 					assert.NotEmpty(t, body.Get("dispatches").Array())
@@ -263,6 +260,7 @@ func TestHandler(t *testing.T) {
 					body := getCourierMessag(tc.s, message.ID.String())
 					assert.Equal(t, message.ID.String(), body.Get("id").String())
 					assert.Equal(t, "<redacted-unless-dev-mode>", body.Get("body").String())
+					assert.Equal(t, "<redacted-unless-dev-mode>", body.Get("subject").String())
 				})
 			}
 		})

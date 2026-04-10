@@ -30,8 +30,8 @@ import (
 	"github.com/ory/herodot"
 
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/verification"
@@ -41,7 +41,7 @@ import (
 
 func TestHandleError(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeySelfServiceVerificationEnabled, true)
 
 	public, _ := testhelpers.NewKratosServer(t, reg)
@@ -72,9 +72,9 @@ func TestHandleError(t *testing.T) {
 	newFlow := func(t *testing.T, ttl time.Duration, ft flow.Type) *verification.Flow {
 		t.Helper()
 		req := &http.Request{URL: urlx.ParseOrPanic("/")}
-		strategy, err := reg.GetActiveVerificationStrategy(context.Background())
+		strategies, _, err := reg.GetActiveVerificationStrategies(context.Background())
 		require.NoError(t, err)
-		f, err := verification.NewFlow(conf, ttl, nosurfx.FakeCSRFToken, req, strategy, ft)
+		f, err := verification.NewFlow(conf, ttl, nosurfx.FakeCSRFToken, req, strategies, ft)
 		require.NoError(t, err)
 		require.NoError(t, reg.VerificationFlowPersister().CreateVerificationFlow(context.Background(), f))
 		f, err = reg.VerificationFlowPersister().GetVerificationFlow(context.Background(), f.ID)
@@ -86,7 +86,7 @@ func TestHandleError(t *testing.T) {
 		t.Helper()
 		res, err := ts.Client().Get(ts.URL + "/error")
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
 		sse, _, err := sdk.FrontendAPI.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
@@ -115,7 +115,7 @@ func TestHandleError(t *testing.T) {
 
 		res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		assert.Contains(t, res.Header.Get("Content-Type"), "application/json")
 		assert.NotContains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
@@ -141,7 +141,7 @@ func TestHandleError(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Contains(t, res.Request.URL.String(), public.URL+verification.RouteGetFlow)
 				require.Equal(t, http.StatusOK, res.StatusCode, "%+v", res.Request)
 
@@ -160,7 +160,7 @@ func TestHandleError(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -178,7 +178,7 @@ func TestHandleError(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusInternalServerError, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -192,7 +192,7 @@ func TestHandleError(t *testing.T) {
 		expectVerificationUI := func(t *testing.T) (*verification.Flow, *http.Response) {
 			res, err := ts.Client().Get(ts.URL + "/error")
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowVerificationUI(ctx).String()+"?flow=")
 
 			vf, err := reg.VerificationFlowPersister().GetVerificationFlow(context.Background(), uuid.FromStringOrNil(res.Request.URL.Query().Get("flow")))

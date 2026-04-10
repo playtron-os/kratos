@@ -11,6 +11,9 @@ import (
 
 	"github.com/ory/x/decoderx"
 	"github.com/ory/x/errorsx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
 
 	"github.com/ory/herodot"
 
@@ -20,9 +23,9 @@ import (
 
 type (
 	handlerDependencies interface {
-		x.WriterProvider
-		x.TracingProvider
-		x.LoggingProvider
+		httpx.WriterProvider
+		otelx.Provider
+		logrusx.Provider
 		config.Provider
 		sessiontokenexchange.PersistenceProvider
 		Provider
@@ -67,7 +70,7 @@ func (h *Handler) exchangeToken(w http.ResponseWriter, r *http.Request) {
 	s, err := h.r.SessionManager().FetchFromRequest(ctx, r)
 	c := h.r.Config()
 	if err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session found.")
+		h.r.Logger().WithField("audience", "audit").WithRequest(r).WithError(err).Info("No valid session found.")
 		h.r.Writer().WriteError(w, r, session.ErrNoSessionFound.WithWrap(err))
 		return
 	}
@@ -77,11 +80,11 @@ func (h *Handler) exchangeToken(w http.ResponseWriter, r *http.Request) {
 		// For the time being we want to update the AAL in the database if it is unset.
 		session.UpsertAAL,
 	); errors.As(err, &aalErr) {
-		h.r.Audit().WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for calling this endpoint.")
+		h.r.Logger().WithField("audience", "audit").WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for calling this endpoint.")
 		h.r.Writer().WriteError(w, r, err)
 		return
 	} else if err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session cookie found.")
+		h.r.Logger().WithField("audience", "audit").WithRequest(r).WithError(err).Info("No valid session cookie found.")
 		h.r.Writer().WriteError(w, r, herodot.ErrUnauthorized.WithWrap(err).WithReasonf("Unable to determine AAL."))
 		return
 	}

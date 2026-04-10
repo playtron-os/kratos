@@ -4,6 +4,7 @@
 package schema
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,8 +16,6 @@ import (
 	"github.com/ory/x/httpx"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/ory/x/stringsx"
 )
 
 func TestSchemaValidator(t *testing.T) {
@@ -57,16 +56,16 @@ func TestSchemaValidator(t *testing.T) {
 		{
 			u:   ts.URL,
 			i:   json.RawMessage(`{ "firstName": "first-name", "lastName": "last-name", "age": 1 }`),
-			err: "An internal server error occurred, please contact the system administrator",
+			err: "Invalid configuration",
 		},
 		{
 			u:   "not-a-url",
 			i:   json.RawMessage(`{ "firstName": "first-name", "lastName": "last-name", "age": 1 }`),
-			err: "An internal server error occurred, please contact the system administrator",
+			err: "Invalid configuration",
 		},
 	} {
 		t.Run(fmt.Sprintf("case=%d", k), func(t *testing.T) {
-			err := NewValidator().Validate(ctx, stringsx.Coalesce(tc.u, ts.URL+"/schema/firstName.schema.json"), tc.i)
+			err := NewValidator().Validate(ctx, cmp.Or(tc.u, ts.URL+"/schema/firstName.schema.json"), tc.i)
 			if tc.err == "" {
 				require.NoError(t, err)
 			} else {

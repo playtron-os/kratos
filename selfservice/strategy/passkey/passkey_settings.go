@@ -40,8 +40,6 @@ import (
 	"github.com/ory/x/sqlxx"
 )
 
-func (s *Strategy) RegisterSettingsRoutes(_ *x.RouterPublic) {}
-
 func (s *Strategy) SettingsStrategyID() string { return s.ID().String() }
 
 const (
@@ -52,10 +50,6 @@ const (
 func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, id *identity.Identity, f *settings.Flow) (err error) {
 	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.passkey.Strategy.PopulateSettingsMethod")
 	defer otelx.End(span, &err)
-
-	if f.Type != flow.TypeBrowser {
-		return nil
-	}
 
 	f.UI.SetCSRF(s.d.GenerateCSRFToken(r))
 	count, err := s.d.IdentityManager().CountActiveFirstFactorCredentials(ctx, id)
@@ -111,7 +105,9 @@ func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, 
 		return errors.WithStack(err)
 	}
 
-	f.UI.Nodes.Upsert(webauthnx.NewWebAuthnScript(s.d.Config().SelfPublicURL(ctx)))
+	if f.Type == flow.TypeBrowser {
+		f.UI.Nodes.Upsert(webauthnx.NewWebAuthnScript(s.d.Config().SelfPublicURL(ctx)))
+	}
 
 	f.UI.Nodes.Upsert(node.NewInputField(
 		node.PasskeyRegisterTrigger,
@@ -119,9 +115,12 @@ func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, 
 		node.PasskeyGroup,
 		node.InputAttributeTypeButton,
 		node.WithInputAttributes(func(a *node.InputAttributes) {
-			//nolint:staticcheck
-			a.OnClick = js.WebAuthnTriggersPasskeySettingsRegistration.String() + "()"
 			a.OnClickTrigger = js.WebAuthnTriggersPasskeySettingsRegistration
+			// Only attach raw JS handler for browser flows; API flows must stay script-free.
+			if f.Type == flow.TypeBrowser {
+				//nolint:staticcheck
+				a.OnClick = js.WebAuthnTriggersPasskeySettingsRegistration.String() + "()"
+			}
 		}),
 	).WithMetaLabel(text.NewInfoSelfServiceSettingsRegisterPasskey()))
 
@@ -167,10 +166,6 @@ func (s *Strategy) Settings(ctx context.Context, w http.ResponseWriter, r *http.
 	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.passkey.Strategy.Settings")
 	defer otelx.End(span, &err)
 
-	if f.Type != flow.TypeBrowser {
-		span.SetAttributes(attribute.String("not_responsible_reason", "not a browser flow"))
-		return nil, errors.WithStack(flow.ErrStrategyNotResponsible)
-	}
 	var p updateSettingsFlowWithPasskeyMethod
 	ctxUpdate, err := settings.PrepareUpdate(s.d, w, r, f, ss, settings.ContinuityKey(s.SettingsStrategyID()), &p)
 	if errors.Is(err, settings.ErrContinuePreviousAction) {
@@ -410,7 +405,7 @@ func (s *Strategy) decodeSettingsFlow(r *http.Request, dest interface{}) error {
 		return errors.WithStack(err)
 	}
 
-	return decoderx.NewHTTP().Decode(r, dest, compiler,
+	return decoderx.Decode(r, dest, compiler,
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
 		decoderx.HTTPDecoderSetValidatePayloads(true),

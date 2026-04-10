@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/ory/kratos/schema"
 
 	"github.com/ory/kratos/text"
-	"github.com/ory/x/stringslice"
 )
 
 // swagger:enum UiNodeType
@@ -156,10 +156,21 @@ func (n Nodes) Find(id string) *Node {
 	return nil
 }
 
+func (n Nodes) FindAll(id string) []Node {
+	var nodes []Node
+	for _, nn := range n {
+		if nn.ID() == id {
+			nodes = append(nodes, *nn)
+		}
+	}
+
+	return nodes
+}
+
 func (n Nodes) Reset(exclude ...string) {
 	for k, nn := range n {
 		nn.Messages = nil
-		if !stringslice.Has(exclude, nn.ID()) {
+		if !slices.Contains(exclude, nn.ID()) {
 			nn.Reset()
 		}
 		n[k] = nn
@@ -168,7 +179,7 @@ func (n Nodes) Reset(exclude ...string) {
 
 func (n Nodes) ResetNodes(reset ...string) {
 	for k, nn := range n {
-		if stringslice.Has(reset, nn.ID()) {
+		if slices.Contains(reset, nn.ID()) {
 			nn.Reset()
 		}
 		n[k] = nn
@@ -324,6 +335,50 @@ func (n *Nodes) Remove(ids ...string) {
 		}
 	}
 	*n = r
+}
+
+// RemoveGroup removes all nodes belonging to a specific group.
+func (n *Nodes) RemoveGroup(group UiNodeGroup) {
+	if n == nil {
+		return
+	}
+
+	var r Nodes
+	for k, v := range *n {
+		if (*n)[k] != nil && string((*n)[k].Group) != string(group) {
+			r = append(r, v)
+		}
+	}
+	*n = r
+}
+
+// RemoveGroup removes all nodes belonging to a set of groups.
+func (n *Nodes) RemoveGroups(group ...UiNodeGroup) {
+	if n == nil {
+		return
+	}
+
+	for _, g := range group {
+		n.RemoveGroup(g)
+	}
+}
+
+// ClearTransientNodes removes all nodes that belong to transient groups.
+func (n *Nodes) ClearTransientNodes() {
+	n.RemoveGroups(
+		DefaultGroup,
+		PasswordGroup,
+		OpenIDConnectGroup,
+		ProfileGroup,
+		LinkGroup,
+		CodeGroup,
+		TOTPGroup,
+		LookupGroup,
+		WebAuthnGroup,
+		PasskeyGroup,
+		IdentifierFirstGroup,
+		SAMLGroup,
+	)
 }
 
 // Upsert updates or appends a node.

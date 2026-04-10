@@ -30,7 +30,7 @@ import (
 
 	"github.com/ory/x/jsonx"
 
-	kratos "github.com/ory/kratos/internal/httpclient"
+	kratos "github.com/ory/kratos/pkg/httpclient"
 
 	"github.com/ory/kratos/corpx"
 
@@ -40,8 +40,8 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/settings"
 	"github.com/ory/kratos/x"
@@ -64,14 +64,14 @@ func newIdentityWithPassword(email string) *identity.Identity {
 		Traits:              identity.Traits(`{"email":"` + email + `","stringy":"foobar","booly":false,"numby":2.5,"should_long_string":"asdfasdfasdfasdfasfdasdfasdfasdf","should_big_number":2048}`),
 		SchemaID:            config.DefaultIdentityTraitsSchemaID,
 		State:               identity.StateActive,
-		VerifiableAddresses: []identity.VerifiableAddress{{Value: email, Via: identity.VerifiableAddressTypeEmail}},
+		VerifiableAddresses: []identity.VerifiableAddress{{Value: email, Via: identity.AddressTypeEmail}},
 		// TO ADD - RECOVERY EMAIL,
 	}
 }
 
 func TestStrategyTraits(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
 	conf.MustSet(ctx, config.ViperKeySelfServiceBrowserDefaultReturnTo, "https://www.ory.sh/")
 	testhelpers.StrategyEnable(t, conf, identity.CredentialsTypePassword.String(), true)
@@ -108,10 +108,12 @@ func TestStrategyTraits(t *testing.T) {
 		identity.CredentialsTypePassword: {Type: "password", Identifiers: []string{apiID2.String()}, Config: []byte(`{"hashed_password":"$2a$04$zvZz1zV"}`)},
 	}}
 
-	browserUser1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, browserIdentity1)
-	browserUser2 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, browserIdentity2)
-	apiUser1 := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, apiIdentity1)
-	apiUser2 := testhelpers.NewHTTPClientWithIdentitySessionToken(t, ctx, reg, apiIdentity2)
+	browserUser1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, browserIdentity1)
+	browserUser1.Jar.SetCookies(nosurfx.WithFakeCSRFCookie(t, reg, publicTS.URL))
+	browserUser2 := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, browserIdentity2)
+	browserUser2.Jar.SetCookies(nosurfx.WithFakeCSRFCookie(t, reg, publicTS.URL))
+	apiUser1 := testhelpers.NewHTTPClientWithIdentitySessionToken(ctx, t, reg, apiIdentity1)
+	apiUser2 := testhelpers.NewHTTPClientWithIdentitySessionToken(ctx, t, reg, apiIdentity2)
 
 	t.Run("description=not authorized to call endpoints without a session", func(t *testing.T) {
 		setUnprivileged(t)
@@ -119,7 +121,7 @@ func TestStrategyTraits(t *testing.T) {
 		t.Run("type=browser", func(t *testing.T) {
 			res, err := http.DefaultClient.Do(httpx.MustNewRequest("POST", publicTS.URL+settings.RouteSubmitFlow, strings.NewReader(url.Values{"foo": {"bar"}}.Encode()), "application/x-www-form-urlencoded"))
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.EqualValues(t, http.StatusUnauthorized, res.StatusCode, "%+v", res.Request)
 			assert.Contains(t, res.Request.URL.String(), conf.GetProvider(ctx).String(config.ViperKeySelfServiceLoginUI))
 		})
@@ -127,7 +129,7 @@ func TestStrategyTraits(t *testing.T) {
 		t.Run("type=api/spa", func(t *testing.T) {
 			res, err := http.DefaultClient.Do(httpx.MustNewRequest("POST", publicTS.URL+settings.RouteSubmitFlow, strings.NewReader(`{"foo":"bar"}`), "application/json"))
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.EqualValues(t, http.StatusUnauthorized, res.StatusCode)
 		})
 	})
@@ -140,7 +142,7 @@ func TestStrategyTraits(t *testing.T) {
 		actual, res := testhelpers.SettingsMakeRequest(t, false, false, f, browserUser1,
 			url.Values{"traits.booly": {"true"}, "csrf_token": {"invalid"}, "method": {"profile"}}.Encode())
 		assert.EqualValues(t, http.StatusOK, res.StatusCode, "should return a 400 error because CSRF token is not set\n\t%s", actual)
-		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFToken, json.RawMessage(actual), "%s", actual)
+		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFTokenServerTokenMismatch, json.RawMessage(actual), "%s", actual)
 	})
 
 	t.Run("description=should fail to post data if CSRF is invalid/type=spa", func(t *testing.T) {
@@ -151,7 +153,7 @@ func TestStrategyTraits(t *testing.T) {
 		actual, res := testhelpers.SettingsMakeRequest(t, false, true, f, browserUser1,
 			testhelpers.EncodeFormAsJSON(t, true, url.Values{"traits.booly": {"true"}, "csrf_token": {"invalid"}, "method": {"profile"}}))
 		assert.EqualValues(t, http.StatusForbidden, res.StatusCode, "should return a 400 error because CSRF token is not set\n\t%s", actual)
-		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFToken, json.RawMessage(gjson.Get(actual, "error").Raw), "%s", actual)
+		assertx.EqualAsJSON(t, nosurfx.ErrInvalidCSRFTokenAJAXTokenMismatch, json.RawMessage(gjson.Get(actual, "error").Raw), "%s", actual)
 	})
 
 	t.Run("description=should not fail because of CSRF token but because of unprivileged/type=api", func(t *testing.T) {
@@ -160,9 +162,9 @@ func TestStrategyTraits(t *testing.T) {
 		f := testhelpers.InitializeSettingsFlowViaAPI(t, apiUser1, publicTS)
 
 		actual, res := testhelpers.SettingsMakeRequest(t, true, false, f, apiUser1, `{"traits.booly":true,"method":"profile","csrf_token":"`+nosurfx.FakeCSRFToken+`"}`)
+		assert.EqualValues(t, http.StatusForbidden, res.StatusCode, "should return a 403 error because the session is unprivileged\n\t%s", actual)
 		require.Len(t, res.Cookies(), 1)
 		assert.Equal(t, "ory_kratos_continuity", res.Cookies()[0].Name)
-		assert.EqualValues(t, http.StatusForbidden, res.StatusCode)
 		assert.Contains(t, gjson.Get(actual, "error.reason").String(), "login session is too old", actual)
 	})
 
@@ -189,12 +191,12 @@ func TestStrategyTraits(t *testing.T) {
 			t.Run(fmt.Sprintf("case=%d", k), func(t *testing.T) {
 				f := testhelpers.InitializeSettingsFlowViaAPI(t, apiUser1, publicTS)
 
-				req := testhelpers.NewRequest(t, true, "POST", f.Ui.Action, bytes.NewBufferString(`{"traits.booly":true,"method":"profile","csrf_token":"invalid"}`))
+				req := testhelpers.NewPostRequest(t, true, f.Ui.Action, bytes.NewBufferString(`{"traits.booly":true,"method":"profile","csrf_token":"invalid"}`))
 				tc.mod(req.Header)
 
 				res, err := apiUser1.Do(req)
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 
 				actual := string(ioutilx.MustReadAll(res.Body))
 				assert.EqualValues(t, http.StatusBadRequest, res.StatusCode)
@@ -323,7 +325,7 @@ func TestStrategyTraits(t *testing.T) {
 			values.Set("traits.email", "not-john-doe@foo.bar")
 			res, err := c.PostForm(config.Ui.Action, values)
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 
 			return res
 		}
@@ -357,7 +359,7 @@ func TestStrategyTraits(t *testing.T) {
 				require.NoError(t, err)
 
 				body := ioutilx.MustReadAll(res.Body)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 
 				assert.EqualValues(t, http.StatusOK, res.StatusCode, "%s", body)
 				assert.EqualValues(t, flow.StateSuccess, gjson.GetBytes(body, "state").String(), "%s", body)
@@ -529,7 +531,7 @@ func TestStrategyTraits(t *testing.T) {
 		res, err := browserUser1.PostForm(f.Ui.Action, values)
 
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 
 		body, err := io.ReadAll(res.Body)
 		require.NoError(t, err)
@@ -623,14 +625,14 @@ func TestStrategyTraits(t *testing.T) {
 }
 
 func TestDisabledEndpoint(t *testing.T) {
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
 	testhelpers.StrategyEnable(t, conf, settings.StrategyProfile, false)
 	errTS := testhelpers.NewErrorTestServer(t, reg)
 
 	publicTS, _ := testhelpers.NewKratosServer(t, reg)
 	browserIdentity1 := newIdentityWithPassword("john-browser@doe.com")
-	browserUser1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, context.Background(), reg, browserIdentity1)
+	browserUser1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(context.Background(), t, reg, browserIdentity1)
 
 	t.Run("case=should not submit when profile method is disabled", func(t *testing.T) {
 		t.Run("method=GET", func(t *testing.T) {
@@ -651,7 +653,7 @@ func TestDisabledEndpoint(t *testing.T) {
 }
 
 func TestSortedForHydration(t *testing.T) {
-	_, reg := internal.NewFastRegistryWithMocks(t)
+	_, reg := pkg.NewFastRegistryWithMocks(t)
 
 	// Get a reference to all registration strategies
 	allStrategies := []registration.Strategy{

@@ -14,10 +14,9 @@ import (
 )
 
 type SMSTemplate interface {
-	json.Marshaler
+	Template
 	SMSBody(context.Context) (string, error)
 	PhoneNumber() (string, error)
-	TemplateType() template.TemplateType
 }
 
 func NewSMSTemplateFromMessage(d template.Dependencies, m Message) (SMSTemplate, error) {
@@ -39,7 +38,7 @@ func NewSMSTemplateFromMessage(d template.Dependencies, m Message) (SMSTemplate,
 		if err := json.Unmarshal(m.TemplateData, &t); err != nil {
 			return nil, err
 		}
-		return sms.NewTestStub(d, &t), nil
+		return sms.NewTestStub(&t), nil
 	case template.TypeLoginCodeValid:
 		var t sms.LoginCodeValidModel
 		if err := json.Unmarshal(m.TemplateData, &t); err != nil {

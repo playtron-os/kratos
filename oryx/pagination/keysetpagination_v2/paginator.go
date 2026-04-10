@@ -8,7 +8,10 @@ import (
 	"reflect"
 
 	"github.com/jmoiron/sqlx/reflectx"
+	"github.com/ory/herodot"
 )
+
+var ErrInvalidPaginationToken = herodot.ErrBadRequest.WithReason("invalid pagination token")
 
 type (
 	Paginator struct {
@@ -23,6 +26,8 @@ const (
 	DefaultSize    = 100
 	DefaultMaxSize = 500
 )
+
+var dbStructTagMapper = reflectx.NewMapper("db")
 
 func (p *Paginator) DefaultToken() PageToken { return p.defaultToken }
 func (p *Paginator) IsLast() bool            { return p.isLast }
@@ -74,6 +79,15 @@ func (p *Paginator) ToOptions() []Option {
 
 // Result removes the last item (if applicable) and returns the paginator for the next page.
 func Result[I any](items []I, p *Paginator) ([]I, *Paginator) {
+	return ResultFunc(items, p, func(last I, colName string) any {
+		lastItemVal := reflect.ValueOf(last)
+		return dbStructTagMapper.FieldByName(lastItemVal, colName).Interface()
+	})
+}
+
+// ResultFunc removes the last item (if applicable) and returns the paginator for the next page.
+// The extractor function is used to extract the column values from the last item.
+func ResultFunc[I any](items []I, p *Paginator, extractor func(last I, colName string) any) ([]I, *Paginator) {
 	if len(items) <= p.Size() {
 		return items, &Paginator{
 			isLast: true,
@@ -88,15 +102,15 @@ func Result[I any](items []I, p *Paginator) ([]I, *Paginator) {
 	items = items[:p.Size()]
 	lastItem := items[len(items)-1]
 
-	mapper := reflectx.NewMapper("db")
-	lastItemVal := reflect.ValueOf(lastItem)
 	currentCols := p.PageToken().Columns()
 	newCols := make([]Column, len(currentCols))
 	for i, col := range currentCols {
 		newCols[i] = Column{
-			Name:  col.Name,
-			Order: col.Order,
-			Value: mapper.FieldByName(lastItemVal, col.Name).Interface(),
+			Name:          col.Name,
+			Order:         col.Order,
+			Nullable:      col.Nullable,
+			HasConstraint: col.HasConstraint,
+			Value:         extractor(lastItem, col.Name),
 		}
 	}
 
@@ -112,23 +126,28 @@ func Result[I any](items []I, p *Paginator) ([]I, *Paginator) {
 func WithSize(size int) Option {
 	return func(p *Paginator) { p.size = size }
 }
+
 func WithDefaultSize(size int) Option {
 	return func(p *Paginator) { p.defaultSize = size }
 }
+
 func WithMaxSize(size int) Option {
 	return func(p *Paginator) { p.maxSize = size }
 }
+
 func WithToken(t PageToken) Option {
 	return func(p *Paginator) { p.token = t }
 }
+
 func WithDefaultToken(t PageToken) Option {
 	return func(p *Paginator) { p.defaultToken = t }
 }
+
 func withIsLast(isLast bool) Option {
 	return func(p *Paginator) { p.isLast = isLast }
 }
 
-func NewPaginator(modifiers ...Option) *Paginator {
+func NewPaginator(modifiers ...Option) (*Paginator, error) {
 	p := &Paginator{
 		// these can still be overridden by the modifiers, but they should never be unset
 		maxSize:     DefaultMaxSize,
@@ -137,5 +156,34 @@ func NewPaginator(modifiers ...Option) *Paginator {
 	for _, f := range modifiers {
 		f(p)
 	}
-	return p
+	if err := p.validatePageToken(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// validatePageToken ensures the page token columns strictly match DefaultToken's schema in order.
+func (p *Paginator) validatePageToken() error {
+	tokenCols := p.PageToken().Columns()
+	if len(tokenCols) == 0 {
+		return nil
+	}
+
+	if columnsMatch(tokenCols, p.defaultToken.Columns()) {
+		return nil
+	}
+	return ErrInvalidPaginationToken
+}
+
+func columnsMatch(tokenCols, templateCols []Column) bool {
+	if len(templateCols) == 0 || len(tokenCols) != len(templateCols) {
+		return false
+	}
+	for i, col := range tokenCols {
+		def := templateCols[i]
+		if def.Name != col.Name || def.Order != col.Order || def.Nullable != col.Nullable {
+			return false
+		}
+	}
+	return true
 }

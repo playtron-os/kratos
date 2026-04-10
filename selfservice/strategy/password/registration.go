@@ -67,9 +67,6 @@ type UpdateRegistrationFlowWithPasswordMethod struct {
 	TransientPayload json.RawMessage `json:"transient_payload,omitempty" form:"transient_payload"`
 }
 
-func (s *Strategy) RegisterRegistrationRoutes(*x.RouterPublic) {
-}
-
 func (s *Strategy) handleRegistrationError(r *http.Request, f *registration.Flow, p UpdateRegistrationFlowWithPasswordMethod, err error) error {
 	if f != nil {
 		for _, n := range container.NewFromJSON("", node.DefaultGroup, p.Traits, "traits").Nodes {
@@ -86,7 +83,7 @@ func (s *Strategy) handleRegistrationError(r *http.Request, f *registration.Flow
 }
 
 func (s *Strategy) decode(p *UpdateRegistrationFlowWithPasswordMethod, r *http.Request, ds *url.URL) (err error) {
-	return registration.DecodeBody(p, r, s.hd, s.d.Config(), registrationSchema, ds)
+	return registration.DecodeBody(p, r, registrationSchema, ds)
 }
 
 func (s *Strategy) Register(_ http.ResponseWriter, r *http.Request, f *registration.Flow, i *identity.Identity) (err error) {
@@ -213,15 +210,13 @@ func (s *Strategy) PopulateRegistrationMethod(r *http.Request, f *registration.F
 	// Going forward, the default is that the group is `default` and the feature flag is not set.
 	//
 	// TODO remove me when everyone has migrated.
-	group := node.DefaultGroup
 	if !s.d.Config().SelfServiceFlowRegistrationTwoSteps(r.Context()) && node.UiNodeGroup(s.d.Config().SelfServiceFlowRegistrationPasswordMethodProfileGroup(r.Context())) == node.PasswordGroup {
 		span.AddEvent(semconv.NewDeprecatedFeatureUsedEvent(ctx, "password_profile_registration_node_group=password"))
 
 		// This is the legacy code path. In the new code path, the profile method is responsible for hydrating the form
 		// nodes. In the old code path, the password method is responsible for hydrating the form nodes if it is
 		// the only method enabled.
-		group = node.PasswordGroup
-		nodes, err := container.NodesFromJSONSchema(r.Context(), group, ds.String(), "", nil)
+		nodes, err := container.NodesFromJSONSchema(r.Context(), node.PasswordGroup, ds.String(), "", nil)
 		if err != nil {
 			return err
 		}

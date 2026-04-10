@@ -23,7 +23,7 @@ import (
 
 	"github.com/gofrs/uuid"
 
-	kratos "github.com/ory/kratos/internal/httpclient"
+	kratos "github.com/ory/kratos/pkg/httpclient"
 
 	"github.com/ory/kratos/corpx"
 
@@ -37,8 +37,8 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/login"
 	"github.com/ory/kratos/selfservice/flow/settings"
@@ -51,7 +51,7 @@ func init() {
 
 func TestHandler(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "default")
 	conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
 		{ID: "default", URL: "file://./stub/identity.schema.json", SelfserviceSelectable: true},
@@ -61,9 +61,7 @@ func TestHandler(t *testing.T) {
 	testhelpers.StrategyEnable(t, conf, identity.CredentialsTypePassword.String(), true)
 	testhelpers.StrategyEnable(t, conf, settings.StrategyProfile, true)
 
-	router := x.NewRouterPublic(reg)
-	admin := x.NewRouterAdmin(reg)
-	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, admin)
+	publicTS, _ := testhelpers.NewKratosServer(t, reg)
 
 	_ = testhelpers.NewSettingsUITestServer(t, conf)
 	_ = testhelpers.NewLoginUIFlowEchoServer(t, reg)
@@ -74,8 +72,8 @@ func TestHandler(t *testing.T) {
 
 	primaryIdentity := &identity.Identity{ID: x.NewUUID(), Traits: identity.Traits(`{}`)}
 	require.NoError(t, reg.PrivilegedIdentityPool().CreateIdentity(context.Background(), primaryIdentity))
-	primaryUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, primaryIdentity)
-	otherUser := testhelpers.NewHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
+	primaryUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, primaryIdentity)
+	otherUser := testhelpers.NewHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
 
 	newExpiredFlow := func() *settings.Flow {
 		f, err := settings.NewFlow(conf, -time.Minute,
@@ -123,7 +121,7 @@ func TestHandler(t *testing.T) {
 		}
 		res, err := hc.Do(req)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		if isAPI {
 			assert.Len(t, res.Header.Get("Set-Cookie"), 0)
 		}
@@ -140,7 +138,7 @@ func TestHandler(t *testing.T) {
 		return initAuthenticatedFlow(t, hc, false, true, opts...)
 	}
 
-	aal2Identity := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, &identity.Identity{
+	aal2Identity := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, &identity.Identity{
 		State:  identity.StateActive,
 		Traits: []byte(`{"email":"foo@bar"}`),
 		Credentials: map[identity.CredentialsType]identity.Credentials{
@@ -158,7 +156,7 @@ func TestHandler(t *testing.T) {
 			})
 
 			t.Run("description=success", func(t *testing.T) {
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 				res, body := initFlow(t, user1, true)
 				assert.Contains(t, res.Request.URL.String(), settings.RouteInitAPIFlow)
 				assertion(t, body, true)
@@ -190,7 +188,7 @@ func TestHandler(t *testing.T) {
 
 				res, err := c.Do(req)
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				// here we check that the redirect status is 303
 				require.Equal(t, http.StatusSeeOther, res.StatusCode)
 				location, err := res.Location()
@@ -209,7 +207,7 @@ func TestHandler(t *testing.T) {
 
 				res, err := c.Do(req)
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				// here we check that the redirect status is 303
 				require.Equal(t, http.StatusSeeOther, res.StatusCode)
 				location, err := res.Location()
@@ -218,7 +216,7 @@ func TestHandler(t *testing.T) {
 			})
 
 			t.Run("description=success", func(t *testing.T) {
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
 				res, body := initFlow(t, user1, false)
 				assert.Contains(t, res.Request.URL.String(), reg.Config().SelfServiceFlowSettingsUI(ctx).String())
 				assertion(t, body, false)
@@ -253,7 +251,7 @@ func TestHandler(t *testing.T) {
 			})
 
 			t.Run("case=redirects with 303", func(t *testing.T) {
-				c := testhelpers.NewHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
+				c := testhelpers.NewHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
 				// prevent the redirect
 				c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 					return http.ErrUseLastResponse
@@ -263,7 +261,7 @@ func TestHandler(t *testing.T) {
 
 				res, err := c.Do(req)
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				// here we check that the redirect status is 303
 				require.Equal(t, http.StatusSeeOther, res.StatusCode)
 				location, err := res.Location()
@@ -280,7 +278,7 @@ func TestHandler(t *testing.T) {
 			})
 
 			t.Run("description=success", func(t *testing.T) {
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 				res, body := initSPAFlow(t, user1)
 				assert.Contains(t, res.Request.URL.String(), settings.RouteInitBrowserFlow)
 				assertion(t, body, false)
@@ -289,7 +287,7 @@ func TestHandler(t *testing.T) {
 			t.Run("description=can not init if identity has aal2 but session has aal1", func(t *testing.T) {
 				email := testhelpers.RandomEmail()
 				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsRequiredAAL, config.HighestAvailableAAL)
-				user1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, &identity.Identity{
+				user1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, &identity.Identity{
 					State:  identity.StateActive,
 					Traits: []byte(`{"email":"` + email + `"}`),
 					Credentials: map[identity.CredentialsType]identity.Credentials{
@@ -315,7 +313,7 @@ func TestHandler(t *testing.T) {
 			t.Run("description=settings return_to should persist through mfa flows", func(t *testing.T) {
 				email := testhelpers.RandomEmail()
 				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsRequiredAAL, config.HighestAvailableAAL)
-				user1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(t, ctx, reg, &identity.Identity{
+				user1 := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, &identity.Identity{
 					State:  identity.StateActive,
 					Traits: []byte(`{"email":"` + email + `"}`),
 					Credentials: map[identity.CredentialsType]identity.Credentials{
@@ -351,7 +349,7 @@ func TestHandler(t *testing.T) {
 					conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "default")
 				})
 
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 
 				// set the default schema to something else than the default
 				conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "not-default")
@@ -370,7 +368,7 @@ func TestHandler(t *testing.T) {
 					conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "default")
 				})
 
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 
 				// set the default schema to something else than the default
 				conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "not-default")
@@ -390,7 +388,7 @@ func TestHandler(t *testing.T) {
 					conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "default")
 				})
 
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 
 				// set the default schema to something else than the default
 				conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "not-default")
@@ -429,7 +427,7 @@ func TestHandler(t *testing.T) {
 			returnTo := "https://www.ory.sh"
 			conf.MustSet(ctx, config.ViperKeyURLsAllowedReturnToDomains, []string{returnTo})
 
-			client := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+			client := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 			body := testhelpers.EasyGetBody(t, client, publicTS.URL+settings.RouteInitBrowserFlow+"?return_to="+returnTo)
 
 			// Expire the flow
@@ -458,12 +456,12 @@ func TestHandler(t *testing.T) {
 
 		t.Run("description=should fail to fetch request if identity changed", func(t *testing.T) {
 			t.Run("type=api", func(t *testing.T) {
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
-				user2 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
+				user2 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 
 				res, err := user1.Get(publicTS.URL + settings.RouteInitAPIFlow)
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 
 				assert.Len(t, res.Header.Get("Set-Cookie"), 0)
 				body := ioutilx.MustReadAll(res.Body)
@@ -472,7 +470,7 @@ func TestHandler(t *testing.T) {
 
 				res, err = user2.Get(publicTS.URL + settings.RouteGetFlow + "?id=" + id.String())
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 
 				require.EqualValues(t, res.StatusCode, http.StatusForbidden)
 				body = ioutilx.MustReadAll(res.Body)
@@ -610,8 +608,8 @@ func TestHandler(t *testing.T) {
 
 		t.Run("description=fail to submit form as another user", func(t *testing.T) {
 			t.Run("type=api", func(t *testing.T) {
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
-				user2 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
+				user2 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 				_, body := initFlow(t, user1, true)
 				var f kratos.SettingsFlow
 				require.NoError(t, json.Unmarshal(body, &f))
@@ -622,8 +620,8 @@ func TestHandler(t *testing.T) {
 			})
 
 			t.Run("type=spa", func(t *testing.T) {
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
-				user2 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
+				user2 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
 				_, body := initFlow(t, user1, true)
 				var f kratos.SettingsFlow
 				require.NoError(t, json.Unmarshal(body, &f))
@@ -634,8 +632,8 @@ func TestHandler(t *testing.T) {
 			})
 
 			t.Run("type=browser", func(t *testing.T) {
-				user1 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
-				user2 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
+				user1 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
+				user2 := testhelpers.NewHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
 				_, body := initFlow(t, user1, true)
 				var f kratos.SettingsFlow
 				require.NoError(t, json.Unmarshal(body, &f))
@@ -695,7 +693,7 @@ func TestHandler(t *testing.T) {
 						conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "default")
 					})
 
-					user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(t, ctx, reg)
+					user1 := testhelpers.NewHTTPClientWithArbitrarySessionToken(ctx, t, reg)
 
 					// set the default schema to something else than the default
 					conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "not-default")
@@ -739,7 +737,7 @@ func TestHandler(t *testing.T) {
 
 	t.Run("case=relative redirect when self-service settings ui is a relative url", func(t *testing.T) {
 		reg.Config().MustSet(ctx, config.ViperKeySelfServiceSettingsURL, "/settings-ts")
-		user1 := testhelpers.NewNoRedirectHTTPClientWithArbitrarySessionCookie(t, ctx, reg)
+		user1 := testhelpers.NewNoRedirectHTTPClientWithArbitrarySessionCookie(ctx, t, reg)
 		res, _ := initFlow(t, user1, false)
 		assert.Regexp(
 			t,

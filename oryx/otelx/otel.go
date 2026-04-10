@@ -4,6 +4,8 @@
 package otelx
 
 import (
+	"context"
+
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/embedded"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -12,11 +14,16 @@ import (
 	"github.com/ory/x/stringsx"
 )
 
-type Tracer struct {
-	tracer trace.Tracer
-}
+type (
+	Tracer struct {
+		tracer trace.Tracer
+	}
+	Provider interface {
+		Tracer(ctx context.Context) *Tracer
+	}
+)
 
-// Creates a new tracer. If name is empty, a default tracer name is used
+// New creates a new tracer. If name is empty, a default tracer name is used
 // instead. See: https://godocs.io/go.opentelemetry.io/otel/sdk/trace#TracerProvider.Tracer
 func New(name string, l *logrusx.Logger, c *Config) (*Tracer, error) {
 	t := &Tracer{}
@@ -28,8 +35,8 @@ func New(name string, l *logrusx.Logger, c *Config) (*Tracer, error) {
 	return t, nil
 }
 
-// Creates a new no-op tracer.
-func NewNoop(_ *logrusx.Logger, c *Config) *Tracer {
+// NewNoop creates a new no-op tracer.
+func NewNoop() *Tracer {
 	tp := noop.NewTracerProvider()
 	t := &Tracer{tracer: tp.Tracer("")}
 	return t
@@ -100,8 +107,6 @@ type tracerProvider struct {
 	embedded.TracerProvider
 	t trace.Tracer
 }
-
-func (tp tracerProvider) tracerProvider() {}
 
 var _ trace.TracerProvider = tracerProvider{}
 

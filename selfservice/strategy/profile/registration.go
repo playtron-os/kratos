@@ -91,8 +91,6 @@ func (s *Strategy) ID() identity.CredentialsType {
 	return identity.CredentialsTypeProfile
 }
 
-func (s *Strategy) RegisterRegistrationRoutes(*x.RouterPublic) {}
-
 func (s *Strategy) PopulateRegistrationMethodCredentials(r *http.Request, f *registration.Flow, options ...registration.FormHydratorModifier) error {
 	f.UI.Nodes.Append(nodePreviousScreen())
 	f.UI.Nodes.RemoveMatching(nodeSubmitProfile())
@@ -165,7 +163,7 @@ func (s *Strategy) decode(p *updateRegistrationFlowWithProfileMethod, r *http.Re
 		return errors.WithStack(err)
 	}
 
-	if err := s.dc.Decode(r, p, compiler,
+	if err := decoderx.Decode(r, p, compiler,
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderSetValidatePayloads(false),
 		decoderx.HTTPDecoderJSONFollowsFormFormat(),
@@ -177,7 +175,7 @@ func (s *Strategy) decode(p *updateRegistrationFlowWithProfileMethod, r *http.Re
 		return errors.WithStack(flow.ErrStrategyNotResponsible)
 	}
 
-	return registration.DecodeBody(p, r, s.dc, s.d.Config(), registrationSchema, ds)
+	return registration.DecodeBody(p, r, registrationSchema, ds)
 }
 
 func (s *Strategy) Register(w http.ResponseWriter, r *http.Request, regFlow *registration.Flow, i *identity.Identity) (err error) {

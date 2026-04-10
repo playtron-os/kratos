@@ -12,23 +12,20 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ory/kratos/schema"
-	"github.com/ory/x/sqlcon"
-
-	"github.com/ory/x/otelx"
-
-	"github.com/ory/kratos/x"
-
-	"github.com/ory/kratos/driver/config"
+	stderrors "errors"
 
 	"github.com/gofrs/uuid"
-
 	"github.com/mohae/deepcopy"
 	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
 	"github.com/ory/jsonschema/v3"
 	"github.com/ory/kratos/courier"
+	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/schema"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
+	"github.com/ory/x/sqlcon"
 )
 
 var ErrProtectedFieldModified = herodot.ErrForbidden.
@@ -39,11 +36,11 @@ type (
 		config.Provider
 		PoolProvider
 		PrivilegedPoolProvider
-		x.TracingProvider
+		otelx.Provider
 		courier.Provider
 		ValidationProvider
 		ActiveCredentialsCounterStrategyProvider
-		x.LoggingProvider
+		logrusx.Provider
 	}
 	ManagementProvider interface {
 		IdentityManager() *Manager
@@ -396,7 +393,11 @@ func (m *Manager) CreateIdentities(ctx context.Context, identities []*Identity, 
 
 		o := newManagerOptions(opts)
 		if err := m.ValidateIdentity(ctx, ident, o); err != nil {
-			createIdentitiesError.AddFailedIdentity(ident, herodot.ErrBadRequest.WithReasonf("%s", err).WithWrap(err))
+			reason := err.Error()
+			if e, ok := stderrors.AsType[*herodot.DefaultError](err); ok {
+				reason = e.Reason()
+			}
+			createIdentitiesError.AddFailedIdentity(ident, herodot.ErrBadRequest.WithReason(reason).WithWrap(err))
 			continue
 		}
 		validIdentities = append(validIdentities, ident)
@@ -454,7 +455,7 @@ func (m *Manager) Update(ctx context.Context, updated *Identity, opts ...Manager
 		return err
 	}
 
-	return m.r.PrivilegedIdentityPool().UpdateIdentity(ctx, updated)
+	return m.r.PrivilegedIdentityPool().UpdateIdentity(ctx, updated, DiffAgainst(original))
 }
 
 func (m *Manager) UpdateSchemaID(ctx context.Context, id uuid.UUID, schemaID string, opts ...ManagerOption) (err error) {

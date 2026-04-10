@@ -4,9 +4,9 @@
 package webauthnx
 
 import (
-	"github.com/go-webauthn/webauthn/webauthn"
+	"cmp"
 
-	"github.com/ory/x/stringsx"
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 var _ webauthn.User = (*User)(nil)
@@ -31,11 +31,11 @@ func (u *User) WebAuthnID() []byte {
 }
 
 func (u *User) WebAuthnName() string {
-	return stringsx.Coalesce(u.Name, u.Config.RPDisplayName)
+	return cmp.Or(u.Name, u.Config.RPDisplayName)
 }
 
 func (u *User) WebAuthnDisplayName() string {
-	return stringsx.Coalesce(u.Name, u.Config.RPDisplayName)
+	return cmp.Or(u.Name, u.Config.RPDisplayName)
 }
 
 func (u *User) WebAuthnIcon() string {

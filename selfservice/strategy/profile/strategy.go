@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
 
 	"github.com/ory/x/otelx"
 
@@ -42,9 +44,9 @@ type (
 	strategyDependencies interface {
 		nosurfx.CSRFProvider
 		nosurfx.CSRFTokenGeneratorProvider
-		x.WriterProvider
-		x.LoggingProvider
-		x.TracingProvider
+		httpx.WriterProvider
+		logrusx.Provider
+		otelx.Provider
 
 		config.Provider
 
@@ -70,21 +72,14 @@ type (
 
 		schema.IdentitySchemaProvider
 	}
-	Strategy struct {
-		d  strategyDependencies
-		dc *decoderx.HTTP
-	}
+	Strategy struct{ d strategyDependencies }
 )
 
-func NewStrategy(d strategyDependencies) *Strategy {
-	return &Strategy{d: d, dc: decoderx.NewHTTP()}
-}
+func NewStrategy(d strategyDependencies) *Strategy { return &Strategy{d: d} }
 
 func (s *Strategy) SettingsStrategyID() string {
 	return settings.StrategyProfile
 }
-
-func (s *Strategy) RegisterSettingsRoutes(_ *x.RouterPublic) {}
 
 func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, id *identity.Identity, f *settings.Flow) (err error) {
 	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.profile.Strategy.PopulateSettingsMethod")
@@ -139,7 +134,7 @@ func (s *Strategy) Settings(ctx context.Context, w http.ResponseWriter, r *http.
 		return ctxUpdate, s.handleSettingsError(ctx, w, r, ctxUpdate, nil, p, err)
 	}
 
-	if err := s.dc.Decode(r, &p, option,
+	if err := decoderx.Decode(r, &p, option,
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
 		decoderx.HTTPDecoderSetValidatePayloads(true),
 		decoderx.HTTPDecoderJSONFollowsFormFormat(),

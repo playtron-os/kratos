@@ -22,15 +22,15 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/x"
 	"github.com/ory/x/urlx"
 )
 
 func TestLogout(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 
 	errTS := testhelpers.NewErrorTestServer(t, reg)
 
@@ -40,17 +40,17 @@ func TestLogout(t *testing.T) {
 	publicRouter.GET("/session/browser/set", func(writer http.ResponseWriter, request *http.Request) {
 		testhelpers.MockSetSession(t, reg, conf)(writer, request)
 	})
-	publicRouter.HandleFunc("GET /session/browser/get", func(w http.ResponseWriter, r *http.Request) {
+	publicRouter.Handler("GET", "/session/browser/get", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, err := reg.SessionManager().FetchFromRequest(r.Context(), r)
 		if err != nil {
 			reg.Writer().WriteError(w, r, err)
 			return
 		}
 		reg.Writer().Write(w, r, sess)
-	})
-	publicRouter.HandleFunc("POST /csrf/check", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	publicRouter.Handler("POST", "/csrf/check", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 	conf.MustSet(ctx, config.ViperKeySelfServiceLogoutBrowserDefaultReturnTo, public.URL+"/session/browser/get")
 
 	t.Run("case=successful logout for API clients", func(t *testing.T) {
@@ -86,7 +86,7 @@ func TestLogout(t *testing.T) {
 	makeBrowserLogout := func(t *testing.T, hc *http.Client, u string) ([]byte, *http.Response) {
 		res, err := hc.Get(u)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		return x.MustReadAll(res.Body), res
 	}
 
@@ -121,7 +121,7 @@ func TestLogout(t *testing.T) {
 			cj.SetCookies(urlx.ParseOrPanic(public.URL), originalCookies)
 			res, err := (&http.Client{Jar: cj}).PostForm(public.URL+"/csrf/check", url.Values{})
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.EqualValues(t, http.StatusForbidden, res.StatusCode)
 			body := x.MustReadAll(res.Body)
 			assert.EqualValues(t, nosurfx.ErrInvalidCSRFToken.ReasonField, gjson.GetBytes(body, "error.reason").String(), "%s", body)
@@ -258,7 +258,7 @@ func TestLogout(t *testing.T) {
 
 		res, err := hc.Do(req)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		// here we check that the redirect status is 303
 		require.Equal(t, http.StatusSeeOther, res.StatusCode)
 	})
@@ -293,7 +293,7 @@ func TestLogout(t *testing.T) {
 
 		resp, err := hc.Do(r)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)

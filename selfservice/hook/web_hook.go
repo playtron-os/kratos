@@ -39,8 +39,11 @@ import (
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/events"
+	"github.com/ory/x/httpx"
 	"github.com/ory/x/jsonnetsecure"
+	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx"
+	"github.com/ory/x/reqlog"
 )
 
 var _ interface {
@@ -70,9 +73,9 @@ var jsonnetCache, _ = ristretto.NewCache(&ristretto.Config[[]byte, []byte]{
 
 type (
 	webHookDependencies interface {
-		x.LoggingProvider
-		x.HTTPClientProvider
-		x.TracingProvider
+		logrusx.Provider
+		httpx.ClientProvider
+		otelx.Provider
 		jsonnetsecure.VMProvider
 		config.Provider
 	}
@@ -212,7 +215,7 @@ func (e *WebHook) ExecuteRegistrationPreHook(_ http.ResponseWriter, req *http.Re
 }
 
 func (e *WebHook) ExecutePostRegistrationPrePersistHook(_ http.ResponseWriter, req *http.Request, flow *registration.Flow, id *identity.Identity) error {
-	if !(e.conf.CanInterrupt || e.conf.Response.Parse) {
+	if !e.conf.CanInterrupt && !e.conf.Response.Parse {
 		return nil
 	}
 
@@ -249,7 +252,7 @@ func (e *WebHook) ExecutePostRegistrationPostPersistHook(_ http.ResponseWriter, 
 	})
 }
 
-func (e *WebHook) ExecuteSettingsPreHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow) error {
+func (e *WebHook) ExecuteSettingsPreHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow, s *session.Session) error {
 	return otelx.WithSpan(req.Context(), "selfservice.hook.WebHook.ExecuteSettingsPreHook", func(ctx context.Context) error {
 		return e.execute(ctx, &templateContext{
 			Flow:           flow,
@@ -257,11 +260,12 @@ func (e *WebHook) ExecuteSettingsPreHook(_ http.ResponseWriter, req *http.Reques
 			RequestMethod:  req.Method,
 			RequestURL:     x.RequestURL(req).String(),
 			RequestCookies: cookies(req),
+			Session:        s,
 		})
 	})
 }
 
-func (e *WebHook) ExecuteSettingsPostPersistHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow, id *identity.Identity, _ *session.Session) error {
+func (e *WebHook) ExecuteSettingsPostPersistHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow, id *identity.Identity, s *session.Session) error {
 	if e.conf.CanInterrupt || e.conf.Response.Parse {
 		return nil
 	}
@@ -273,12 +277,13 @@ func (e *WebHook) ExecuteSettingsPostPersistHook(_ http.ResponseWriter, req *htt
 			RequestURL:     x.RequestURL(req).String(),
 			RequestCookies: cookies(req),
 			Identity:       id,
+			Session:        s,
 		})
 	})
 }
 
-func (e *WebHook) ExecuteSettingsPrePersistHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow, id *identity.Identity) error {
-	if !(e.conf.CanInterrupt || e.conf.Response.Parse) {
+func (e *WebHook) ExecuteSettingsPrePersistHook(_ http.ResponseWriter, req *http.Request, flow *settings.Flow, id *identity.Identity, s *session.Session) error {
+	if !e.conf.CanInterrupt && !e.conf.Response.Parse {
 		return nil
 	}
 	return otelx.WithSpan(req.Context(), "selfservice.hook.WebHook.ExecuteSettingsPrePersistHook", func(ctx context.Context) error {
@@ -289,6 +294,7 @@ func (e *WebHook) ExecuteSettingsPrePersistHook(_ http.ResponseWriter, req *http
 			RequestURL:     x.RequestURL(req).String(),
 			RequestCookies: cookies(req),
 			Identity:       id,
+			Session:        s,
 		})
 	})
 }
@@ -306,7 +312,7 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 		tracer    = trace.SpanFromContext(ctx).TracerProvider().Tracer("kratos-webhooks")
 	)
 	if ignoreResponse && (parseResponse || canInterrupt) {
-		return errors.WithStack(herodot.ErrInternalServerError.WithReasonf("A webhook is configured to ignore the response but also to parse the response. This is not possible."))
+		return errors.WithStack(herodot.ErrMisconfiguration.WithReasonf("A webhook is configured to ignore the response but also to parse the response. This is not possible."))
 	}
 
 	makeRequest := func() (finalErr error) {
@@ -394,7 +400,7 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 			}
 			return errors.WithStack(err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		resp.Body = io.NopCloser(io.LimitReader(resp.Body, 5<<20)) // read at most 5 MB from the response
 		span.SetAttributes(semconv.HTTPAttributesFromHTTPStatusCode(resp.StatusCode)...)
 
@@ -421,7 +427,10 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 	}
 
 	if !ignoreResponse {
-		return makeRequest()
+		t0 := time.Now()
+		err := makeRequest()
+		reqlog.AccumulateExternalLatency(ctx, time.Since(t0))
+		return err
 	}
 	go func() {
 		// we cannot handle the error as we are running async, and it is logged anyway
@@ -430,11 +439,13 @@ func (e *WebHook) execute(ctx context.Context, data *templateContext) error {
 	return nil
 }
 
+// RemoveDisallowedHeaders removes all headers from httpHeaders that are not in
+// headerAllowlist.
 func RemoveDisallowedHeaders(httpHeaders http.Header, headerAllowlist []string) http.Header {
 	res := make(http.Header, len(headerAllowlist))
 	for _, allowed := range headerAllowlist {
-		h, present := httpHeaders[textproto.CanonicalMIMEHeaderKey(allowed)]
-		if present {
+		allowed = textproto.CanonicalMIMEHeaderKey(allowed)
+		if h, ok := httpHeaders[allowed]; ok {
 			res[allowed] = h
 		}
 	}
@@ -474,10 +485,6 @@ func parseWebhookResponse(resp *http.Response, id *identity.Identity) (err error
 
 		if len(hookResponse.Identity.State) > 0 {
 			id.State = hookResponse.Identity.State
-		}
-
-		if len(hookResponse.Identity.VerifiableAddresses) > 0 {
-			id.VerifiableAddresses = hookResponse.Identity.VerifiableAddresses
 		}
 
 		if len(hookResponse.Identity.VerifiableAddresses) > 0 {

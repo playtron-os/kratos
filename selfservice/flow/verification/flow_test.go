@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/ory/x/jsonx"
 
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/selfservice/flow/verification"
 
 	"github.com/stretchr/testify/assert"
@@ -30,7 +31,7 @@ import (
 
 func TestFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, _ := internal.NewFastRegistryWithMocks(t)
+	conf, _ := pkg.NewFastRegistryWithMocks(t)
 
 	must := func(r *verification.Flow, err error) *verification.Flow {
 		require.NoError(t, err)
@@ -87,7 +88,7 @@ func TestGetRequestURL(t *testing.T) {
 }
 
 func TestNewPostHookFlow(t *testing.T) {
-	conf := internal.NewConfigurationWithDefaults(t)
+	conf := pkg.NewConfigurationWithDefaults(t)
 	u := &http.Request{URL: urlx.ParseOrPanic("http://foo/bar/baz"), Host: "foo"}
 	expectReturnTo := func(t *testing.T, originalFlowRequestQueryParams url.Values, expectedReturnTo string) {
 		originalFlow := registration.Flow{
@@ -98,6 +99,7 @@ func TestNewPostHookFlow(t *testing.T) {
 		require.NoError(t, err)
 		u, err := urlx.Parse(f.RequestURL)
 		require.NoError(t, err)
+		assert.True(t, strings.HasPrefix(f.RequestURL, "http://foo.com/bar?"))
 		assert.Equal(t, "", u.Query().Get("after_verification_return_to"))
 		assert.Equal(t, expectedReturnTo, u.Query().Get("return_to"))
 	}
@@ -128,7 +130,7 @@ func TestFlowEncodeJSON(t *testing.T) {
 
 func TestFromOldFlow(t *testing.T) {
 	ctx := context.Background()
-	conf := internal.NewConfigurationWithDefaults(t)
+	conf := pkg.NewConfigurationWithDefaults(t)
 	r := http.Request{URL: &url.URL{Path: "/", RawQuery: "return_to=" + urlx.AppendPaths(conf.SelfPublicURL(ctx), "/self-service/login/browser").String()}, Host: "ory.sh"}
 	for _, ft := range []flow.Type{
 		flow.TypeAPI,
@@ -192,7 +194,7 @@ func TestContinueURL(t *testing.T) {
 		},
 	} {
 		t.Run(fmt.Sprintf("case=%s", tc.desc), func(t *testing.T) {
-			conf := internal.NewConfigurationWithDefaults(t)
+			conf := pkg.NewConfigurationWithDefaults(t)
 			conf.MustSet(context.Background(), config.ViperKeySelfServiceBrowserDefaultReturnTo, globalReturnTo)
 			if tc.prep != nil {
 				tc.prep(conf)

@@ -31,7 +31,7 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/request"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/selfservice/flow"
@@ -50,7 +50,6 @@ import (
 	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/otelx/semconv"
-	"github.com/ory/x/pointerx"
 	"github.com/ory/x/snapshotx"
 )
 
@@ -63,10 +62,10 @@ var transientPayload = json.RawMessage(`{
 
 func TestWebHooks(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	logger := logrusx.New("kratos", "test")
 
-	conf.Set(ctx, config.ViperKeyWebhookHeaderAllowlist, []string{
+	conf.MustSet(ctx, config.ViperKeyWebhookHeaderAllowlist, []string{
 		"Accept",
 		"Accept-Encoding",
 		"Accept-Language",
@@ -88,11 +87,11 @@ func TestWebHooks(t *testing.T) {
 	})
 
 	whDeps := struct {
-		x.SimpleLoggerWithClient
+		x.BasicRegistry
 		*jsonnetsecure.TestProvider
 		config.Provider
 	}{
-		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(ctx), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
+		x.BasicRegistry{L: logger, C: reg.HTTPClient(ctx), T: otelx.NewNoop()},
 		jsonnetsecure.NewTestProvider(t),
 		reg,
 	}
@@ -290,7 +289,7 @@ func TestWebHooks(t *testing.T) {
 				return wh.ExecuteSettingsPostPersistHook(nil, req, f.(*settings.Flow), s.Identity, s)
 			},
 			expectedBody: func(req *http.Request, f flow.Flow, s *session.Session) string {
-				return bodyWithFlowAndIdentityAndTransientPayload(req, f, s, transientPayload)
+				return bodyWithFlowAndIdentityAndSessionAndTransientPayload(req, f, s, transientPayload)
 			},
 		},
 	} {
@@ -612,7 +611,7 @@ func TestWebHooks(t *testing.T) {
 			uc:         "Post Settings Hook Pre Persist - block",
 			createFlow: func() flow.Flow { return &settings.Flow{ID: x.NewUUID()} },
 			callWebHook: func(wh *hook.WebHook, req *http.Request, f flow.Flow, s *session.Session) error {
-				return wh.ExecuteSettingsPrePersistHook(nil, req, f.(*settings.Flow), s.Identity)
+				return wh.ExecuteSettingsPrePersistHook(nil, req, f.(*settings.Flow), s.Identity, s)
 			},
 			webHookResponse: func() (int, []byte) {
 				return http.StatusBadRequest, webHookResponse
@@ -711,7 +710,8 @@ func TestWebHooks(t *testing.T) {
 						Type:        "password",
 						Identifiers: []string{"test"},
 						Config:      []byte(`{"hashed_password":"$argon2id$v=19$m=65536,t=1,p=1$Z3JlZW5hbmRlcnNlY3JldA$Z3JlZW5hbmRlcnNlY3JldA"}`),
-					}},
+					},
+				},
 				ExternalID: "original-external-id",
 				SchemaID:   "default",
 				SchemaURL:  "file://stub/default.schema.json",
@@ -844,7 +844,7 @@ func TestWebHooks(t *testing.T) {
 			assert.NoError(t, postPersistErr)
 			assert.Equal(t, in, &identity.Identity{ID: uuid})
 
-			prePersistErr := wh.ExecuteSettingsPrePersistHook(nil, req, f, in)
+			prePersistErr := wh.ExecuteSettingsPrePersistHook(nil, req, f, in, s)
 			assert.NoError(t, prePersistErr)
 			if tc.parse == true {
 				assert.Equal(t, in, &identity.Identity{ID: uuid, Traits: identity.Traits(`{"email":"some@other-example.org"}`)})
@@ -1042,16 +1042,16 @@ func TestWebHooks(t *testing.T) {
 func TestDisallowPrivateIPRanges(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeyClientHTTPNoPrivateIPRanges, true)
 	conf.MustSet(ctx, config.ViperKeyClientHTTPPrivateIPExceptionURLs, []string{"http://localhost/exception"})
 	logger := logrusx.New("kratos", "test")
 	whDeps := struct {
-		x.SimpleLoggerWithClient
+		x.BasicRegistry
 		*jsonnetsecure.TestProvider
 		config.Provider
 	}{
-		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
+		x.BasicRegistry{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop()},
 		jsonnetsecure.NewTestProvider(t),
 		reg,
 	}
@@ -1074,8 +1074,7 @@ func TestDisallowPrivateIPRanges(t *testing.T) {
 			TemplateURI: "file://stub/test_body.jsonnet",
 		})
 		err := wh.ExecuteLoginPostHook(nil, req, node.DefaultGroup, f, s)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "is not a permitted destination")
+		assert.ErrorContains(t, err, "is not a permitted destination")
 	})
 
 	t.Run("allowed to call exempt url", func(t *testing.T) {
@@ -1107,23 +1106,22 @@ func TestDisallowPrivateIPRanges(t *testing.T) {
 			TemplateURI: "http://192.168.178.0/test_body.jsonnet",
 		})
 		err := wh.ExecuteLoginPostHook(nil, req, node.DefaultGroup, f, s)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "is not a permitted destination")
+		require.ErrorContains(t, err, "is not a permitted destination")
 	})
 }
 
 func TestAsyncWebhook(t *testing.T) {
 	t.Parallel()
-	_, reg := internal.NewFastRegistryWithMocks(t)
+	_, reg := pkg.NewFastRegistryWithMocks(t)
 	logger := logrusx.New("kratos", "test")
 	logHook := new(test.Hook)
 	logger.Logger.Hooks.Add(logHook)
 	whDeps := struct {
-		x.SimpleLoggerWithClient
+		x.BasicRegistry
 		*jsonnetsecure.TestProvider
 		config.Provider
 	}{
-		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
+		x.BasicRegistry{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop()},
 		jsonnetsecure.NewTestProvider(t),
 		reg,
 	}
@@ -1152,7 +1150,7 @@ func TestAsyncWebhook(t *testing.T) {
 	webhookReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(handlerEntered)
 		<-blockHandlerOnExit
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	t.Cleanup(webhookReceiver.Close)
 
@@ -1197,14 +1195,14 @@ func TestAsyncWebhook(t *testing.T) {
 
 func TestWebhookEvents(t *testing.T) {
 	t.Parallel()
-	_, reg := internal.NewFastRegistryWithMocks(t)
+	_, reg := pkg.NewFastRegistryWithMocks(t)
 	logger := logrusx.New("kratos", "test")
 	whDeps := struct {
-		x.SimpleLoggerWithClient
+		x.BasicRegistry
 		*jsonnetsecure.TestProvider
 		config.Provider
 	}{
-		x.SimpleLoggerWithClient{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop(logger, &otelx.Config{ServiceName: "kratos"})},
+		x.BasicRegistry{L: logger, C: reg.HTTPClient(context.Background()), T: otelx.NewNoop()},
 		jsonnetsecure.NewTestProvider(t),
 		reg,
 	}
@@ -1221,10 +1219,10 @@ func TestWebhookEvents(t *testing.T) {
 	webhookReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ok" {
 			w.WriteHeader(200)
-			w.Write([]byte("ok"))
+			_, _ = w.Write([]byte("ok"))
 		} else {
 			w.WriteHeader(500)
-			w.Write([]byte("fail"))
+			_, _ = w.Write([]byte("fail"))
 		}
 	}))
 	t.Cleanup(webhookReceiver.Close)
@@ -1352,7 +1350,7 @@ func TestWebhookEvents(t *testing.T) {
 			URL:                webhookReceiver.URL + "/fail",
 			Method:             "GET",
 			TemplateURI:        "file://stub/test_body.jsonnet",
-			EmitAnalyticsEvent: pointerx.Ptr(false),
+			EmitAnalyticsEvent: new(false),
 		})
 
 		recorder := tracetest.NewSpanRecorder()

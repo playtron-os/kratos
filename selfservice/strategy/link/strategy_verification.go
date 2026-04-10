@@ -20,7 +20,6 @@ import (
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/ui/container"
 	"github.com/ory/kratos/ui/node"
-	"github.com/ory/kratos/x"
 	"github.com/ory/x/decoderx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/sqlcon"
@@ -30,12 +29,6 @@ import (
 
 func (s *Strategy) VerificationStrategyID() string {
 	return string(verification.VerificationStrategyLink)
-}
-
-func (s *Strategy) RegisterPublicVerificationRoutes(_ *x.RouterPublic) {
-}
-
-func (s *Strategy) RegisterAdminVerificationRoutes(_ *x.RouterAdmin) {
 }
 
 func (s *Strategy) PopulateVerificationMethod(r *http.Request, f *verification.Flow) error {
@@ -65,7 +58,7 @@ func (s *Strategy) decodeVerification(r *http.Request) (*verificationSubmitPaylo
 		return nil, errors.WithStack(err)
 	}
 
-	if err := s.dx.Decode(r, &body, compiler,
+	if err := decoderx.Decode(r, &body, compiler,
 		decoderx.HTTPDecoderUseQueryAndBody(),
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
@@ -179,7 +172,7 @@ func (s *Strategy) verificationHandleFormSubmission(ctx context.Context, r *http
 		return s.handleVerificationError(r, f, body, err)
 	}
 
-	if err := s.d.LinkSender().SendVerificationLink(ctx, f, identity.VerifiableAddressTypeEmail, body.Email); err != nil {
+	if err := s.d.LinkSender().SendVerificationLink(ctx, f, identity.AddressTypeEmail, body.Email); err != nil {
 		if !errors.Is(err, ErrUnknownAddress) {
 			return s.handleVerificationError(r, f, body, err)
 		}
@@ -266,7 +259,7 @@ func (s *Strategy) retryVerificationFlowWithMessage(ctx context.Context, w http.
 	s.d.Logger().WithRequest(r).WithField("message", message).Debug("A verification flow is being retried because a validation error occurred.")
 
 	f, err := verification.NewFlow(s.d.Config(),
-		s.d.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.d.CSRFHandler().RegenerateToken(w, r), r, s, ft)
+		s.d.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.d.CSRFHandler().RegenerateToken(w, r), r, verification.Strategies{s}, ft)
 	if err != nil {
 		return s.handleVerificationError(r, f, nil, err)
 	}
@@ -290,7 +283,7 @@ func (s *Strategy) retryVerificationFlowWithError(ctx context.Context, w http.Re
 	s.d.Logger().WithRequest(r).WithError(verErr).Debug("A verification flow is being retried because an error occurred.")
 
 	f, err := verification.NewFlow(s.d.Config(),
-		s.d.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.d.CSRFHandler().RegenerateToken(w, r), r, s, ft)
+		s.d.Config().SelfServiceFlowVerificationRequestLifespan(ctx), s.d.CSRFHandler().RegenerateToken(w, r), r, verification.Strategies{s}, ft)
 	if err != nil {
 		return s.handleVerificationError(r, f, nil, err)
 	}

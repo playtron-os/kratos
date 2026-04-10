@@ -7,7 +7,12 @@ import (
 	"net/http"
 	"net/url"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
 
 	"github.com/gofrs/uuid"
 
@@ -35,8 +40,9 @@ var ErrHookAbortFlow = errors.New("aborted verification hook execution")
 type (
 	errorHandlerDependencies interface {
 		errorx.ManagementProvider
-		x.WriterProvider
-		x.LoggingProvider
+		httpx.WriterProvider
+		logrusx.Provider
+		otelx.Provider
 		nosurfx.CSRFProvider
 		nosurfx.CSRFTokenGeneratorProvider
 		config.Provider
@@ -64,7 +70,14 @@ func (s *ErrorHandler) WriteFlowError(
 	group node.UiNodeGroup,
 	err error,
 ) {
-	logger := s.d.Audit().
+	ctx, span := s.d.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.flow.verification.ErrorHandler.WriteFlowError",
+		trace.WithAttributes(
+			attribute.String("error", err.Error()),
+		))
+	r = r.WithContext(ctx)
+	defer otelx.End(span, &err)
+
+	logger := s.d.Logger().
 		WithError(err).
 		WithRequest(r).
 		WithField("verification_flow", f.ToLoggerField())
@@ -77,13 +90,14 @@ func (s *ErrorHandler) WriteFlowError(
 		s.forward(w, r, nil, err)
 		return
 	}
+	span.SetAttributes(attribute.String("flow_id", f.ID.String()))
 	trace.SpanFromContext(r.Context()).AddEvent(events.NewVerificationFailed(r.Context(), f.ID, string(f.Type), f.Active.String(), err))
 
 	if e := new(flow.ExpiredError); errors.As(err, &e) {
-		strategy, err := s.d.VerificationStrategies(r.Context()).Strategy(f.Active.String())
+		strategies, _, err := s.d.VerificationStrategies(r.Context()).ActiveStrategies(f.Active.String())
 		if err != nil {
-			strategy, err = s.d.GetActiveVerificationStrategy(r.Context())
-			// Can't retry the verification if no strategy has been set
+			strategies, _, err = s.d.GetActiveVerificationStrategies(r.Context())
+			// Can't retry the verification if no primary strategy has been set
 			if err != nil {
 				s.d.SelfServiceErrorManager().Forward(r.Context(), w, r, err)
 				return
@@ -91,7 +105,7 @@ func (s *ErrorHandler) WriteFlowError(
 		}
 		// create new flow because the old one is not valid
 		a, err := FromOldFlow(s.d.Config(), s.d.Config().SelfServiceFlowVerificationRequestLifespan(r.Context()),
-			s.d.CSRFHandler().RegenerateToken(w, r), r, strategy, f)
+			s.d.CSRFHandler().RegenerateToken(w, r), r, strategies, f)
 		if err != nil {
 			// failed to create a new session and redirect to it, handle that error as a new one
 			s.WriteFlowError(w, r, f, group, err)
@@ -135,6 +149,7 @@ func (s *ErrorHandler) WriteFlowError(
 	updatedFlow, innerErr := s.d.VerificationFlowPersister().GetVerificationFlow(r.Context(), f.ID)
 	if innerErr != nil {
 		s.forward(w, r, updatedFlow, innerErr)
+		return
 	}
 
 	s.d.Writer().WriteCode(w, r, x.RecoverStatusCode(err, http.StatusBadRequest), updatedFlow)

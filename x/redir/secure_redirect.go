@@ -4,6 +4,7 @@
 package redir
 
 import (
+	"cmp"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,7 +17,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
-	"github.com/ory/x/stringsx"
 	"github.com/ory/x/urlx"
 
 	"github.com/ory/kratos/driver/config"
@@ -85,7 +85,7 @@ func TakeOverReturnToParameter(from string, to string, fallback ...string) (stri
 	if err != nil {
 		return "", err
 	}
-	returnTo := stringsx.Coalesce(append([]string{fromURL.Query().Get("return_to")}, fallback...)...)
+	returnTo := cmp.Or(append([]string{fromURL.Query().Get("return_to")}, fallback...)...)
 	// Empty return_to parameter, return early
 	if returnTo == "" {
 		return to, nil
@@ -120,7 +120,7 @@ func SecureRedirectTo(r *http.Request, defaultReturnTo *url.URL, opts ...SecureR
 		}
 	}
 
-	rawReturnTo := stringsx.Coalesce(o.returnTo, source.Query().Get("return_to"))
+	rawReturnTo := cmp.Or(o.returnTo, source.Query().Get("return_to"))
 	if rawReturnTo == "" {
 		return o.defaultReturnTo, nil
 	}
@@ -130,15 +130,15 @@ func SecureRedirectTo(r *http.Request, defaultReturnTo *url.URL, opts ...SecureR
 		return nil, errors.WithStack(herodot.ErrBadRequest.WithWrap(err).WithReasonf("Unable to parse the return_to query parameter as an URL: %s", err))
 	}
 
-	returnTo.Host = stringsx.Coalesce(returnTo.Host, o.defaultReturnTo.Host)
-	returnTo.Scheme = stringsx.Coalesce(returnTo.Scheme, o.defaultReturnTo.Scheme)
+	returnTo.Host = cmp.Or(returnTo.Host, o.defaultReturnTo.Host)
+	returnTo.Scheme = cmp.Or(returnTo.Scheme, o.defaultReturnTo.Scheme)
 
 	for _, allowed := range o.allowlist {
 		if strings.EqualFold(allowed.Scheme, returnTo.Scheme) &&
 			SecureRedirectToIsAllowedHost(returnTo, allowed) &&
 			strings.HasPrefix(
-				stringsx.Coalesce(returnTo.Path, "/"),
-				stringsx.Coalesce(allowed.Path, "/")) {
+				cmp.Or(returnTo.Path, "/"),
+				cmp.Or(allowed.Path, "/")) {
 			return returnTo, nil
 		}
 	}

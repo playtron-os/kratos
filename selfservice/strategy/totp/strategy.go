@@ -6,6 +6,7 @@ package totp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 
 	"github.com/ory/kratos/x/nosurfx"
 
@@ -22,22 +23,24 @@ import (
 	"github.com/ory/kratos/selfservice/flow/settings"
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/ui/node"
-	"github.com/ory/kratos/x"
-	"github.com/ory/x/decoderx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
 )
 
 var (
-	_ login.Strategy                    = new(Strategy)
-	_ settings.Strategy                 = new(Strategy)
-	_ identity.ActiveCredentialsCounter = new(Strategy)
+	_ login.Strategy                    = (*Strategy)(nil)
+	_ login.AAL2FormHydrator            = (*Strategy)(nil)
+	_ settings.Strategy                 = (*Strategy)(nil)
+	_ identity.ActiveCredentialsCounter = (*Strategy)(nil)
 )
 
-type totpStrategyDependencies interface {
-	x.LoggingProvider
-	x.WriterProvider
+type dependencies interface {
+	logrusx.Provider
+	httpx.WriterProvider
 	nosurfx.CSRFTokenGeneratorProvider
 	nosurfx.CSRFProvider
-	x.TracingProvider
+	otelx.Provider
 
 	config.Provider
 
@@ -71,17 +74,9 @@ type totpStrategyDependencies interface {
 	session.PersistenceProvider
 }
 
-type Strategy struct {
-	d  totpStrategyDependencies
-	hd *decoderx.HTTP
-}
+type Strategy struct{ d dependencies }
 
-func NewStrategy(d totpStrategyDependencies) *Strategy {
-	return &Strategy{
-		d:  d,
-		hd: decoderx.NewHTTP(),
-	}
-}
+func NewStrategy(d dependencies) *Strategy { return &Strategy{d: d} }
 
 func (s *Strategy) CountActiveFirstFactorCredentials(_ context.Context, _ map[identity.CredentialsType]identity.Credentials) (count int, err error) {
 	return 0, nil
@@ -117,4 +112,12 @@ func (s *Strategy) CompletedAuthenticationMethod(ctx context.Context) session.Au
 		Method: s.ID(),
 		AAL:    identity.AuthenticatorAssuranceLevel2,
 	}
+}
+
+func (s *Strategy) PopulateLoginMethodSecondFactor(r *http.Request, f *login.Flow) error {
+	return s.PopulateLoginMethod(r, identity.AuthenticatorAssuranceLevel2, f)
+}
+
+func (s *Strategy) PopulateLoginMethodSecondFactorRefresh(r *http.Request, f *login.Flow) error {
+	return s.PopulateLoginMethod(r, identity.AuthenticatorAssuranceLevel2, f)
 }

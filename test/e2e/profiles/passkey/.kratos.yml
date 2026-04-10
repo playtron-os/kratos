@@ -43,6 +43,7 @@ selfservice:
           id: localhost
           origins:
             - http://localhost:4455
+            - http://localhost:19006
           display_name: Ory
 
 identity:

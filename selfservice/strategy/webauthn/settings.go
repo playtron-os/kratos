@@ -43,9 +43,6 @@ import (
 	"github.com/ory/kratos/x"
 )
 
-func (s *Strategy) RegisterSettingsRoutes(_ *x.RouterPublic) {
-}
-
 func (s *Strategy) SettingsStrategyID() string {
 	return identity.CredentialsTypeWebAuthn.String()
 }
@@ -150,7 +147,7 @@ func (s *Strategy) decodeSettingsFlow(r *http.Request, dest interface{}) error {
 		return errors.WithStack(err)
 	}
 
-	return decoderx.NewHTTP().Decode(r, dest, compiler,
+	return decoderx.Decode(r, dest, compiler,
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderAllowedMethods("POST", "GET"),
 		decoderx.HTTPDecoderSetValidatePayloads(true),

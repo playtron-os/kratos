@@ -197,6 +197,28 @@ func NewErrorValidationConstGeneric() *Message {
 	}
 }
 
+func NewErrorValidationEmail(value string) *Message {
+	return &Message{
+		ID:   ErrorValidationEmail,
+		Text: "Enter a valid email address",
+		Type: Error,
+		Context: context(map[string]any{
+			"value": value,
+		}),
+	}
+}
+
+func NewErrorValidationPhone(value string) *Message {
+	return &Message{
+		ID:   ErrorValidationPhone,
+		Text: "Enter a valid phone number",
+		Type: Error,
+		Context: context(map[string]any{
+			"value": value,
+		}),
+	}
+}
+
 func NewErrorValidationPasswordPolicyViolationGeneric(reason string) *Message {
 	return &Message{
 		ID:   ErrorValidationPasswordPolicyViolationGeneric,
@@ -290,7 +312,11 @@ func NewErrorValidationDuplicateCredentialsWithHints(availableCredentialTypes []
 	}
 	oidcProviders := make([]string, 0, len(availableOIDCProviders))
 	for _, provider := range availableOIDCProviders {
-		oidcProviders = append(oidcProviders, cases.Title(language.English).String(provider))
+		if strings.ContainsAny(provider, "{}") {
+			oidcProviders = append(oidcProviders, provider)
+		} else {
+			oidcProviders = append(oidcProviders, cases.Title(language.English).String(provider))
+		}
 	}
 
 	reason := fmt.Sprintf("You tried signing in with %s which is already in use by another account.", identifier)

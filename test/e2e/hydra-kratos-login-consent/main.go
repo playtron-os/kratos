@@ -13,7 +13,6 @@ import (
 	"github.com/ory/hydra-client-go/models"
 	kratos "github.com/ory/kratos-client-go"
 	"github.com/ory/x/osx"
-	"github.com/ory/x/pointerx"
 	"github.com/ory/x/urlx"
 )
 
@@ -42,8 +41,10 @@ func main() {
 		if *res.Payload.Skip {
 			res, err := hc.Admin.AcceptLoginRequest(admin.NewAcceptLoginRequestParams().
 				WithLoginChallenge(r.URL.Query().Get("login_challenge")).
-				WithBody(&models.AcceptLoginRequest{Remember: true, RememberFor: 3600,
-					Subject: res.Payload.Subject}))
+				WithBody(&models.AcceptLoginRequest{
+					Remember: true, RememberFor: 3600,
+					Subject: res.Payload.Subject,
+				}))
 			if !checkReq(w, err) {
 				return
 			}
@@ -73,7 +74,8 @@ func main() {
 				WithLoginChallenge(r.URL.Query().Get("login_challenge")).
 				WithBody(&models.AcceptLoginRequest{
 					RememberFor: 3600, Remember: r.Form.Get("remember") == "true",
-					Subject: pointerx.String(r.Form.Get("username"))}))
+					Subject: new(r.Form.Get("username")),
+				}))
 			if !checkReq(w, err) {
 				return
 			}
@@ -154,7 +156,8 @@ func main() {
 				WithBody(&models.AcceptConsentRequest{
 					Session:  &models.ConsentRequestSession{IDToken: idToken},
 					Remember: r.Form.Get("remember") == "true", RememberFor: 3600,
-					GrantScope: r.Form["scope"]}))
+					GrantScope: r.Form["scope"],
+				}))
 			if !checkReq(w, err) {
 				return
 			}

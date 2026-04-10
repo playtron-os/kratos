@@ -13,8 +13,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ory/pop/v6/logging"
-
 	"github.com/sirupsen/logrus"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
@@ -31,8 +29,6 @@ type (
 		redactionText             string
 		additionalRedactedHeaders map[string]struct{}
 		opts                      []Option
-		name                      string
-		version                   string
 	}
 	Provider interface {
 		Logger() *Logger
@@ -40,10 +36,6 @@ type (
 )
 
 var opts = otelhttptrace.WithPropagators(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-
-func (l *Logger) LeakSensitiveData() bool {
-	return l.leakSensitive
-}
 
 func (l *Logger) Logrus() *logrus.Logger {
 	return l.Entry.Logger
@@ -61,8 +53,8 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 	return &ll
 }
 
-func (l *Logger) HTTPHeadersRedacted(h http.Header) map[string]interface{} {
-	headers := map[string]interface{}{}
+func (l *Logger) HTTPHeadersRedacted(h http.Header) map[string]any {
+	headers := map[string]any{}
 
 	for key, value := range h {
 		switch keyLower := strings.ToLower(key); keyLower {
@@ -104,7 +96,7 @@ func (l *Logger) WithRequest(r *http.Request) *Logger {
 		scheme = "http"
 	}
 
-	ll := l.WithField("http_request", map[string]interface{}{
+	ll := l.WithField("http_request", map[string]any{
 		"remote":  r.RemoteAddr,
 		"method":  r.Method,
 		"path":    r.URL.EscapedPath(),
@@ -147,7 +139,7 @@ func (l *Logger) WithSpanFromContext(ctx context.Context) *Logger {
 	return l.WithField("otel", traces)
 }
 
-func (l *Logger) Logf(level logrus.Level, format string, args ...interface{}) {
+func (l *Logger) Logf(level logrus.Level, format string, args ...any) {
 	if !l.leakSensitive {
 		for i, arg := range args {
 			switch urlArg := arg.(type) {
@@ -165,40 +157,32 @@ func (l *Logger) Logf(level logrus.Level, format string, args ...interface{}) {
 	l.Entry.Logf(level, format, args...)
 }
 
-func (l *Logger) Tracef(format string, args ...interface{}) {
+func (l *Logger) Tracef(format string, args ...any) {
 	l.Logf(logrus.TraceLevel, format, args...)
 }
 
-func (l *Logger) Debugf(format string, args ...interface{}) {
+func (l *Logger) Debugf(format string, args ...any) {
 	l.Logf(logrus.DebugLevel, format, args...)
 }
 
-func (l *Logger) Infof(format string, args ...interface{}) {
+func (l *Logger) Infof(format string, args ...any) {
 	l.Logf(logrus.InfoLevel, format, args...)
 }
 
-func (l *Logger) Printf(format string, args ...interface{}) {
-	l.Infof(format, args...)
-}
-
-func (l *Logger) Warnf(format string, args ...interface{}) {
+func (l *Logger) Warnf(format string, args ...any) {
 	l.Logf(logrus.WarnLevel, format, args...)
 }
 
-func (l *Logger) Warningf(format string, args ...interface{}) {
-	l.Warnf(format, args...)
-}
-
-func (l *Logger) Errorf(format string, args ...interface{}) {
+func (l *Logger) Errorf(format string, args ...any) {
 	l.Logf(logrus.ErrorLevel, format, args...)
 }
 
-func (l *Logger) Fatalf(format string, args ...interface{}) {
+func (l *Logger) Fatalf(format string, args ...any) {
 	l.Logf(logrus.FatalLevel, format, args...)
 	l.Entry.Logger.Exit(1)
 }
 
-func (l *Logger) Panicf(format string, args ...interface{}) {
+func (l *Logger) Panicf(format string, args ...any) {
 	l.Logf(logrus.PanicLevel, format, args...)
 }
 
@@ -208,13 +192,13 @@ func (l *Logger) WithFields(f logrus.Fields) *Logger {
 	return &ll
 }
 
-func (l *Logger) WithField(key string, value interface{}) *Logger {
+func (l *Logger) WithField(key string, value any) *Logger {
 	ll := *l
 	ll.Entry = l.Entry.WithField(key, value)
 	return &ll
 }
 
-func (l *Logger) maybeRedact(value interface{}) interface{} {
+func (l *Logger) maybeRedact(value any) any {
 	if fmt.Sprintf("%v", value) == "" || value == nil {
 		return nil
 	}
@@ -224,7 +208,7 @@ func (l *Logger) maybeRedact(value interface{}) interface{} {
 	return value
 }
 
-func (l *Logger) WithSensitiveField(key string, value interface{}) *Logger {
+func (l *Logger) WithSensitiveField(key string, value any) *Logger {
 	return l.WithField(key, l.maybeRedact(value))
 }
 
@@ -233,7 +217,7 @@ func (l *Logger) WithError(err error) *Logger {
 		return l
 	}
 
-	ctx := map[string]interface{}{"message": err.Error()}
+	ctx := map[string]any{"message": err.Error()}
 	if l.Entry.Logger.IsLevelEnabled(logrus.DebugLevel) {
 		if e, ok := err.(errorsx.StackTracer); ok {
 			ctx["stack_trace"] = fmt.Sprintf("%+v", e.StackTrace())
@@ -261,21 +245,6 @@ func (l *Logger) WithError(err error) *Logger {
 	}
 
 	return l.WithField("error", ctx)
-}
-
-var popLevelTranslations = map[logging.Level]logrus.Level{
-	// logging.SQL:   logrus.TraceLevel, we never want to log SQL statements, see https://github.com/ory/keto/issues/454
-	logging.Debug: logrus.DebugLevel,
-	logging.Info:  logrus.InfoLevel,
-	logging.Warn:  logrus.WarnLevel,
-	logging.Error: logrus.ErrorLevel,
-}
-
-func (l *Logger) PopLogger(lvl logging.Level, s string, args ...interface{}) {
-	level, ok := popLevelTranslations[lvl]
-	if ok {
-		l.WithField("source", "pop").Logf(level, s, args...)
-	}
 }
 
 func (l *Logger) StdLogger(lvl logrus.Level) *log.Logger {

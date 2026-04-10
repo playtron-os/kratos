@@ -4,6 +4,7 @@
 package webauthnx
 
 import (
+	"cmp"
 	"crypto/sha512"
 	_ "embed"
 	"encoding/base64"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/ory/kratos/x/webauthnx/js"
 
-	"github.com/ory/x/stringsx"
 	"github.com/ory/x/urlx"
 
 	"github.com/ory/kratos/identity"
@@ -73,7 +73,7 @@ func NewWebAuthnUnlink(c *identity.CredentialWebAuthn, opts ...node.InputAttribu
 		node.WebAuthnGroup,
 		node.InputAttributeTypeSubmit,
 		opts...,
-	).WithMetaLabel(text.NewInfoSelfServiceRemoveWebAuthn(stringsx.Coalesce(c.DisplayName, "unnamed"), c.AddedAt))
+	).WithMetaLabel(text.NewInfoSelfServiceRemoveWebAuthn(cmp.Or(c.DisplayName, "unnamed"), c.AddedAt))
 }
 
 func NewPasskeyUnlink(c *identity.CredentialWebAuthn, opts ...node.InputAttributesModifier) *node.Node {
@@ -83,5 +83,5 @@ func NewPasskeyUnlink(c *identity.CredentialWebAuthn, opts ...node.InputAttribut
 		node.PasskeyGroup,
 		node.InputAttributeTypeSubmit,
 		opts...,
-	).WithMetaLabel(text.NewInfoSelfServiceRemovePasskey(stringsx.Coalesce(c.DisplayName, "unnamed"), c.AddedAt))
+	).WithMetaLabel(text.NewInfoSelfServiceRemovePasskey(cmp.Or(c.DisplayName, "unnamed"), c.AddedAt))
 }

@@ -5,6 +5,7 @@ package oidc
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -12,10 +13,12 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/tidwall/sjson"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/continuity"
+	oidcv1 "github.com/ory/kratos/gen/oidc/v1"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/login"
@@ -29,17 +32,12 @@ import (
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/sqlcon"
 	"github.com/ory/x/sqlxx"
-	"github.com/ory/x/stringsx"
 )
 
 var (
-	_ login.FormHydrator = new(Strategy)
-	_ login.Strategy     = new(Strategy)
+	_ login.AAL1FormHydrator = (*Strategy)(nil)
+	_ login.Strategy         = (*Strategy)(nil)
 )
-
-func (s *Strategy) RegisterLoginRoutes(r *x.RouterPublic) {
-	s.setRoutes(r)
-}
 
 // Update Login Flow with OpenID Connect Method
 //
@@ -70,6 +68,7 @@ type UpdateLoginFlowWithOidcMethod struct {
 	// - `login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.
 	// - `hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.
 	// - `prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.
+	// - `acr_values` (string): The `acr_values` specifies the Authentication Context Class Reference values for the authorization request.
 	//
 	// required: false
 	UpstreamParameters json.RawMessage `json:"upstream_parameters"`
@@ -99,7 +98,7 @@ type UpdateLoginFlowWithOidcMethod struct {
 	TransientPayload json.RawMessage `json:"transient_payload,omitempty" form:"transient_payload"`
 }
 
-func (s *Strategy) handleConflictingIdentity(ctx context.Context, w http.ResponseWriter, r *http.Request, loginFlow *login.Flow, token *identity.CredentialsOIDCEncryptedTokens, claims *Claims, provider Provider, container *AuthCodeContainer) (verdict ConflictingIdentityVerdict, id *identity.Identity, credentials *identity.Credentials, err error) {
+func (s *Strategy) handleConflictingIdentity(ctx context.Context, loginFlow *login.Flow, token *identity.CredentialsOIDCEncryptedTokens, claims *Claims, provider Provider, container *AuthCodeContainer) (verdict ConflictingIdentityVerdict, id *identity.Identity, credentials *identity.Credentials, err error) {
 	if s.conflictingIdentityPolicy == nil {
 		return ConflictingIdentityVerdictReject, nil, nil, nil
 	}
@@ -167,7 +166,7 @@ func (s *Strategy) ProcessLogin(ctx context.Context, w http.ResponseWriter, r *h
 	if err != nil {
 		if errors.Is(err, sqlcon.ErrNoRows) {
 			var verdict ConflictingIdentityVerdict
-			verdict, i, c, err = s.handleConflictingIdentity(ctx, w, r, loginFlow, token, claims, provider, container)
+			verdict, i, c, err = s.handleConflictingIdentity(ctx, loginFlow, token, claims, provider, container)
 			switch verdict {
 			case ConflictingIdentityVerdictMerge:
 				// Do nothing
@@ -240,7 +239,7 @@ func (s *Strategy) ProcessLogin(ctx context.Context, w http.ResponseWriter, r *h
 
 	var oidcCredentials identity.CredentialsOIDC
 	if err := json.NewDecoder(bytes.NewBuffer(c.Config)).Decode(&oidcCredentials); err != nil {
-		return nil, s.HandleError(ctx, w, r, loginFlow, provider.Config().ID, nil, errors.WithStack(herodot.ErrInternalServerError.WithReason("The OpenID Connect credentials could not be decoded properly").WithDebug(err.Error())))
+		return nil, s.HandleError(ctx, w, r, loginFlow, provider.Config().ID, nil, x.WrapWithIdentityIDError(errors.WithStack(herodot.ErrInternalServerError.WithReason("The OpenID Connect credentials could not be decoded properly").WithDebug(err.Error())), i.ID))
 	}
 
 	sess := session.NewInactiveSession()
@@ -249,13 +248,13 @@ func (s *Strategy) ProcessLogin(ctx context.Context, w http.ResponseWriter, r *h
 	for _, c := range oidcCredentials.Providers {
 		if c.Subject == claims.Subject && c.Provider == provider.Config().ID {
 			if err = s.d.LoginHookExecutor().PostLoginHook(w, r, node.OpenIDConnectGroup, loginFlow, i, sess, provider.Config().ID); err != nil {
-				return nil, s.HandleError(ctx, w, r, loginFlow, provider.Config().ID, nil, err)
+				return nil, x.WrapWithIdentityIDError(s.HandleError(ctx, w, r, loginFlow, provider.Config().ID, nil, err), i.ID)
 			}
 			return nil, nil
 		}
 	}
 
-	return nil, s.HandleError(ctx, w, r, loginFlow, provider.Config().ID, nil, errors.WithStack(herodot.ErrInternalServerError.WithReason("Unable to find matching OpenID Connect credentials.").WithDebugf(`Unable to find credentials that match the given provider "%s" and subject "%s".`, provider.Config().ID, claims.Subject)))
+	return nil, s.HandleError(ctx, w, r, loginFlow, provider.Config().ID, nil, x.WrapWithIdentityIDError(errors.WithStack(herodot.ErrInternalServerError.WithReason("Unable to find matching OpenID Connect credentials.").WithDebugf(`Unable to find credentials that match the given provider "%s" and subject "%s".`, provider.Config().ID, claims.Subject)), i.ID))
 }
 
 func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, _ *session.Session) (i *identity.Identity, err error) {
@@ -284,7 +283,7 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 
 	if !strings.EqualFold(strings.ToLower(p.Method), s.SettingsStrategyID()) && p.Method != "" {
 		// the user is sending a method that is not oidc, but the payload includes a provider
-		s.d.Audit().
+		s.d.Logger().
 			WithRequest(r).
 			WithField("provider", p.Provider).
 			WithField("method", p.Method).
@@ -302,7 +301,7 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 		return nil, s.HandleError(ctx, w, r, f, pid, nil, err)
 	}
 
-	req, err := s.validateFlow(ctx, r, f.ID)
+	req, err := s.validateFlow(ctx, r, f.ID, oidcv1.FlowKind_FLOW_KIND_LOGIN)
 	if err != nil {
 		return nil, s.HandleError(ctx, w, r, f, pid, nil, err)
 	}
@@ -322,13 +321,15 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 			FlowID: f.ID.String(),
 			Traits: p.Traits,
 		})
-		if err != nil {
+		if errors.Is(err, flow.ErrCompletedByStrategy) {
+			return nil, err
+		} else if err != nil {
 			return nil, s.HandleError(ctx, w, r, f, pid, nil, err)
 		}
 		return nil, errors.WithStack(flow.ErrCompletedByStrategy)
 	}
 
-	state, pkce, err := s.GenerateState(ctx, provider, f.ID)
+	state, pkce, err := s.GenerateState(ctx, provider, f)
 	if err != nil {
 		return nil, s.HandleError(ctx, w, r, f, pid, nil, err)
 	}
@@ -344,9 +345,22 @@ func (s *Strategy) Login(w http.ResponseWriter, r *http.Request, f *login.Flow, 
 		return nil, s.HandleError(ctx, w, r, f, pid, nil, err)
 	}
 
+	// For API/native flows, persist TransientPayload in InternalContext so it
+	// survives the OIDC redirect. Browser flows restore it from the continuity
+	// cookie instead, which is not available in native flows because the
+	// callback comes from a different user agent (system browser/webview).
+	if f.Type == flow.TypeAPI && len(f.TransientPayload) > 0 {
+		f.EnsureInternalContext()
+		ic, err := sjson.SetRawBytes(f.InternalContext, "transient_payload", f.TransientPayload)
+		if err != nil {
+			return nil, s.HandleError(ctx, w, r, f, pid, nil, err)
+		}
+		f.InternalContext = ic
+	}
+
 	f.Active = s.ID()
 	if err = s.d.LoginFlowPersister().UpdateLoginFlow(ctx, f); err != nil {
-		return nil, s.HandleError(ctx, w, r, f, pid, nil, errors.WithStack(herodot.ErrInternalServerError.WithReason("Could not update flow").WithDebug(err.Error())))
+		return nil, s.HandleError(ctx, w, r, f, pid, nil, errors.WithStack(herodot.ErrInternalServerError.WithReason("Could not update flow").WithWrap(err)))
 	}
 
 	var up map[string]string
@@ -404,14 +418,6 @@ func (s *Strategy) PopulateLoginMethodFirstFactorRefresh(r *http.Request, lf *lo
 
 func (s *Strategy) PopulateLoginMethodFirstFactor(r *http.Request, f *login.Flow) error {
 	return s.populateMethod(r, f, text.NewInfoLoginWith)
-}
-
-func (s *Strategy) PopulateLoginMethodSecondFactor(*http.Request, *login.Flow) error {
-	return nil
-}
-
-func (s *Strategy) PopulateLoginMethodSecondFactorRefresh(*http.Request, *login.Flow) error {
-	return nil
 }
 
 func (s *Strategy) removeProviders(conf *ConfigurationCollection, f *login.Flow) {
@@ -485,7 +491,7 @@ func (s *Strategy) PopulateLoginMethodIdentifierFirstCredentials(r *http.Request
 			if lc.OrganizationID != "" {
 				continue
 			}
-			AddProvider(f.UI, lc.ID, text.NewInfoLoginWith(stringsx.Coalesce(lc.Label, lc.ID), lc.ID), s.ID())
+			AddProvider(f.UI, lc.ID, text.NewInfoLoginWith(cmp.Or(lc.Label, lc.ID), lc.ID), s.ID())
 		}
 	}
 

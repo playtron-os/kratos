@@ -29,7 +29,7 @@ type SMTPClient struct {
 func NewSMTPClient(deps Dependencies, cfg *config.SMTPConfig) (*SMTPClient, error) {
 	uri, err := url.Parse(cfg.ConnectionURI)
 	if err != nil {
-		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("The SMTP connection URI is malformed. Please contact a system administrator."))
+		return nil, errors.WithStack(herodot.ErrMisconfiguration.WithReasonf("The SMTP connection URI is malformed. Please contact a system administrator."))
 	}
 
 	var tlsCertificates []tls.Certificate
@@ -67,7 +67,7 @@ func NewSMTPClient(deps Dependencies, cfg *config.SMTPConfig) (*SMTPClient, erro
 	}
 
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: sslSkipVerify, //#nosec G402 -- This is ok (and required!) because it is configurable and disabled by default.
+		InsecureSkipVerify: sslSkipVerify, // #nosec G402 -- This is ok (and required!) because it is configurable and disabled by default.
 		Certificates:       tlsCertificates,
 		ServerName:         serverName,
 		MinVersion:         tls.VersionTLS12,
@@ -99,40 +99,49 @@ func NewSMTPClient(deps Dependencies, cfg *config.SMTPConfig) (*SMTPClient, erro
 func (c *courier) QueueEmail(ctx context.Context, t EmailTemplate) (uuid.UUID, error) {
 	recipient, err := t.EmailRecipient()
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, errors.WithStack(err)
 	}
 	if _, err := mail.ParseAddress(recipient); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, errors.WithStack(err)
 	}
 
 	subject, err := t.EmailSubject(ctx)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, errors.WithStack(err)
 	}
 
 	bodyPlaintext, err := t.EmailBodyPlaintext(ctx)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, errors.WithStack(err)
 	}
 
 	templateData, err := json.Marshal(t)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, errors.WithStack(err)
+	}
+
+	requestHeaders := []byte(`{}`)
+	if t, ok := t.(RequestHeadersCarrier); ok {
+		requestHeaders, err = json.Marshal(t.RequestHeaders())
+		if err != nil {
+			return uuid.Nil, err
+		}
 	}
 
 	message := &Message{
-		Status:       MessageStatusQueued,
-		Type:         MessageTypeEmail,
-		Channel:      "email",
-		Recipient:    recipient,
-		Body:         bodyPlaintext,
-		Subject:      subject,
-		TemplateType: t.TemplateType(),
-		TemplateData: templateData,
+		Status:         MessageStatusQueued,
+		Type:           MessageTypeEmail,
+		Channel:        "email",
+		Recipient:      recipient,
+		Body:           bodyPlaintext,
+		Subject:        subject,
+		TemplateType:   t.TemplateType(),
+		TemplateData:   templateData,
+		RequestHeaders: requestHeaders,
 	}
 
 	if err := c.deps.CourierPersister().AddMessage(ctx, message); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, errors.WithStack(err)
 	}
 
 	return message.ID, nil

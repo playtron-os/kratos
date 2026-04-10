@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 
 	"golang.org/x/oauth2/spotify"
 
@@ -14,7 +15,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/ory/x/httpx"
-	"github.com/ory/x/stringslice"
+
 	"github.com/ory/x/stringsx"
 
 	spotifyapi "github.com/zmb3/spotify/v2"
@@ -65,7 +66,7 @@ func (g *ProviderSpotify) AuthCodeURLOptions(r ider) []oauth2.AuthCodeOption {
 func (g *ProviderSpotify) Claims(ctx context.Context, exchange *oauth2.Token, query url.Values) (*Claims, error) {
 	grantedScopes := stringsx.Splitx(fmt.Sprintf("%s", exchange.Extra("scope")), " ")
 	for _, check := range g.Config().Scope {
-		if !stringslice.Has(grantedScopes, check) {
+		if !slices.Contains(grantedScopes, check) {
 			return nil, errors.WithStack(ErrScopeMissing)
 		}
 	}
@@ -79,7 +80,7 @@ func (g *ProviderSpotify) Claims(ctx context.Context, exchange *oauth2.Token, qu
 
 	user, err := spotifyClient.CurrentUser(ctx)
 	if err != nil {
-		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("%s", err))
+		return nil, errors.WithStack(herodot.ErrUpstreamError.WithWrap(err).WithReasonf("%s", err))
 	}
 
 	var userPicture string

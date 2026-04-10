@@ -24,18 +24,6 @@ type noInternalIPRoundTripper struct {
 	internalIPExceptions        []string
 }
 
-// NewNoInternalIPRoundTripper creates a RoundTripper that disallows
-// non-publicly routable IP addresses, except for URLs matching the given
-// exception globs.
-// Deprecated: Use ResilientClientDisallowInternalIPs instead.
-func NewNoInternalIPRoundTripper(exceptions []string) http.RoundTripper {
-	return &noInternalIPRoundTripper{
-		onWhitelist:          allowInternalAllowIPv6,
-		notOnWhitelist:       prohibitInternalAllowIPv6,
-		internalIPExceptions: exceptions,
-	}
-}
-
 // RoundTrip implements http.RoundTripper.
 func (n noInternalIPRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	incoming := IncomingRequestURL(request)
@@ -55,10 +43,8 @@ func (n noInternalIPRoundTripper) RoundTrip(request *http.Request) (*http.Respon
 }
 
 var (
-	prohibitInternalAllowIPv6    http.RoundTripper
-	prohibitInternalProhibitIPv6 http.RoundTripper
-	allowInternalAllowIPv6       http.RoundTripper
-	allowInternalProhibitIPv6    http.RoundTripper
+	prohibitInternalAllowIPv6 http.RoundTripper
+	allowInternalAllowIPv6    http.RoundTripper
 )
 
 func init() {
@@ -67,7 +53,7 @@ func init() {
 		ssrf.WithAnyPort(),
 		ssrf.WithNetworks("tcp4", "tcp6"),
 	).Safe
-	prohibitInternalAllowIPv6 = otelTransport(t)
+	prohibitInternalAllowIPv6 = OTELTraceTransport(t)
 }
 
 func init() {
@@ -79,7 +65,6 @@ func init() {
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return d.DialContext(ctx, "tcp4", addr)
 	}
-	prohibitInternalProhibitIPv6 = otelTransport(t)
 }
 
 func init() {
@@ -99,7 +84,7 @@ func init() {
 			netip.MustParsePrefix("fc00::/7"), // Unique Local (RFC 4193)
 		),
 	).Safe
-	allowInternalAllowIPv6 = otelTransport(t)
+	allowInternalAllowIPv6 = OTELTraceTransport(t)
 }
 
 func init() {
@@ -122,7 +107,6 @@ func init() {
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return d.DialContext(ctx, "tcp4", addr)
 	}
-	allowInternalProhibitIPv6 = otelTransport(t)
 }
 
 func newDefaultTransport() (*http.Transport, *net.Dialer) {
@@ -141,7 +125,8 @@ func newDefaultTransport() (*http.Transport, *net.Dialer) {
 	}, &dialer
 }
 
-func otelTransport(t *http.Transport) http.RoundTripper {
+// OTELTraceTransport wraps the given http.Transport with OpenTelemetry instrumentation.
+func OTELTraceTransport(t *http.Transport) http.RoundTripper {
 	return otelhttp.NewTransport(t, otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
 		return otelhttptrace.NewClientTrace(ctx, otelhttptrace.WithoutHeaders(), otelhttptrace.WithoutSubSpans())
 	}))

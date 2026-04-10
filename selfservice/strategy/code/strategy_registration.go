@@ -26,8 +26,10 @@ import (
 	"github.com/ory/x/urlx"
 )
 
-var _ registration.Strategy = new(Strategy)
-var _ registration.FormHydrator = new(Strategy)
+var (
+	_ registration.Strategy     = new(Strategy)
+	_ registration.FormHydrator = new(Strategy)
+)
 
 // Update Registration Flow with Code Method
 //
@@ -67,8 +69,6 @@ type updateRegistrationFlowWithCodeMethod struct {
 func (p *updateRegistrationFlowWithCodeMethod) GetResend() string {
 	return p.Resend
 }
-
-func (s *Strategy) RegisterRegistrationRoutes(*x.RouterPublic) {}
 
 func (s *Strategy) HandleRegistrationError(ctx context.Context, r *http.Request, f *registration.Flow, body *updateRegistrationFlowWithCodeMethod, err error) error {
 	if errors.Is(err, flow.ErrCompletedByStrategy) {
@@ -184,7 +184,7 @@ func (s *Strategy) Register(w http.ResponseWriter, r *http.Request, f *registrat
 	}
 
 	var p updateRegistrationFlowWithCodeMethod
-	if err := registration.DecodeBody(&p, r, s.dx, s.deps.Config(), registrationSchema, ds); err != nil {
+	if err := registration.DecodeBody(&p, r, registrationSchema, ds); err != nil {
 		return s.HandleRegistrationError(ctx, r, f, &p, err)
 	}
 
@@ -238,7 +238,7 @@ func (s *Strategy) registrationSendEmail(ctx context.Context, w http.ResponseWri
 
 	// kratos only supports `email` identifiers at the moment with the code method
 	// this is validated in the identity validation step above
-	if err := s.deps.CodeSender().SendCode(ctx, f, i, addresses...); err != nil {
+	if err := s.deps.CodeSender().SendCode(ctx, f, i, r.Header, addresses...); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -255,6 +255,14 @@ func (s *Strategy) registrationSendEmail(ctx context.Context, w http.ResponseWri
 	f.Active = identity.CredentialsTypeCodeAuth
 	if err := s.deps.RegistrationFlowPersister().UpdateRegistrationFlow(ctx, f); err != nil {
 		return errors.WithStack(err)
+	}
+
+	if f.OAuth2LoginChallenge != "" {
+		hlr, err := s.deps.Hydra().GetLoginRequest(ctx, string(f.OAuth2LoginChallenge))
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		f.HydraLoginRequest = hlr
 	}
 
 	if x.IsJSONRequest(r) {

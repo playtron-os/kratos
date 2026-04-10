@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tidwall/sjson"
 
@@ -19,7 +18,7 @@ import (
 func PrettifyJSONPayload(t testing.TB, payload interface{}) string {
 	t.Helper()
 	o, err := json.MarshalIndent(payload, "", "  ")
-	require.NoError(t, err)
+	require.NoErrorf(t, err, "%+v", payload)
 	return string(o)
 }
 
@@ -56,10 +55,4 @@ func EqualAsJSONExcept(t testing.TB, expected, actual interface{}, except []stri
 	}
 
 	assert.JSONEq(t, strings.TrimSpace(ebs), strings.TrimSpace(abs), args...)
-}
-
-// Deprecated: use assert.WithinDuration instead
-func TimeDifferenceLess(t testing.TB, t1, t2 time.Time, seconds int) {
-	t.Helper()
-	assert.WithinDuration(t, t1, t2, time.Duration(seconds)*time.Second)
 }

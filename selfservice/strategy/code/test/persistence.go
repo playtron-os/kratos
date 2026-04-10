@@ -17,8 +17,8 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal/testhelpers"
 	"github.com/ory/kratos/persistence"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/strategy/code"
@@ -47,7 +47,7 @@ func TestPersister(ctx context.Context, p interface {
 				var i identity.Identity
 				require.NoError(t, faker.FakeData(&i))
 
-				address := &identity.RecoveryAddress{Value: email, Via: identity.RecoveryAddressTypeEmail, IdentityID: i.ID}
+				address := &identity.RecoveryAddress{Value: email, Via: identity.AddressTypeEmail, IdentityID: i.ID}
 				i.RecoveryAddresses = append(i.RecoveryAddresses, *address)
 
 				require.NoError(t, p.CreateIdentity(ctx, &i))
@@ -106,7 +106,7 @@ func TestPersister(ctx context.Context, p interface {
 				require.NoError(t, err)
 
 				_, err = p.UseRecoveryCode(ctx, f.ID, dto.RawCode)
-				assert.Error(t, err)
+				require.ErrorIs(t, err, code.ErrCodeNotFound)
 			})
 
 			t.Run("case=should increment flow submit count and fail after too many tries (default limit)", func(t *testing.T) {

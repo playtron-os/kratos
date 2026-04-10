@@ -7,45 +7,45 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/ory/kratos/x/nosurfx"
-
 	"github.com/gofrs/uuid"
-
-	"github.com/ory/x/ioutilx"
-	"github.com/ory/x/jsonx"
-	"github.com/ory/x/snapshotx"
-
-	"github.com/ory/kratos/ui/node"
-
-	"github.com/gobuffalo/httptest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
-	"github.com/ory/x/assertx"
-	"github.com/ory/x/urlx"
+	"github.com/ory/x/configx"
 
 	"github.com/ory/herodot"
-
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/text"
+	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/x/assertx"
+	"github.com/ory/x/ioutilx"
+	"github.com/ory/x/jsonx"
+	"github.com/ory/x/snapshotx"
+	"github.com/ory/x/urlx"
 )
 
 func TestHandleError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryEnabled, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryUse, "code")
+	conf, reg := pkg.NewFastRegistryWithMocks(t,
+		configx.WithValues(map[string]any{
+			config.ViperKeySelfServiceRecoveryEnabled: true,
+			config.ViperKeySelfServiceRecoveryUse:     "code",
+		}),
+	)
 
 	public, _ := testhelpers.NewKratosServer(t, reg)
 
@@ -74,7 +74,7 @@ func TestHandleError(t *testing.T) {
 
 	newFlow := func(t *testing.T, ttl time.Duration, ft flow.Type) *recovery.Flow {
 		req := &http.Request{URL: urlx.ParseOrPanic("/")}
-		s, err := reg.GetActiveRecoveryStrategy(context.Background())
+		s, _, err := reg.GetActiveRecoveryStrategies(context.Background())
 		require.NoError(t, err)
 		f, err := recovery.NewFlow(conf, ttl, nosurfx.FakeCSRFToken, req, s, ft)
 		require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestHandleError(t *testing.T) {
 	expectErrorUI := func(t *testing.T) (map[string]interface{}, *http.Response) {
 		res, err := ts.Client().Get(ts.URL + "/error")
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
 		sse, _, err := sdk.FrontendAPI.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
@@ -116,7 +116,7 @@ func TestHandleError(t *testing.T) {
 
 		res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		assert.Contains(t, res.Header.Get("Content-Type"), "application/json")
 		assert.NotContains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
@@ -142,7 +142,7 @@ func TestHandleError(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Contains(t, res.Request.URL.String(), public.URL+recovery.RouteGetFlow)
 				require.Equal(t, http.StatusOK, res.StatusCode, "%+v", res.Request)
 
@@ -161,7 +161,7 @@ func TestHandleError(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -179,7 +179,7 @@ func TestHandleError(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusInternalServerError, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -188,17 +188,17 @@ func TestHandleError(t *testing.T) {
 			})
 
 			t.Run("case=fails if active strategy is disabled", func(t *testing.T) {
-				c, reg := internal.NewVeryFastRegistryWithoutDB(t)
-				c.Set(context.Background(), "selfservice.methods.code.enabled", false)
-				c.Set(context.Background(), config.ViperKeySelfServiceRecoveryUse, "code")
-				_, err := reg.GetActiveRecoveryStrategy(context.Background())
+				c, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+				require.NoError(t, c.Set(context.Background(), "selfservice.methods.code.enabled", false))
+				require.NoError(t, c.Set(context.Background(), config.ViperKeySelfServiceRecoveryUse, "code"))
+				_, _, err := reg.GetActiveRecoveryStrategies(context.Background())
 				recoveryFlow = newFlow(t, time.Minute, tc.t)
 				flowError = err
 				methodName = node.UiNodeGroup(recovery.RecoveryStrategyLink)
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -213,7 +213,7 @@ func TestHandleError(t *testing.T) {
 		expectRecoveryUI := func(t *testing.T) (*recovery.Flow, *http.Response) {
 			res, err := ts.Client().Get(ts.URL + "/error")
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowRecoveryUI(ctx).String()+"?flow=")
 
 			rf, err := reg.RecoveryFlowPersister().GetRecoveryFlow(context.Background(), uuid.FromStringOrNil(res.Request.URL.Query().Get("flow")))
@@ -299,11 +299,16 @@ func TestHandleError(t *testing.T) {
 }
 
 func TestHandleError_WithContinueWith(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	conf.MustSet(ctx, config.ViperKeyUseContinueWithTransitions, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryEnabled, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceRecoveryUse, "code")
+	conf, reg := pkg.NewFastRegistryWithMocks(t,
+		configx.WithValues(map[string]any{
+			config.ViperKeyUseContinueWithTransitions: true,
+			config.ViperKeySelfServiceRecoveryEnabled: true,
+			config.ViperKeySelfServiceRecoveryUse:     "code",
+		}),
+	)
 
 	public, _ := testhelpers.NewKratosServer(t, reg)
 
@@ -332,7 +337,7 @@ func TestHandleError_WithContinueWith(t *testing.T) {
 
 	newFlow := func(t *testing.T, ttl time.Duration, ft flow.Type) *recovery.Flow {
 		req := &http.Request{URL: urlx.ParseOrPanic("/")}
-		s, err := reg.GetActiveRecoveryStrategy(context.Background())
+		s, _, err := reg.GetActiveRecoveryStrategies(context.Background())
 		require.NoError(t, err)
 		f, err := recovery.NewFlow(conf, ttl, nosurfx.FakeCSRFToken, req, s, ft)
 		require.NoError(t, err)
@@ -345,7 +350,7 @@ func TestHandleError_WithContinueWith(t *testing.T) {
 	expectErrorUI := func(t *testing.T) (map[string]interface{}, *http.Response) {
 		res, err := ts.Client().Get(ts.URL + "/error")
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		require.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
 		sse, _, err := sdk.FrontendAPI.GetFlowError(context.Background()).Id(res.Request.URL.Query().Get("id")).Execute()
@@ -374,7 +379,7 @@ func TestHandleError_WithContinueWith(t *testing.T) {
 
 		res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		assert.Contains(t, res.Header.Get("Content-Type"), "application/json")
 		assert.NotContains(t, res.Request.URL.String(), conf.SelfServiceFlowErrorURL(ctx).String()+"?id=")
 
@@ -427,7 +432,7 @@ func TestHandleError_WithContinueWith(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -445,7 +450,7 @@ func TestHandleError_WithContinueWith(t *testing.T) {
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusInternalServerError, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -454,17 +459,17 @@ func TestHandleError_WithContinueWith(t *testing.T) {
 			})
 
 			t.Run("case=fails if active strategy is disabled", func(t *testing.T) {
-				c, reg := internal.NewVeryFastRegistryWithoutDB(t)
-				c.Set(context.Background(), "selfservice.methods.code.enabled", false)
-				c.Set(context.Background(), config.ViperKeySelfServiceRecoveryUse, "code")
-				_, err := reg.GetActiveRecoveryStrategy(context.Background())
+				c, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+				require.NoError(t, c.Set(context.Background(), "selfservice.methods.code.enabled", false))
+				require.NoError(t, c.Set(context.Background(), config.ViperKeySelfServiceRecoveryUse, "code"))
+				_, _, err := reg.GetActiveRecoveryStrategies(context.Background())
 				recoveryFlow = newFlow(t, time.Minute, tc.t)
 				flowError = err
 				methodName = node.UiNodeGroup(recovery.RecoveryStrategyLink)
 
 				res, err := ts.Client().Do(testhelpers.NewHTTPGetJSONRequest(t, ts.URL+"/error"))
 				require.NoError(t, err)
-				defer res.Body.Close()
+				defer func() { _ = res.Body.Close() }()
 				require.Equal(t, http.StatusBadRequest, res.StatusCode)
 
 				body, err := io.ReadAll(res.Body)
@@ -479,7 +484,7 @@ func TestHandleError_WithContinueWith(t *testing.T) {
 		expectRecoveryUI := func(t *testing.T) (*recovery.Flow, *http.Response) {
 			res, err := ts.Client().Get(ts.URL + "/error")
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			assert.Contains(t, res.Request.URL.String(), conf.SelfServiceFlowRecoveryUI(ctx).String()+"?flow=")
 
 			rf, err := reg.RecoveryFlowPersister().GetRecoveryFlow(context.Background(), uuid.FromStringOrNil(res.Request.URL.Query().Get("flow")))

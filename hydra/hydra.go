@@ -14,6 +14,7 @@ import (
 	"github.com/gofrs/uuid"
 
 	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
 	"github.com/ory/x/sqlxx"
 
 	"github.com/pkg/errors"
@@ -23,16 +24,15 @@ import (
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/session"
-	"github.com/ory/kratos/x"
 )
 
 type (
 	hydraDependencies interface {
 		config.Provider
-		x.HTTPClientProvider
+		httpx.ClientProvider
+		logrusx.Provider
 		session.ManagementProvider
 		session.PersistenceProvider
-		x.LoggingProvider
 		identity.ManagementProvider
 		identity.PoolProvider
 	}
@@ -66,7 +66,7 @@ func GetLoginChallengeID(conf *config.Config, r *http.Request) (sqlxx.NullString
 	if !r.URL.Query().Has("login_challenge") {
 		return "", nil
 	} else if conf.OAuth2ProviderURL(r.Context()) == nil {
-		return "", errors.WithStack(herodot.ErrInternalServerError.WithReason("refusing to parse login_challenge query parameter because " + config.ViperKeyOAuth2ProviderURL + " is invalid or unset"))
+		return "", errors.WithStack(herodot.ErrMisconfiguration.WithReason("refusing to parse login_challenge query parameter because " + config.ViperKeyOAuth2ProviderURL + " is invalid or unset"))
 	}
 
 	loginChallenge := r.URL.Query().Get("login_challenge")
@@ -80,7 +80,7 @@ func GetLoginChallengeID(conf *config.Config, r *http.Request) (sqlxx.NullString
 func (h *DefaultHydra) getAdminURL(ctx context.Context) (string, error) {
 	u := h.d.Config().OAuth2ProviderURL(ctx)
 	if u == nil {
-		return "", errors.WithStack(herodot.ErrInternalServerError.WithReason(config.ViperKeyOAuth2ProviderURL + " is not configured"))
+		return "", errors.WithStack(herodot.ErrMisconfiguration.WithReason(config.ViperKeyOAuth2ProviderURL + " is not configured"))
 	}
 	return u.String(), nil
 }
@@ -137,7 +137,7 @@ func (h *DefaultHydra) AcceptLoginRequest(ctx context.Context, params AcceptLogi
 		if aalErr.PassReturnToAndLoginChallengeParametersDirect(params.LoginChallenge, params.ReturnTo) != nil {
 			_ = aalErr.WithDetail("pass_request_params_error", "failed to pass request parameters to aalErr.RedirectTo")
 		}
-		h.d.Audit().WithError(err).Warnf("Session was found but AAL is not satisfied for logging in with hydra for Identity=%s.", sess.IdentityID)
+		h.d.Logger().WithField("audience", "audit").WithError(err).Warnf("Session was found but AAL is not satisfied for logging in with hydra for Identity=%s.", sess.IdentityID)
 		return aalErr.RedirectTo, nil
 	}
 

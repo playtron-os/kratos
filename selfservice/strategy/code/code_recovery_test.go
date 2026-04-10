@@ -5,25 +5,24 @@ package code_test
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/selfservice/strategy/code"
-	"github.com/ory/kratos/x"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ory/x/urlx"
-
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
+	"github.com/ory/kratos/selfservice/strategy/code"
+	"github.com/ory/kratos/x"
+	"github.com/ory/x/urlx"
 )
 
 func TestRecoveryCode(t *testing.T) {
-	conf, _ := internal.NewFastRegistryWithMocks(t)
+	conf := pkg.NewConfigurationWithDefaults(t)
 
 	newCode := func(expiresIn time.Duration, f *recovery.Flow) *code.RecoveryCode {
 		return &code.RecoveryCode{
@@ -37,13 +36,20 @@ func TestRecoveryCode(t *testing.T) {
 	t.Run("method=Validate", func(t *testing.T) {
 		t.Parallel()
 
-		t.Run("case=returns error if flow is expired", func(t *testing.T) {
+		t.Run("case=returns ErrCodeNotFound if code is expired", func(t *testing.T) {
 			f, err := recovery.NewFlow(conf, -time.Hour, "", req, nil, flow.TypeBrowser)
 			require.NoError(t, err)
 
 			c := newCode(-time.Hour, f)
-			expected := new(flow.ExpiredError)
-			require.ErrorAs(t, c.Validate(), &expected)
+			require.ErrorIs(t, c.Validate(), code.ErrCodeNotFound)
+		})
+		t.Run("case=expired code does not return flow.ExpiredError", func(t *testing.T) {
+			f, err := recovery.NewFlow(conf, -time.Hour, "", req, nil, flow.TypeBrowser)
+			require.NoError(t, err)
+
+			c := newCode(-time.Hour, f)
+			expired := new(flow.ExpiredError)
+			require.False(t, errors.As(c.Validate(), &expired), "expired code should not return flow.ExpiredError")
 		})
 		t.Run("case=returns no error if flow is not expired", func(t *testing.T) {
 			f, err := recovery.NewFlow(conf, time.Hour, "", req, nil, flow.TypeBrowser)

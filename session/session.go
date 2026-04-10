@@ -20,7 +20,6 @@ import (
 	"github.com/ory/kratos/x"
 	"github.com/ory/x/httpx"
 	"github.com/ory/x/pagination/keysetpagination"
-	"github.com/ory/x/pointerx"
 	"github.com/ory/x/randx"
 )
 
@@ -61,7 +60,8 @@ type Device struct {
 	// Last updated at
 	UpdatedAt time.Time `json:"-" faker:"-" db:"updated_at"`
 
-	NID uuid.UUID `json:"-"  faker:"-" db:"nid"`
+	NID        uuid.UUID  `json:"-"  faker:"-" db:"nid"`
+	IdentityID *uuid.UUID `json:"-"  faker:"-" db:"identity_id"`
 }
 
 func (Device) TableName() string { return "session_devices" }
@@ -154,14 +154,14 @@ func (s Session) PageToken() keysetpagination.PageToken {
 	}
 }
 
-func (m Session) DefaultPageToken() keysetpagination.PageToken {
+func (Session) DefaultPageToken() keysetpagination.PageToken {
 	return keysetpagination.MapPageToken{
 		"id":         uuid.Nil.String(),
 		"created_at": time.Date(2200, 12, 31, 23, 59, 59, 0, time.UTC).Format(x.MapPaginationDateFormat),
 	}
 }
 
-func (s Session) TableName() string { return "sessions" }
+func (Session) TableName() string { return "sessions" }
 
 func (s *Session) CompletedLoginForMethod(method AuthenticationMethod) {
 	method.CompletedAt = time.Now().UTC()
@@ -251,13 +251,14 @@ func NewInactiveSession() *Session {
 
 func (s *Session) SetSessionDeviceInformation(r *http.Request) {
 	device := Device{
-		SessionID: s.ID,
-		IPAddress: pointerx.Ptr(httpx.ClientIP(r)),
+		SessionID:  s.ID,
+		IdentityID: new(s.IdentityID),
+		IPAddress:  new(httpx.ClientIP(r)),
 	}
 
 	agent := r.Header["User-Agent"]
 	if len(agent) > 0 {
-		device.UserAgent = pointerx.Ptr(strings.Join(agent, " "))
+		device.UserAgent = new(strings.Join(agent, " "))
 	}
 
 	var clientGeoLocation []string
@@ -267,7 +268,8 @@ func (s *Session) SetSessionDeviceInformation(r *http.Request) {
 	if r.Header.Get("Cf-Ipcountry") != "" {
 		clientGeoLocation = append(clientGeoLocation, r.Header.Get("Cf-Ipcountry"))
 	}
-	device.Location = pointerx.Ptr(strings.Join(clientGeoLocation, ", "))
+	loc := strings.Join(clientGeoLocation, ", ")
+	device.Location = &loc
 
 	s.Devices = append(s.Devices, device)
 }

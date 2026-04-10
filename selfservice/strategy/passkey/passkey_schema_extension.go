@@ -4,6 +4,7 @@
 package passkey
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"github.com/ory/jsonschema/v3"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/schema"
-	"github.com/ory/x/stringsx"
 )
 
 type SchemaExtension struct {
@@ -47,7 +47,7 @@ func (s *Strategy) PasskeyDisplayNameFromIdentity(ctx context.Context, id *ident
 	// We can ignore teh error here because proper validation happens once the identity is persisted.
 	_ = s.d.IdentityValidator().ValidateWithRunner(ctx, id, e)
 
-	return stringsx.Coalesce(e.PasskeyDisplayName, e.WebauthnIdentifier)
+	return cmp.Or(e.PasskeyDisplayName, e.WebauthnIdentifier)
 }
 
 func (s *Strategy) PasskeyDisplayNameFromTraits(ctx context.Context, traits identity.Traits) string {

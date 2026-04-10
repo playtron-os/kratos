@@ -4,6 +4,7 @@
 package node
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -11,6 +12,7 @@ import (
 	"github.com/ory/x/jsonx"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIDs(t *testing.T) {
@@ -116,7 +118,7 @@ func TestNodeDecode(t *testing.T) {
 		Script,
 	} {
 		var n Node
-		jsonx.TestUnmarshalJSON(t, []byte(`{"type":"`+kind+`"}`), &n)
+		require.NoError(t, json.Unmarshal([]byte(`{"type":"`+kind+`"}`), &n))
 		assert.EqualValues(t, kind, n.Attributes.GetNodeType())
 	}
 }

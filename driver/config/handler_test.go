@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/x/contextx"
+	"github.com/ory/x/httprouterx"
 )
 
 type configProvider struct {
@@ -27,16 +27,16 @@ func (c *configProvider) Config() *config.Config {
 
 func TestNewConfigHashHandler(t *testing.T) {
 	ctx := context.Background()
-	cfg := internal.NewConfigurationWithDefaults(t)
-	router := x.NewTestRouterPublic(t)
-	config.NewConfigHashHandler(&configProvider{cfg: cfg}, router)
+	cfg := pkg.NewConfigurationWithDefaults(t)
+	router := httprouterx.NewTestRouterAdmin(t)
+	config.RegisterConfigHashRoute(&configProvider{cfg: cfg}, router)
 	ts := contextx.NewConfigurableTestServer(router)
 	t.Cleanup(ts.Close)
 
 	// first request, get baseline hash
 	res, err := ts.Client(ctx).Get(ts.URL + "/health/config")
 	require.NoError(t, err)
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	require.Equal(t, 200, res.StatusCode)
 	first, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestNewConfigHashHandler(t *testing.T) {
 	// second request, no config change
 	res, err = ts.Client(ctx).Get(ts.URL + "/health/config")
 	require.NoError(t, err)
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	require.Equal(t, 200, res.StatusCode)
 	second, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
@@ -53,7 +53,7 @@ func TestNewConfigHashHandler(t *testing.T) {
 	// third request, with config change
 	res, err = ts.Client(contextx.WithConfigValue(ctx, config.ViperKeySessionDomain, "foobar")).Get(ts.URL + "/health/config")
 	require.NoError(t, err)
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	require.Equal(t, 200, res.StatusCode)
 	third, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestNewConfigHashHandler(t *testing.T) {
 	// fourth request, no config change
 	res, err = ts.Client(ctx).Get(ts.URL + "/health/config")
 	require.NoError(t, err)
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	require.Equal(t, 200, res.StatusCode)
 	fourth, err := io.ReadAll(res.Body)
 	require.NoError(t, err)

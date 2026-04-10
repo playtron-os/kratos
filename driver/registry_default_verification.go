@@ -60,16 +60,17 @@ func (m *RegistryDefault) LinkSender() *link.Sender {
 	return m.selfserviceLinkSender
 }
 
-// GetActiveVerificationStrategy returns the currently active verification strategy
-// If no verification strategy has been set, an error is returned
-func (m *RegistryDefault) GetActiveVerificationStrategy(ctx context.Context) (verification.Strategy, error) {
+// GetActiveVerificationStrategies returns the currently active verification strategies.
+// It returns a list of all strategies and the specific primary strategy.
+// If no primary verification strategy has been set, an error is returned.
+func (m *RegistryDefault) GetActiveVerificationStrategies(ctx context.Context) (active verification.Strategies, primary verification.PrimaryStrategy, err error) {
 	as := m.Config().SelfServiceFlowVerificationUse(ctx)
-	s, err := m.VerificationStrategies(ctx).Strategy(as)
+	s, ps, err := m.VerificationStrategies(ctx).ActiveStrategies(as)
 	if err != nil {
-		return nil, errors.WithStack(herodot.ErrBadRequest.
+		return nil, ps, errors.WithStack(herodot.ErrBadRequest.
 			WithReasonf("The active verification strategy %s is not enabled. Please enable it in the configuration.", as))
 	}
-	return s, nil
+	return s, ps, nil
 }
 
 func (m *RegistryDefault) VerificationStrategies(ctx context.Context) (verificationStrategies verification.Strategies) {

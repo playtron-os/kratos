@@ -22,23 +22,25 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	kratos "github.com/ory/kratos/internal/httpclient"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	kratos "github.com/ory/kratos/pkg/httpclient"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	. "github.com/ory/kratos/selfservice/strategy/code"
 	"github.com/ory/kratos/x"
+	"github.com/ory/x/configx"
 	"github.com/ory/x/ioutilx"
-	"github.com/ory/x/pointerx"
 	"github.com/ory/x/snapshotx"
 )
 
 func TestAdminStrategy(t *testing.T) {
-	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	initViper(t, ctx, conf)
-	conf.MustSet(ctx, config.ViperKeyUseContinueWithTransitions, true)
+	t.Parallel()
+
+	conf, reg := pkg.NewFastRegistryWithMocks(t,
+		configx.WithValues(defaultConfig),
+		configx.WithValue(config.ViperKeyUseContinueWithTransitions, true),
+	)
 
 	_ = testhelpers.NewRecoveryUIFlowEchoServer(t, reg)
 	_ = testhelpers.NewSettingsUIFlowEchoServer(t, reg)
@@ -57,14 +59,15 @@ func TestAdminStrategy(t *testing.T) {
 
 	t.Run("no panic on empty body #1384", func(t *testing.T) {
 		ctx := context.Background()
-		s, err := reg.RecoveryStrategies(ctx).Strategy("code")
+		s, ps, err := reg.RecoveryStrategies(ctx).ActiveStrategies("code")
 		require.NoError(t, err)
+		require.Len(t, s, 1)
 		w := httptest.NewRecorder()
 		r := &http.Request{URL: new(url.URL)}
 		f, err := recovery.NewFlow(reg.Config(), time.Minute, "", r, s, flow.TypeBrowser)
 		require.NoError(t, err)
 		require.NotPanics(t, func() {
-			require.Error(t, s.(*Strategy).HandleRecoveryError(w, r, f, nil, errors.New("test")))
+			require.Error(t, ps.(*Strategy).HandleRecoveryError(w, r, f, nil, errors.New("test")))
 		})
 	})
 
@@ -76,13 +79,13 @@ func TestAdminStrategy(t *testing.T) {
 	})
 
 	t.Run("description=should fail on malformed expiry time", func(t *testing.T) {
-		_, _, err := createCode(createCodeParams{IdentityId: x.NewUUID().String(), ExpiresIn: pointerx.Ptr("not-a-valid-value")})
+		_, _, err := createCode(createCodeParams{IdentityId: x.NewUUID().String(), ExpiresIn: new("not-a-valid-value")})
 		require.IsType(t, err, new(kratos.GenericOpenAPIError), "%T", err)
 		snapshotx.SnapshotT(t, err.(*kratos.GenericOpenAPIError).Model())
 	})
 
 	t.Run("description=should fail on negative expiry time", func(t *testing.T) {
-		_, _, err := createCode(createCodeParams{IdentityId: x.NewUUID().String(), ExpiresIn: pointerx.Ptr("-1h")})
+		_, _, err := createCode(createCodeParams{IdentityId: x.NewUUID().String(), ExpiresIn: new("-1h")})
 		require.IsType(t, err, new(kratos.GenericOpenAPIError), "%T", err)
 		snapshotx.SnapshotT(t, err.(*kratos.GenericOpenAPIError).Model())
 	})
@@ -109,7 +112,7 @@ func TestAdminStrategy(t *testing.T) {
 	}
 
 	assertEmailNotVerified := func(t *testing.T, email string) {
-		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.VerifiableAddressTypeEmail, email)
+		addr, err := reg.IdentityPool().FindVerifiableAddressByValue(context.Background(), identity.AddressTypeEmail, email)
 		assert.NoError(t, err)
 		assert.False(t, addr.Verified)
 		assert.Nil(t, addr.VerifiedAt)
@@ -129,13 +132,14 @@ func TestAdminStrategy(t *testing.T) {
 		require.Contains(t, code.RecoveryLink, "flow=")
 		require.NotContains(t, code.RecoveryLink, "code=")
 		require.NotEmpty(t, code.RecoveryCode)
-		require.True(t, code.ExpiresAt.Before(time.Now().Add(conf.SelfServiceFlowRecoveryRequestLifespan(ctx))))
+		require.True(t, code.ExpiresAt.Before(time.Now().Add(conf.SelfServiceFlowRecoveryRequestLifespan(t.Context()))))
 
-		client := pointerx.Ptr(*publicTS.Client())
+		client := new(*publicTS.Client())
 		client.Jar, _ = cookiejar.New(nil)
 		body := submitRecoveryCode(t, client, code.RecoveryLink, code.RecoveryCode)
 		testhelpers.AssertMessage(t, body, "You successfully recovered your account. Please change your password or set up an alternative login method (e.g. social sign in) within the next 60.00 minutes.")
 		u, err := url.Parse(publicTS.URL)
+		require.NoError(t, err)
 		cs := client.Jar.Cookies(u)
 		require.Len(t, cs, 1, "%s", body)
 		assert.Equal(t, "ory_kratos_session", cs[0].Name, "%s", body)
@@ -148,15 +152,15 @@ func TestAdminStrategy(t *testing.T) {
 		require.NoError(t, reg.IdentityManager().Create(context.Background(),
 			&id, identity.ManagerAllowWriteProtectedTraits))
 
-		code, _, err := createCode(createCodeParams{IdentityId: id.ID.String(), ExpiresIn: pointerx.Ptr("100ms")})
+		code, _, err := createCode(createCodeParams{IdentityId: id.ID.String(), ExpiresIn: new("100ms")})
 		require.NoError(t, err)
 
 		time.Sleep(time.Millisecond * 100)
 		require.NotEmpty(t, code.RecoveryLink)
-		require.True(t, code.ExpiresAt.Before(time.Now().Add(conf.SelfServiceFlowRecoveryRequestLifespan(ctx))))
+		require.True(t, code.ExpiresAt.Before(time.Now().Add(conf.SelfServiceFlowRecoveryRequestLifespan(t.Context()))))
 
 		body := submitRecoveryCode(t, nil, code.RecoveryLink, code.RecoveryCode)
-		testhelpers.AssertMessage(t, body, "The recovery flow expired 0.00 minutes ago, please try again.")
+		assert.Contains(t, gjson.GetBytes(body, "ui.messages.0.text").Str, "The recovery flow expired", "%s", body)
 
 		// The recovery address should not be verified if the flow was initiated by the admins
 		assertEmailNotVerified(t, recoveryEmail)
@@ -173,7 +177,7 @@ func TestAdminStrategy(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NotEmpty(t, code.RecoveryLink)
-		require.True(t, code.ExpiresAt.Before(time.Now().Add(conf.SelfServiceFlowRecoveryRequestLifespan(ctx)+time.Second)))
+		require.True(t, code.ExpiresAt.Before(time.Now().Add(conf.SelfServiceFlowRecoveryRequestLifespan(t.Context())+time.Second)))
 
 		body := submitRecoveryCode(t, nil, code.RecoveryLink, code.RecoveryCode)
 
@@ -183,13 +187,25 @@ func TestAdminStrategy(t *testing.T) {
 		assertEmailNotVerified(t, recoveryEmail)
 	})
 
+	t.Run("description=should respect custom expires_in in response", func(t *testing.T) {
+		id := identity.Identity{Traits: identity.Traits(`{}`)}
+		require.NoError(t, reg.IdentityManager().Create(context.Background(),
+			&id, identity.ManagerAllowWriteProtectedTraits))
+
+		code, _, err := createCode(createCodeParams{IdentityId: id.ID.String(), ExpiresIn: new("24h")})
+		require.NoError(t, err)
+
+		// The response expires_at must reflect the requested 24h, not the default 1h lifespan.
+		require.WithinDuration(t, time.Now().Add(24*time.Hour), *code.ExpiresAt, time.Hour)
+	})
+
 	t.Run("case=should not be able to use code from different flow", func(t *testing.T) {
 		email := testhelpers.RandomEmail()
 		i := createIdentityToRecover(t, reg, email)
 
-		c1, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), ExpiresIn: pointerx.Ptr("1h")})
+		c1, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), ExpiresIn: new("1h")})
 		require.NoError(t, err)
-		c2, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), ExpiresIn: pointerx.Ptr("1h")})
+		c2, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), ExpiresIn: new("1h")})
 		require.NoError(t, err)
 		code2 := c2.RecoveryCode
 		require.NotEmpty(t, code2)
@@ -203,7 +219,7 @@ func TestAdminStrategy(t *testing.T) {
 		email := testhelpers.RandomEmail()
 		i := createIdentityToRecover(t, reg, email)
 
-		c1, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), ExpiresIn: pointerx.Ptr("1h")})
+		c1, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), ExpiresIn: new("1h")})
 		require.NoError(t, err)
 
 		res, err := http.Get(c1.RecoveryLink)
@@ -217,7 +233,7 @@ func TestAdminStrategy(t *testing.T) {
 		email := testhelpers.RandomEmail()
 		i := createIdentityToRecover(t, reg, email)
 
-		code, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), FlowType: pointerx.Ptr(string(flow.TypeAPI))})
+		code, _, err := createCode(createCodeParams{IdentityId: i.ID.String(), FlowType: new(string(flow.TypeAPI))})
 		require.NoError(t, err)
 
 		res, err := publicTS.Client().Get(code.RecoveryLink)

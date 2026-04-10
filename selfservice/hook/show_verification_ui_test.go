@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/login"
 	"github.com/ory/kratos/selfservice/flow/registration"
@@ -25,7 +25,7 @@ import (
 func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 	t.Run("flow=registration", func(t *testing.T) {
 		t.Run("case=no continue with items returns 200 OK", func(t *testing.T) {
-			_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+			_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			f := &registration.Flow{}
@@ -35,7 +35,7 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=not a browser request returns 200 OK", func(t *testing.T) {
-			_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+			_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			browserRequest.Header.Add("Accept", "application/json")
@@ -46,8 +46,8 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=verification ui in continue with item returns redirect", func(t *testing.T) {
-			conf, reg := internal.NewVeryFastRegistryWithoutDB(t)
-			conf.Set(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
+			conf, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			vf := &verification.Flow{
@@ -64,8 +64,8 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=no verification ui in continue with item returns 200 OK", func(t *testing.T) {
-			conf, reg := internal.NewVeryFastRegistryWithoutDB(t)
-			conf.Set(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
+			conf, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			rf := &registration.Flow{}
@@ -80,7 +80,7 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 
 	t.Run("flow=login", func(t *testing.T) {
 		t.Run("case=no continue with items returns 200 OK", func(t *testing.T) {
-			_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+			_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			f := &login.Flow{}
@@ -90,7 +90,7 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=not a browser request returns 200 OK", func(t *testing.T) {
-			_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+			_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			browserRequest.Header.Add("Accept", "application/json")
@@ -101,8 +101,8 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=verification ui in continue with item returns redirect", func(t *testing.T) {
-			conf, reg := internal.NewVeryFastRegistryWithoutDB(t)
-			conf.Set(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
+			conf, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			vf := &verification.Flow{
@@ -119,8 +119,8 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=no verification ui in continue with item returns 200 OK", func(t *testing.T) {
-			conf, reg := internal.NewVeryFastRegistryWithoutDB(t)
-			conf.Set(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
+			conf, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			rf := &login.Flow{}
@@ -135,8 +135,8 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 
 	t.Run("internal_context=registration", func(t *testing.T) {
 		t.Run("case=verification flow from internal context returns redirect", func(t *testing.T) {
-			conf, reg := internal.NewVeryFastRegistryWithoutDB(t)
-			conf.Set(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
+			conf, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			vfID := uuid.Must(uuid.NewV4())
@@ -161,7 +161,7 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=invalid json in internal context returns error", func(t *testing.T) {
-			_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+			_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 
@@ -181,8 +181,8 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 
 	t.Run("internal_context=login", func(t *testing.T) {
 		t.Run("case=verification flow from internal context returns redirect", func(t *testing.T) {
-			conf, reg := internal.NewVeryFastRegistryWithoutDB(t)
-			conf.Set(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
+			conf, reg := pkg.NewVeryFastRegistryWithoutDB(t)
+			conf.MustSet(context.Background(), config.ViperKeySelfServiceVerificationUI, "/verification")
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 			vfID := uuid.Must(uuid.NewV4())
@@ -207,7 +207,7 @@ func TestExecutePostRegistrationPostPersistHook(t *testing.T) {
 		})
 
 		t.Run("case=invalid json in internal context returns error", func(t *testing.T) {
-			_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+			_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 			h := hook.NewShowVerificationUIHook(reg)
 			browserRequest := httptest.NewRequest("GET", "/", nil)
 

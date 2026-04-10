@@ -18,8 +18,8 @@ import (
 
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/registration"
 	"github.com/ory/kratos/selfservice/strategy/oidc"
@@ -31,7 +31,7 @@ import (
 
 func TestTwoStepRegistration(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
 
@@ -117,8 +117,8 @@ func TestTwoStepRegistration(t *testing.T) {
 
 				fmt.Println(body)
 
-				require.Equal(t, int64(4000001), gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.id").Int(), "%s", body)
-				require.Equal(t, "\"invalidemail\" is not valid \"email\"", gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.text").String(), "%s", body)
+				require.Equal(t, int64(4000040), gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.id").Int(), "%s", body)
+				require.Equal(t, "Enter a valid email address", gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.text").String(), "%s", body)
 			})
 
 			t.Run("select_credentials", func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestTwoStepRegistration(t *testing.T) {
 
 func TestOneStepRegistration(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 
 	testhelpers.StrategyEnable(t, conf, identity.CredentialsTypePassword.String(), true)
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
@@ -240,8 +240,8 @@ func TestOneStepRegistration(t *testing.T) {
 
 				fmt.Println(body)
 
-				require.Equal(t, int64(4000001), gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.id").Int(), "%s", body)
-				require.Equal(t, "\"invalidemail\" is not valid \"email\"", gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.text").String(), "%s", body)
+				require.Equal(t, int64(4000040), gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.id").Int(), "%s", body)
+				require.Equal(t, "Enter a valid email address", gjson.Get(body, "ui.nodes.#(attributes.name==traits.email).messages.0.text").String(), "%s", body)
 			})
 		})
 	})
@@ -249,7 +249,7 @@ func TestOneStepRegistration(t *testing.T) {
 
 func TestPopulateRegistrationMethod(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	ctx = testhelpers.WithDefaultIdentitySchema(ctx, "file://stub/identity.schema.json")
 
 	s, err := reg.AllRegistrationStrategies().Strategy(identity.CredentialsTypeProfile)
@@ -344,7 +344,7 @@ func TestPopulateRegistrationMethod(t *testing.T) {
 			testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/identity.schema.json")
 		})
 		multiSchema := contextx.WithConfigValue(ctx, config.ViperKeyDefaultIdentitySchemaID, "default")
-		multiSchema = contextx.WithConfigValue(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
+		multiSchema = contextx.WithConfigValue(multiSchema, config.ViperKeyIdentitySchemas, config.Schemas{
 			{ID: "default", URL: "file://./stub/identity-doesnotexist.schema.json"},
 			{ID: "not-default", URL: "file://./stub/identity.schema.json", SelfserviceSelectable: true},
 		})

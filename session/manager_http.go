@@ -11,6 +11,7 @@ import (
 
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
+	"github.com/ory/x/logrusx"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -52,9 +53,9 @@ type (
 		identity.PrivilegedPoolProvider
 		identity.ManagementProvider
 		x.CookieProvider
-		x.LoggingProvider
+		logrusx.Provider
 		nosurfx.CSRFProvider
-		x.TracingProvider
+		otelx.Provider
 		x.TransactionPersistenceProvider
 		PersistenceProvider
 		sessiontokenexchange.PersistenceProvider
@@ -139,7 +140,7 @@ func (s *ManagerHTTP) IssueCookie(ctx context.Context, w http.ResponseWriter, r 
 	ctx, span := s.r.Tracer(ctx).Tracer().Start(ctx, "sessions.ManagerHTTP.IssueCookie")
 	defer otelx.End(span, &err)
 
-	cookie, err := s.r.CookieManager(r.Context()).Get(r, s.cookieName(ctx))
+	cookie, err := s.r.CookieManager(ctx).Get(r, s.cookieName(ctx))
 	// Fix for https://github.com/ory/kratos/issues/1695
 	if err != nil && cookie == nil {
 		return errors.WithStack(err)

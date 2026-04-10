@@ -5,6 +5,7 @@ package oidc
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -22,9 +23,9 @@ import (
 	"github.com/ory/x/decoderx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/sqlxx"
-	"github.com/ory/x/stringsx"
 
 	"github.com/ory/kratos/continuity"
+	oidcv1 "github.com/ory/kratos/gen/oidc/v1"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/settings"
@@ -51,8 +52,6 @@ var UnlinkAllFirstFactorConnectionsError = &jsonschema.ValidationError{
 	Message: "can not unlink OpenID Connect connection because it is the last remaining first factor credential", InstancePtr: "#/",
 }
 
-func (s *Strategy) RegisterSettingsRoutes(*x.RouterPublic) {}
-
 func (s *Strategy) SettingsStrategyID() string {
 	return s.ID().String()
 }
@@ -74,7 +73,7 @@ func (s *Strategy) decoderSettings(ctx context.Context, p *updateSettingsFlowWit
 		return errors.WithStack(err)
 	}
 
-	if err := s.dec.Decode(r, &p, compiler,
+	if err := decoderx.Decode(r, &p, compiler,
 		decoderx.HTTPKeepRequestBody(true),
 		decoderx.HTTPDecoderUseQueryAndBody(),
 		decoderx.HTTPDecoderSetValidatePayloads(false),
@@ -146,10 +145,6 @@ func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, 
 	ctx, span := s.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.strategy.oidc.Strategy.PopulateSettingsMethod")
 	defer otelx.End(span, &err)
 
-	if sr.Type != flow.TypeBrowser {
-		return nil
-	}
-
 	conf, err := s.Config(ctx)
 	if err != nil {
 		return err
@@ -172,7 +167,7 @@ func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, 
 		if l.Config().OrganizationID != "" {
 			continue
 		}
-		sr.UI.GetNodes().Append(NewLinkNode(l.Config().ID, stringsx.Coalesce(l.Config().Label, l.Config().ID)))
+		sr.UI.GetNodes().Append(NewLinkNode(l.Config().ID, cmp.Or(l.Config().Label, l.Config().ID)))
 	}
 
 	count, err := s.d.IdentityManager().CountActiveFirstFactorCredentials(ctx, id)
@@ -184,7 +179,7 @@ func (s *Strategy) PopulateSettingsMethod(ctx context.Context, r *http.Request, 
 		// This means that we're able to remove a connection because it is the last configured credential. If it is
 		// removed, the identity is no longer able to sign in.
 		for _, l := range linked {
-			sr.UI.GetNodes().Append(NewUnlinkNode(l.Config().ID, stringsx.Coalesce(l.Config().Label, l.Config().ID)))
+			sr.UI.GetNodes().Append(NewUnlinkNode(l.Config().ID, cmp.Or(l.Config().Label, l.Config().ID)))
 		}
 	}
 
@@ -238,6 +233,7 @@ type updateSettingsFlowWithOidcMethod struct {
 	// - `login_hint` (string): The `login_hint` parameter suppresses the account chooser and either pre-fills the email box on the sign-in form, or selects the proper session.
 	// - `hd` (string): The `hd` parameter limits the login/registration process to a Google Organization, e.g. `mycollege.edu`.
 	// - `prompt` (string): The `prompt` specifies whether the Authorization Server prompts the End-User for reauthentication and consent, e.g. `select_account`.
+	// - `acr_values` (string): The `acr_values` specifies the Authentication Context Class Reference values for the authorization request.
 	//
 	// required: false
 	UpstreamParameters json.RawMessage `json:"upstream_parameters"`
@@ -286,7 +282,7 @@ func (s *Strategy) Settings(ctx context.Context, w http.ResponseWriter, r *http.
 			return ctxUpdate, nil
 		}
 
-		return nil, s.handleSettingsError(ctx, w, r, ctxUpdate, &p, errors.WithStack(herodot.ErrInternalServerError.WithReason("Expected either link or unlink to be set when continuing flow but both are unset.")))
+		return nil, s.handleSettingsError(ctx, w, r, ctxUpdate, &p, errors.WithStack(herodot.ErrBadRequest.WithReason("Expected either link or unlink to be set when continuing flow but both are unset.")))
 	} else if err != nil {
 		return nil, s.handleSettingsError(ctx, w, r, ctxUpdate, &p, err)
 	}
@@ -365,12 +361,12 @@ func (s *Strategy) initLinkProvider(ctx context.Context, w http.ResponseWriter, 
 		return s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 	}
 
-	req, err := s.validateFlow(ctx, r, ctxUpdate.Flow.ID)
+	req, err := s.validateFlow(ctx, r, ctxUpdate.Flow.ID, oidcv1.FlowKind_FLOW_KIND_SETTINGS)
 	if err != nil {
 		return s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 	}
 
-	state, pkce, err := s.GenerateState(ctx, provider, ctxUpdate.Flow.ID)
+	state, pkce, err := s.GenerateState(ctx, provider, ctxUpdate.Flow)
 	if err != nil {
 		return s.handleSettingsError(ctx, w, r, ctxUpdate, p, err)
 	}
@@ -518,7 +514,8 @@ func (s *Strategy) unlinkProvider(ctx context.Context, w http.ResponseWriter, r 
 }
 
 func (s *Strategy) handleSettingsError(ctx context.Context, w http.ResponseWriter, r *http.Request, ctxUpdate *settings.UpdateContext, p *updateSettingsFlowWithOidcMethod, err error) error {
-	if e := new(settings.FlowNeedsReAuth); errors.As(err, &e) {
+	// Do not pause flow if the flow type is an API flow as we can't save cookies in those flows.
+	if e := new(settings.FlowNeedsReAuth); errors.As(err, &e) && ctxUpdate.Flow != nil && ctxUpdate.Flow.Type == flow.TypeBrowser {
 		if err := s.d.ContinuityManager().Pause(ctx, w, r,
 			settings.ContinuityKey(s.SettingsStrategyID()), settings.ContinuityOptions(p, ctxUpdate.Session.Identity)...); err != nil {
 			return err

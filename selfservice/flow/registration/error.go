@@ -7,9 +7,15 @@ import (
 	"net/http"
 
 	"github.com/gofrs/uuid"
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
 
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ory/kratos/hydra"
 	"github.com/ory/kratos/identity"
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/selfservice/sessiontokenexchange"
@@ -36,9 +42,11 @@ var (
 type (
 	errorHandlerDependencies interface {
 		errorx.ManagementProvider
-		x.WriterProvider
-		x.LoggingProvider
+		httpx.WriterProvider
+		logrusx.Provider
+		otelx.Provider
 		config.Provider
+		hydra.Provider
 
 		sessiontokenexchange.PersistenceProvider
 		FlowPersistenceProvider
@@ -79,27 +87,35 @@ func (s *ErrorHandler) WriteFlowError(
 	w http.ResponseWriter,
 	r *http.Request,
 	f *Flow,
+	ct identity.CredentialsType,
 	group node.UiNodeGroup,
 	err error,
 ) {
+	ctx, span := s.d.Tracer(r.Context()).Tracer().Start(r.Context(), "selfservice.flow.registration.ErrorHandler.WriteFlowError",
+		trace.WithAttributes(
+			attribute.String("error", err.Error()),
+		))
+	r = r.WithContext(ctx)
+	defer otelx.End(span, &err)
+
 	if dup := new(identity.ErrDuplicateCredentials); errors.As(err, &dup) {
 		err = schema.NewDuplicateCredentialsError(dup)
 	}
 
-	logger := s.d.Audit().
+	logger := s.d.Logger().
 		WithError(err).
 		WithRequest(r).
 		WithField("registration_flow", f.ToLoggerField())
 
-	logger.
-		Info("Encountered self-service flow error.")
+	logger.Info("Encountered self-service flow error.")
 
 	if f == nil {
 		trace.SpanFromContext(r.Context()).AddEvent(events.NewRegistrationFailed(r.Context(), uuid.Nil, "", "", err))
 		s.forward(w, r, nil, err)
 		return
 	}
-	trace.SpanFromContext(r.Context()).AddEvent(events.NewRegistrationFailed(r.Context(), f.ID, string(f.Type), f.Active.String(), err))
+	span.SetAttributes(attribute.String("flow_id", f.ID.String()))
+	trace.SpanFromContext(r.Context()).AddEvent(events.NewRegistrationFailed(r.Context(), f.ID, string(f.Type), ct.String(), err))
 
 	if expired, inner := s.PrepareReplacementForExpiredFlow(w, r, f, err); inner != nil {
 		s.forward(w, r, f, err)
@@ -147,6 +163,19 @@ func (s *ErrorHandler) WriteFlowError(
 	updatedFlow, innerErr := s.d.RegistrationFlowPersister().GetRegistrationFlow(r.Context(), f.ID)
 	if innerErr != nil {
 		s.forward(w, r, updatedFlow, innerErr)
+		return
+	}
+
+	// If the flow has an OAuth2LoginChallenge, we try to fetch the login request from Hydra because we return the flow object as JSON.
+	if updatedFlow.OAuth2LoginChallenge != "" {
+		hlr, err := s.d.Hydra().GetLoginRequest(ctx, string(updatedFlow.OAuth2LoginChallenge))
+		if err != nil {
+			// We don't redirect back to the third party on errors because Hydra doesn't
+			// give us the 3rd party return_uri when it redirects to the login UI.
+			s.forward(w, r, updatedFlow, err)
+			return
+		}
+		updatedFlow.HydraLoginRequest = hlr
 	}
 
 	s.d.Writer().WriteCode(w, r, x.RecoverStatusCode(err, http.StatusBadRequest), updatedFlow)

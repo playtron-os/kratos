@@ -12,24 +12,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofrs/uuid"
-
-	"github.com/tidwall/gjson"
-
-	"github.com/ory/x/jsonx"
-
-	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
-
 	"github.com/go-faker/faker/v4"
+	"github.com/gofrs/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
-	"github.com/ory/x/urlx"
-
+	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/pkg"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/registration"
 	"github.com/ory/kratos/x"
+	"github.com/ory/x/jsonx"
+	"github.com/ory/x/urlx"
 )
 
 func TestFakeFlow(t *testing.T) {
@@ -45,7 +40,7 @@ func TestFakeFlow(t *testing.T) {
 
 func TestNewFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, _ := internal.NewFastRegistryWithMocks(t)
+	conf, _ := pkg.NewFastRegistryWithMocks(t)
 	t.Run("case=0", func(t *testing.T) {
 		r, err := registration.NewFlow(conf, 0, "csrf", &http.Request{
 			URL:  urlx.ParseOrPanic("/"),

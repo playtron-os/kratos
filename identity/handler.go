@@ -13,6 +13,8 @@ import (
 
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/httpx"
 
 	"github.com/gofrs/uuid"
 
@@ -51,11 +53,11 @@ const (
 )
 
 type (
-	handlerDependencies interface {
+	dependencies interface {
 		PoolProvider
 		PrivilegedPoolProvider
 		ManagementProvider
-		x.WriterProvider
+		httpx.WriterProvider
 		config.Provider
 		nosurfx.CSRFProvider
 		cipher.Provider
@@ -64,29 +66,19 @@ type (
 	HandlerProvider interface {
 		IdentityHandler() *Handler
 	}
-	Handler struct {
-		r  handlerDependencies
-		dx *decoderx.HTTP
-	}
+	Handler struct{ r dependencies }
 )
 
-func (h *Handler) Config(ctx context.Context) *config.Config {
-	return h.r.Config()
-}
+func NewHandler(r dependencies) *Handler { return &Handler{r: r} }
 
-func NewHandler(r handlerDependencies) *Handler {
-	return &Handler{
-		r:  r,
-		dx: decoderx.NewHTTP(),
-	}
-}
-
-func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(public *httprouterx.RouterPublic) {
 	h.r.CSRFHandler().IgnoreGlobs(
-		RouteCollection, RouteCollection+"/*",
+		RouteCollection,
+		RouteCollection+"/*",
 		RouteCollection+"/*/credentials/*",
-		x.AdminPrefix+RouteCollection, x.AdminPrefix+RouteCollection+"/*",
-		x.AdminPrefix+RouteCollection+"/*/credentials/*",
+		httprouterx.AdminPrefix+RouteCollection,
+		httprouterx.AdminPrefix+RouteCollection+"/*",
+		httprouterx.AdminPrefix+RouteCollection+"/*/credentials/*",
 	)
 
 	public.GET(RouteCollection, redir.RedirectToAdminRoute(h.r))
@@ -98,17 +90,17 @@ func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
 	public.PATCH(RouteItem, redir.RedirectToAdminRoute(h.r))
 	public.DELETE(RouteCredentialItem, redir.RedirectToAdminRoute(h.r))
 
-	public.GET(x.AdminPrefix+RouteCollection, redir.RedirectToAdminRoute(h.r))
-	public.GET(x.AdminPrefix+RouteCollection+"/by/external/{externalID}", redir.RedirectToAdminRoute(h.r))
-	public.GET(x.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
-	public.DELETE(x.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
-	public.POST(x.AdminPrefix+RouteCollection, redir.RedirectToAdminRoute(h.r))
-	public.PUT(x.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
-	public.PATCH(x.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
-	public.DELETE(x.AdminPrefix+RouteCredentialItem, redir.RedirectToAdminRoute(h.r))
+	public.GET(httprouterx.AdminPrefix+RouteCollection, redir.RedirectToAdminRoute(h.r))
+	public.GET(httprouterx.AdminPrefix+RouteCollection+"/by/external/{externalID}", redir.RedirectToAdminRoute(h.r))
+	public.GET(httprouterx.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
+	public.DELETE(httprouterx.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
+	public.POST(httprouterx.AdminPrefix+RouteCollection, redir.RedirectToAdminRoute(h.r))
+	public.PUT(httprouterx.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
+	public.PATCH(httprouterx.AdminPrefix+RouteItem, redir.RedirectToAdminRoute(h.r))
+	public.DELETE(httprouterx.AdminPrefix+RouteCredentialItem, redir.RedirectToAdminRoute(h.r))
 }
 
-func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(admin *httprouterx.RouterAdmin) {
 	admin.GET(RouteCollection, h.list)
 	admin.GET(RouteItem, h.get)
 	admin.GET(RouteCollection+"/by/external/{externalID}", h.getByExternalID)
@@ -268,6 +260,9 @@ func parseListIdentitiesParameters(r *http.Request) (params ListIdentityParamete
 //	Responses:
 //	  200: listIdentities
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-medium
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	params, err := parseListIdentitiesParameters(r)
 	if err != nil {
@@ -380,6 +375,9 @@ type getIdentityByExternalID struct {
 //	  200: identity
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-low
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	i, err := h.r.PrivilegedIdentityPool().GetIdentityConfidential(r.Context(), x.ParseUUID(r.PathValue("id")))
 	if err != nil {
@@ -429,6 +427,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 //	  200: identity
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-medium
 func (h *Handler) getByExternalID(w http.ResponseWriter, r *http.Request) {
 	externalID := r.PathValue("externalID")
 	if externalID == "" {
@@ -663,6 +664,9 @@ type AdminCreateIdentityImportCredentialsSAMLProvider struct {
 //	  400: errorGeneric
 //	  409: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var cr CreateIdentityBody
 	if err := jsonx.NewStrictDecoder(r.Body).Decode(&cr); err != nil {
@@ -737,14 +741,14 @@ func (h *Handler) identityFromCreateIdentityBody(ctx context.Context, cr *Create
 //
 // # Create multiple identities
 //
-// Creates multiple [identities](https://www.ory.sh/docs/kratos/concepts/identity-user-model).
+// Creates multiple [identities](https://www.ory.com/docs/kratos/concepts/identity-user-model).
 //
-// You can also use this endpoint to [import credentials](https://www.ory.sh/docs/kratos/manage-identities/import-user-accounts-identities),
+// You can also use this endpoint to [import credentials](https://www.ory.com/docs/kratos/manage-identities/import-user-accounts-identities),
 // including passwords, social sign-in settings, and multi-factor authentication methods.
 //
-// You can import:
-// - Up to 1,000 identities per request
-// - Up to 200 identities per request if including plaintext passwords
+// If the patch includes hashed passwords you can import up to 1,000 identities per request.
+//
+// If the patch includes at least one plaintext password you can import up to 200 identities per request.
 //
 // Avoid importing large batches with plaintext passwords. They can cause timeouts as the passwords need to be hashed before they are stored.
 //
@@ -776,6 +780,9 @@ func (h *Handler) identityFromCreateIdentityBody(ctx context.Context, cr *Create
 //	  400: errorGeneric
 //	  409: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) batchPatchIdentities(w http.ResponseWriter, r *http.Request) {
 	var (
 		req BatchPatchIdentitiesBody
@@ -940,9 +947,12 @@ type UpdateIdentityBody struct {
 //	  404: errorGeneric
 //	  409: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	var ur UpdateIdentityBody
-	if err := h.dx.Decode(r, &ur,
+	if err := decoderx.Decode(r, &ur,
 		decoderx.HTTPJSONDecoder()); err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
@@ -1029,6 +1039,9 @@ type deleteIdentity struct {
 //	  204: emptyResponse
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.r.PrivilegedIdentityPool().DeleteIdentity(r.Context(), x.ParseUUID(r.PathValue("id"))); err != nil {
 		h.r.Writer().WriteError(w, r, err)
@@ -1079,6 +1092,9 @@ type patchIdentity struct {
 //	  404: errorGeneric
 //	  409: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
 	requestBody, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -1185,6 +1201,9 @@ type _ struct {
 //	  204: emptyResponse
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) deleteIdentityCredentials(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	identity, err := h.r.PrivilegedIdentityPool().GetIdentityConfidential(ctx, x.ParseUUID(r.PathValue("id")))

@@ -10,6 +10,7 @@ import (
 	"github.com/tidwall/sjson"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/ory/x/httpx"
 	"github.com/ory/x/otelx/semconv"
 
 	"github.com/gofrs/uuid"
@@ -24,7 +25,6 @@ import (
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/ui/node"
-	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/x/otelx"
 )
@@ -43,8 +43,8 @@ type (
 		verification.StrategyProvider
 		verification.FlowPersistenceProvider
 		identity.PrivilegedPoolProvider
-		x.WriterProvider
-		x.TracingProvider
+		httpx.WriterProvider
+		otelx.Provider
 	}
 	Verifier struct {
 		r verifierDependencies
@@ -81,7 +81,20 @@ func (e *Verifier) ExecuteLoginPostHook(w http.ResponseWriter, r *http.Request, 
 		return nil
 	}
 
-	return e.do(w, r.WithContext(ctx), s.Identity, f, nil)
+	return e.do(w, r.WithContext(ctx), s.Identity, f, func(vf *verification.Flow) {
+		vf.OAuth2LoginChallenge = f.OAuth2LoginChallenge
+		var sID uuid.UUID
+		if s != nil {
+			sID = s.ID
+		}
+		vf.SessionID = uuid.NullUUID{UUID: sID, Valid: sID != uuid.Nil}
+		var iID uuid.UUID
+		if s != nil && s.Identity != nil {
+			iID = s.Identity.ID
+		}
+		vf.IdentityID = uuid.NullUUID{UUID: iID, Valid: iID != uuid.Nil}
+		vf.AMR = s.AMR
+	})
 }
 
 const InternalContextRegistrationVerificationFlow = "registration_verification_flow_continue_with"
@@ -103,7 +116,7 @@ func (e *Verifier) do(
 	// This is called after the identity has been created so we can safely assume that all addresses are available
 	// already.
 
-	strategy, err := e.r.GetActiveVerificationStrategy(ctx)
+	strategies, primaryStrategy, err := e.r.GetActiveVerificationStrategies(ctx)
 	if err != nil {
 		return err
 	}
@@ -141,7 +154,7 @@ func (e *Verifier) do(
 
 		verificationFlow, err := verification.NewPostHookFlow(e.r.Config(),
 			e.r.Config().SelfServiceFlowVerificationRequestLifespan(ctx),
-			csrf, r, strategy, f)
+			csrf, r, strategies, f)
 		if err != nil {
 			return err
 		}
@@ -151,7 +164,7 @@ func (e *Verifier) do(
 		}
 
 		verificationFlow.State = flow.StateEmailSent
-		if err := strategy.PopulateVerificationMethod(r, verificationFlow); err != nil {
+		if err := primaryStrategy.PopulateVerificationMethod(r, verificationFlow); err != nil {
 			return err
 		}
 
@@ -164,7 +177,7 @@ func (e *Verifier) do(
 			return err
 		}
 
-		if err := strategy.SendVerificationCode(ctx, verificationFlow, i, address); err != nil {
+		if err := primaryStrategy.SendVerificationCode(ctx, verificationFlow, i, address); err != nil {
 			return err
 		}
 

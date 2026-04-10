@@ -18,29 +18,26 @@ import (
 
 	"github.com/go-faker/faker/v4"
 	"github.com/gofrs/uuid"
-
-	"github.com/ory/kratos/x/nosurfx"
-
-	"github.com/ory/kratos/corpx"
-	"github.com/ory/kratos/hydra"
-	"github.com/ory/x/ioutilx"
-	"github.com/ory/x/urlx"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
-	"github.com/ory/x/assertx"
-
+	"github.com/ory/kratos/corpx"
 	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/hydra"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow/login"
 	"github.com/ory/kratos/selfservice/flow/registration"
 	"github.com/ory/kratos/selfservice/strategy/oidc"
 	"github.com/ory/kratos/selfservice/strategy/password"
 	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/x/assertx"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/ioutilx"
+	"github.com/ory/x/urlx"
 )
 
 func init() {
@@ -49,12 +46,12 @@ func init() {
 
 func TestHandlerRedirectOnAuthenticated(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	fakeHydra := hydra.NewFake()
 	reg.SetHydra(fakeHydra)
 
-	router := x.NewRouterPublic(reg)
-	ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
+	router := httprouterx.NewTestRouterPublic(t)
+	ts, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, httprouterx.NewTestRouterAdminWithPrefix(t))
 
 	// Set it first as otherwise it will overwrite the ViperKeySelfServiceBrowserDefaultReturnTo key;
 	returnToTS := testhelpers.NewRedirTS(t, "return_to", conf)
@@ -113,16 +110,17 @@ func TestHandlerRedirectOnAuthenticated(t *testing.T) {
 
 func TestInitFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+"."+string(identity.CredentialsTypePassword),
 		map[string]interface{}{"enabled": true})
 
-	router := x.NewRouterPublic(reg)
-	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
+	router := httprouterx.NewTestRouterPublic(t)
+	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, httprouterx.NewTestRouterAdminWithPrefix(t))
 	registrationTS := testhelpers.NewRegistrationUIFlowEchoServer(t, reg)
+	returnToTS := testhelpers.NewRedirTS(t, "return_to", conf)
 
 	conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationEnabled, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceBrowserDefaultReturnTo, "https://www.ory.sh")
+	conf.MustSet(ctx, config.ViperKeySelfServiceBrowserDefaultReturnTo, returnToTS.URL)
 
 	conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
 		{ID: "default", URL: "file://./stub/registration.schema.json"},
@@ -171,7 +169,7 @@ func TestInitFlow(t *testing.T) {
 
 		res, err := c.Do(req)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		body, err := io.ReadAll(res.Body)
 		require.NoError(t, err)
 		return res, body
@@ -281,12 +279,12 @@ func TestInitFlow(t *testing.T) {
 
 		t.Run("case=redirects when already authenticated", func(t *testing.T) {
 			res, _ := initAuthenticatedFlow(t, false, false)
-			assert.Contains(t, res.Request.URL.String(), "https://www.ory.sh")
+			assert.Contains(t, res.Request.URL.String(), returnToTS.URL)
 		})
 
 		t.Run("case=responds with error if already authenticated and SPA", func(t *testing.T) {
 			res, body := initAuthenticatedFlow(t, false, true)
-			assert.NotContains(t, res.Request.URL.String(), "https://www.ory.sh")
+			assert.NotContains(t, res.Request.URL.String(), returnToTS.URL)
 			assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 			assertx.EqualAsJSON(t, registration.ErrAlreadyLoggedIn, json.RawMessage(gjson.GetBytes(body, "error").Raw), "%s", body)
 		})
@@ -313,7 +311,7 @@ func TestInitFlow(t *testing.T) {
 
 			res, err := c.Do(req)
 			require.NoError(t, err)
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			// here we check that the redirect status is 303
 			require.Equal(t, http.StatusSeeOther, res.StatusCode)
 		})
@@ -322,7 +320,7 @@ func TestInitFlow(t *testing.T) {
 
 func TestDisabledFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 
 	conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationEnabled, false)
 	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/login.schema.json")
@@ -343,7 +341,7 @@ func TestDisabledFlow(t *testing.T) {
 
 		res, err := c.Do(req)
 		require.NoError(t, err)
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		body, err := io.ReadAll(res.Body)
 		require.NoError(t, err)
 		return res, body
@@ -380,8 +378,9 @@ func TestDisabledFlow(t *testing.T) {
 
 func TestGetFlow(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 	conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationEnabled, true)
+	returnToTS := testhelpers.NewRedirTS(t, "return_to", conf)
 
 	conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
 		{ID: "email", URL: "file://./stub/registration.schema.json", SelfserviceSelectable: true},
@@ -444,7 +443,7 @@ func TestGetFlow(t *testing.T) {
 	})
 
 	t.Run("case=expired with return_to and identity_schema", func(t *testing.T) {
-		returnTo := "https://www.ory.sh"
+		returnTo := returnToTS.URL
 		conf.MustSet(ctx, config.ViperKeyURLsAllowedReturnToDomains, []string{returnTo})
 
 		client := testhelpers.NewClientWithCookies(t)
@@ -493,7 +492,7 @@ func TestOIDCStrategyOrder(t *testing.T) {
 	t.Logf("This test has been set up to validate the current incorrect `oidc` behaviour. When submitting the form, the `oidc` strategy is executed first, even if the method is set to `password`.")
 
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 
 	// reorder the strategies
 	reg.WithSelfserviceStrategies(t, []any{
@@ -553,7 +552,7 @@ func TestOIDCStrategyOrder(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, resp.StatusCode, "%s", ioutilx.MustReadAll(resp.Body))
 
-		verifiableAddress, err := reg.PrivilegedIdentityPool().FindVerifiableAddressByValue(ctx, identity.VerifiableAddressTypeEmail, email)
+		verifiableAddress, err := reg.PrivilegedIdentityPool().FindVerifiableAddressByValue(ctx, identity.AddressTypeEmail, email)
 		require.NoError(t, err)
 		require.Equal(t, strings.ToLower(email), verifiableAddress.Value)
 
@@ -583,7 +582,7 @@ func TestOIDCStrategyOrder(t *testing.T) {
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 		b, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)

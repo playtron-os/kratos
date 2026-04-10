@@ -10,24 +10,18 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/ory/kratos/identity"
-	"github.com/ory/x/pagination/keysetpagination"
-
 	"github.com/bradleyjkemp/cupaloy/v2"
-	"github.com/stretchr/testify/assert"
-
-	"github.com/ory/x/migratest"
-
 	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ory/pop/v6"
 
 	"github.com/ory/kratos/driver"
 	"github.com/ory/kratos/driver/config"
+	"github.com/ory/kratos/identity"
+	"github.com/ory/kratos/persistence/sql"
+	gomigrations "github.com/ory/kratos/persistence/sql/migrations/go"
 	"github.com/ory/kratos/selfservice/flow/login"
 	"github.com/ory/kratos/selfservice/flow/recovery"
 	"github.com/ory/kratos/selfservice/flow/registration"
@@ -37,8 +31,14 @@ import (
 	"github.com/ory/kratos/selfservice/strategy/link"
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/x"
+	"github.com/ory/pop/v6"
 	"github.com/ory/x/configx"
+	"github.com/ory/x/dbal"
+	"github.com/ory/x/fsx"
 	"github.com/ory/x/logrusx"
+	"github.com/ory/x/migratest"
+	"github.com/ory/x/networkx"
+	"github.com/ory/x/pagination/keysetpagination"
 	"github.com/ory/x/popx"
 	"github.com/ory/x/sqlcon"
 	"github.com/ory/x/sqlcon/dockertest"
@@ -64,7 +64,7 @@ func CompareWithFixture(t *testing.T, actual interface{}, prefix string, id stri
 func TestMigrations_SQLite(t *testing.T) {
 	t.Parallel()
 	sqlite, err := pop.NewConnection(&pop.ConnectionDetails{
-		URL: "sqlite3://" + filepath.Join(os.TempDir(), x.NewUUID().String()) + ".sql?_fk=true",
+		URL: dbal.NewSQLiteTestDatabase(t),
 	})
 	require.NoError(t, err)
 	require.NoError(t, sqlite.Open())
@@ -77,7 +77,7 @@ func TestMigrations_Postgres(t *testing.T) {
 		t.Skip("skipping testing in short mode")
 	}
 	t.Parallel()
-	testDatabase(t, "postgres", dockertest.ConnectPop(t, dockertest.RunTestPostgreSQLWithVersion(t, "11.8")))
+	testDatabase(t, "postgres", dockertest.ConnectPop(t, dockertest.RunTestPostgreSQLWithVersion(t, "16")))
 }
 
 func TestMigrations_Mysql(t *testing.T) {
@@ -93,7 +93,7 @@ func TestMigrations_Cockroach(t *testing.T) {
 		t.Skip("skipping testing in short mode")
 	}
 	t.Parallel()
-	testDatabase(t, "cockroach", dockertest.ConnectPop(t, dockertest.RunTestCockroachDBWithVersion(t, "latest-v23.1")))
+	testDatabase(t, "cockroach", dockertest.ConnectPop(t, dockertest.RunTestCockroachDBWithVersion(t, "latest-v25.4")))
 }
 
 func testDatabase(t *testing.T, db string, c *pop.Connection) {
@@ -113,7 +113,7 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 	if db != "sqlite" {
 		dbName := "testdb" + strings.ReplaceAll(x.NewUUID().String(), "-", "")
 		require.NoError(t, c.RawQuery("CREATE DATABASE "+dbName).Exec())
-		url = regexp.MustCompile("/[a-z0-9]+\\?").ReplaceAllString(url, "/"+dbName+"?")
+		url = regexp.MustCompile(`/[a-z0-9]+\?`).ReplaceAllString(url, "/"+dbName+"?")
 	}
 
 	t.Logf("URL: %s", url)
@@ -123,36 +123,41 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 	require.NoError(t, c.Open())
 
 	tm, err := popx.NewMigrationBox(
-		os.DirFS("../migrations/sql"),
+		fsx.Merge(sql.Migrations, networkx.Migrations),
 		c, l,
+		popx.WithGoMigrations(gomigrations.All),
 		popx.WithTestdata(t, os.DirFS("./testdata")),
-		popx.WithDumpMigrations(),
 	)
 	require.NoError(t, err)
-	require.NoError(t, tm.Up(ctx))
+
+	err = tm.Up(ctx) // for easy breakpointing
+	// _ = tm.DumpMigrationSchema(ctx) // uncomment to get the current state of the database after migrations have run
+	if !assert.NoError(t, err) {
+		assert.NoError(t, tm.DumpMigrationSchema(ctx))
+		t.FailNow()
+	}
+
+	opts := driver.WithConfigOptions(
+		configx.WithValues(map[string]any{
+			config.ViperKeyDSN:             url,
+			config.ViperKeyPublicBaseURL:   "https://www.ory.sh/",
+			config.ViperKeyIdentitySchemas: config.Schemas{{ID: "default", URL: "file://stub/default.schema.json"}},
+			config.ViperKeySecretsDefault:  []string{"secret"},
+		}),
+		configx.SkipValidation(),
+	)
 
 	t.Run("suite=fixtures", func(t *testing.T) {
-		wg := &sync.WaitGroup{}
-
-		d, err := driver.New(
-			context.Background(),
-			os.Stderr,
-			driver.WithConfigOptions(
-				configx.WithValues(map[string]any{
-					config.ViperKeyDSN:             url,
-					config.ViperKeyPublicBaseURL:   "https://www.ory.sh/",
-					config.ViperKeyIdentitySchemas: config.Schemas{{ID: "default", URL: "file://stub/default.schema.json"}},
-					config.ViperKeySecretsDefault:  []string{"secret"},
-				}),
-				configx.SkipValidation(),
-			),
-		)
-		require.NoError(t, err)
-
 		t.Run("case=identity", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			ids, _, err := d.PrivilegedIdentityPool().ListIdentities(context.Background(), identity.ListIdentityParameters{Expand: identity.ExpandEverything, KeySetPagination: []keysetpagination.Option{keysetpagination.WithSize(1000)}})
 			require.NoError(t, err)
@@ -178,9 +183,15 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=identity_get", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			ids, _, err := d.PrivilegedIdentityPool().ListIdentities(context.Background(), identity.ListIdentityParameters{Expand: identity.ExpandNothing, KeySetPagination: []keysetpagination.Option{keysetpagination.WithSize(1000)}})
 			require.NoError(t, err)
@@ -199,8 +210,7 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=verification_token", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []link.VerificationToken
@@ -214,13 +224,18 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=session", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
 			t.Parallel()
 
 			var ids []session.Session
 			require.NoError(t, c.Select("id").All(&ids))
 			require.NotEmpty(t, ids)
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			var found []string
 			for _, id := range ids {
@@ -234,13 +249,19 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=login", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []login.Flow
 			require.NoError(t, c.Select("id").All(&ids))
 			require.NotEmpty(t, ids)
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			var found []string
 			for _, id := range ids {
@@ -253,13 +274,19 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=registration", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []registration.Flow
 			require.NoError(t, c.Select("id").All(&ids))
 			require.NotEmpty(t, ids)
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			var found []string
 			for _, id := range ids {
@@ -272,13 +299,19 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=settings_flow", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []settings.Flow
 			require.NoError(t, c.Select("id").All(&ids))
 			require.NotEmpty(t, ids)
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			var found []string
 			for _, id := range ids {
@@ -291,13 +324,19 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=recovery_flow", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []recovery.Flow
 			require.NoError(t, c.Select("id").All(&ids))
 			require.NotEmpty(t, ids)
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			var found []string
 			for _, id := range ids {
@@ -310,13 +349,19 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=verification_flow", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []verification.Flow
 			require.NoError(t, c.Select("id").All(&ids))
 			require.NotEmpty(t, ids)
+
+			d, err := driver.New(
+				context.Background(),
+				os.Stderr,
+				opts,
+			)
+			require.NoError(t, err)
 
 			var found []string
 			for _, id := range ids {
@@ -329,8 +374,7 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=recovery_token", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []link.RecoveryToken
@@ -346,8 +390,7 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=recovery_code", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []code.RecoveryCode
@@ -363,8 +406,7 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=registration_code", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []code.RegistrationCode
@@ -380,8 +422,7 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 		})
 
 		t.Run("case=login_code", func(t *testing.T) {
-			wg.Add(1)
-			defer wg.Done()
+
 			t.Parallel()
 
 			var ids []code.LoginCode
@@ -395,23 +436,36 @@ func testDatabase(t *testing.T, db string, c *pop.Connection) {
 			}
 			migratest.ContainsExpectedIds(t, filepath.Join("fixtures", "login_code"), found)
 		})
-
-		t.Run("suite=constraints", func(t *testing.T) {
-			// This is not really a parallel test, but we have to mark it parallel so the other tests run first.
-			t.Parallel()
-			wg.Wait()
-
-			sr, err := d.SettingsFlowPersister().GetSettingsFlow(context.Background(), x.ParseUUID("a79bfcf1-68ae-49de-8b23-4f96921b8341"))
-			require.NoError(t, err)
-
-			require.NoError(t, d.PrivilegedIdentityPool().DeleteIdentity(context.Background(), sr.IdentityID))
-
-			_, err = d.SettingsFlowPersister().GetSettingsFlow(context.Background(), x.ParseUUID("a79bfcf1-68ae-49de-8b23-4f96921b8341"))
-			require.Error(t, err)
-			require.ErrorIs(t, err, sqlcon.ErrNoRows)
-		})
 	})
 
-	err = tm.Down(ctx, -1) // for easy breakpointing
-	require.NoError(t, err)
+	t.Run("suite=constraints", func(t *testing.T) {
+		t.Cleanup(func() {
+			// clean up test duplicates - remove identity_credential_identifiers 10985ed1-5b6e-4012-ac10-03d87df65618 - otherwise down migration later fails.
+			require.NoError(t, c.RawQuery("DELETE FROM identity_credential_identifiers WHERE identifier = '10985ed1-5b6e-4012-ac10-03d87df65618'").Exec())
+		})
+
+		d, err := driver.New(
+			context.Background(),
+			os.Stderr,
+			opts,
+		)
+		require.NoError(t, err)
+
+		sr, err := d.SettingsFlowPersister().GetSettingsFlow(context.Background(), x.ParseUUID("a79bfcf1-68ae-49de-8b23-4f96921b8341"))
+		require.NoError(t, err)
+
+		require.NoError(t, d.PrivilegedIdentityPool().DeleteIdentity(context.Background(), sr.IdentityID))
+
+		_, err = d.SettingsFlowPersister().GetSettingsFlow(context.Background(), x.ParseUUID("a79bfcf1-68ae-49de-8b23-4f96921b8341"))
+		require.Error(t, err)
+		require.ErrorIs(t, err, sqlcon.ErrNoRows)
+	})
+
+	t.Run("suite=down", func(t *testing.T) {
+		err = tm.Down(ctx, -1) // for easy breakpointing
+		if !assert.NoError(t, err) {
+			assert.NoError(t, tm.DumpMigrationSchema(ctx))
+			t.FailNow()
+		}
+	})
 }

@@ -17,19 +17,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
+	"github.com/ory/x/configx"
+
 	"github.com/ory/kratos/driver"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	kratos "github.com/ory/kratos/internal/httpclient"
-	"github.com/ory/kratos/internal/registrationhelpers"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	kratos "github.com/ory/kratos/pkg/httpclient"
+	"github.com/ory/kratos/pkg/registrationhelpers"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/registration"
 	"github.com/ory/kratos/selfservice/strategy/webauthn"
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/ui/node"
-	"github.com/ory/kratos/x"
 	"github.com/ory/x/assertx"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/snapshotx"
@@ -37,8 +38,6 @@ import (
 
 var (
 	flows = []string{"spa", "browser"}
-	//go:embed fixtures/registration/success/identity.json
-	registrationFixtureSuccessIdentity []byte
 	//go:embed fixtures/registration/success/response.json
 	registrationFixtureSuccessResponse []byte
 	//go:embed fixtures/registration/success/internal_context.json
@@ -51,31 +50,28 @@ func flowToIsSPA(flow string) bool {
 	return flow == "spa"
 }
 
-func newRegistrationRegistry(t *testing.T) *driver.RegistryDefault {
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	conf.MustSet(ctx, config.ViperKeySelfServiceStrategyConfig+"."+string(identity.CredentialsTypePassword)+".enabled", true)
-	enableWebAuthn(conf)
-	conf.MustSet(ctx, config.ViperKeyWebAuthnPasswordless, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationLoginHints, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationEnableLegacyOneStep, true)
-	conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationEnableLegacyOneStep, true)
-
+func newRegistrationRegistry(t *testing.T, cfgOpts ...configx.OptionModifier) *driver.RegistryDefault {
+	_, reg := pkg.NewFastRegistryWithMocks(t, append([]configx.OptionModifier{
+		configx.WithValues(map[string]any{
+			config.ViperKeySelfServiceStrategyConfig + "." + string(identity.CredentialsTypePassword) + ".enabled": true,
+			config.ViperKeyWebAuthnPasswordless:                       true,
+			config.ViperKeySelfServiceRegistrationLoginHints:          true,
+			config.ViperKeySelfServiceRegistrationEnableLegacyOneStep: true,
+		}),
+		enabledWebauthn,
+	}, cfgOpts...)...)
 	return reg
 }
 
 func TestRegistration(t *testing.T) {
-	reg := newRegistrationRegistry(t)
+	reg := newRegistrationRegistry(t, configx.WithValues(testhelpers.DefaultIdentitySchemaConfig("file://./stub/registration.schema.json")))
 	conf := reg.Config()
 
-	router := x.NewRouterPublic(reg)
-	publicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, router, x.NewRouterAdmin(reg))
+	publicTS, _ := testhelpers.NewKratosServer(t, reg)
 
 	_ = testhelpers.NewErrorTestServer(t, reg)
 	_ = testhelpers.NewRegistrationUIFlowEchoServer(t, reg)
 	_ = testhelpers.NewRedirSessionEchoTS(t, reg)
-
-	testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/registration.schema.json")
-	conf.MustSet(ctx, config.ViperKeySecretsDefault, []string{"not-a-secure-session-key"})
 
 	redirTS := testhelpers.NewRedirSessionEchoTS(t, reg)
 	redirNoSessionTS := testhelpers.NewRedirNoSessionTS(t, reg)
@@ -83,8 +79,8 @@ func TestRegistration(t *testing.T) {
 	// set the "return to" server, which will assert the session state
 	// (redirTS: enforce that a session exists, redirNoSessionTS: enforce that no session exists)
 	useReturnToFromTS := func(ts *httptest.Server) {
-		conf.MustSet(ctx, config.ViperKeySelfServiceBrowserDefaultReturnTo, ts.URL+"/default-return-to")
-		conf.MustSet(ctx, config.ViperKeySelfServiceRegistrationAfter+"."+config.DefaultBrowserReturnURL, ts.URL+"/registration-return-ts")
+		conf.MustSet(t.Context(), config.ViperKeySelfServiceBrowserDefaultReturnTo, ts.URL+"/default-return-to")
+		conf.MustSet(t.Context(), config.ViperKeySelfServiceRegistrationAfter+"."+config.DefaultBrowserReturnURL, ts.URL+"/registration-return-ts")
 	}
 	useReturnToFromTS(redirTS)
 
@@ -126,9 +122,9 @@ func TestRegistration(t *testing.T) {
 	})
 
 	t.Run("case=webauthn button does not exist when passwordless is disabled", func(t *testing.T) {
-		conf.MustSet(ctx, config.ViperKeyWebAuthnPasswordless, false)
+		conf.MustSet(t.Context(), config.ViperKeyWebAuthnPasswordless, false)
 		t.Cleanup(func() {
-			conf.MustSet(ctx, config.ViperKeyWebAuthnPasswordless, true)
+			conf.MustSet(t.Context(), config.ViperKeyWebAuthnPasswordless, true)
 		})
 		for _, f := range flows {
 			t.Run(f, func(t *testing.T) {
@@ -169,7 +165,7 @@ func TestRegistration(t *testing.T) {
 
 		for _, f := range flows {
 			t.Run("type="+f, func(t *testing.T) {
-				actual := registrationhelpers.ExpectValidationError(t, publicTS, conf, f, values)
+				actual := registrationhelpers.ExpectValidationError(t.Context(), t, publicTS, conf, f, values)
 
 				assert.NotEmpty(t, gjson.Get(actual, "id").String(), "%s", actual)
 				assert.Contains(t, gjson.Get(actual, "ui.action").String(), publicTS.URL+registration.RouteSubmitFlow, "%s", actual)
@@ -193,7 +189,7 @@ func TestRegistration(t *testing.T) {
 
 		for _, f := range flows {
 			t.Run("type="+f, func(t *testing.T) {
-				actual := registrationhelpers.ExpectValidationError(t, publicTS, conf, f, values)
+				actual := registrationhelpers.ExpectValidationError(t.Context(), t, publicTS, conf, f, values)
 
 				assert.NotEmpty(t, gjson.Get(actual, "id").String(), "%s", actual)
 				assert.Contains(t, gjson.Get(actual, "ui.action").String(), publicTS.URL+registration.RouteSubmitFlow, "%s", actual)
@@ -216,7 +212,7 @@ func TestRegistration(t *testing.T) {
 
 		for _, f := range flows {
 			t.Run("type="+f, func(t *testing.T) {
-				actual := registrationhelpers.ExpectValidationError(t, publicTS, conf, f, values)
+				actual := registrationhelpers.ExpectValidationError(t.Context(), t, publicTS, conf, f, values)
 				assert.NotEmpty(t, gjson.Get(actual, "id").String(), "%s", actual)
 				assert.Contains(t, gjson.Get(actual, "ui.action").String(), publicTS.URL+registration.RouteSubmitFlow, "%s", actual)
 				registrationhelpers.CheckFormContent(t, []byte(actual), node.WebAuthnRegisterTrigger, "csrf_token", "traits.username", "traits.foobar")
@@ -338,7 +334,7 @@ func TestRegistration(t *testing.T) {
 
 	t.Run("successful registration", func(t *testing.T) {
 		t.Cleanup(func() {
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), nil)
+			conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), nil)
 		})
 
 		values := func(email string) func(v url.Values) {
@@ -355,7 +351,7 @@ func TestRegistration(t *testing.T) {
 			t.Cleanup(func() {
 				useReturnToFromTS(redirTS)
 			})
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), nil)
+			conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), nil)
 
 			for _, f := range flows {
 				t.Run("type="+f, func(t *testing.T) {
@@ -388,7 +384,7 @@ func TestRegistration(t *testing.T) {
 			t.Cleanup(func() {
 				useReturnToFromTS(redirTS)
 			})
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), nil)
+			conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypePassword.String()), nil)
 
 			for _, f := range flows {
 				t.Run("type="+f, func(t *testing.T) {
@@ -413,9 +409,9 @@ func TestRegistration(t *testing.T) {
 		})
 
 		t.Run("case=should create the identity and a session and use the correct schema", func(t *testing.T) {
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
-			conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "advanced-user")
-			conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
+			conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
+			conf.MustSet(t.Context(), config.ViperKeyDefaultIdentitySchemaID, "advanced-user")
+			conf.MustSet(t.Context(), config.ViperKeyIdentitySchemas, config.Schemas{
 				{ID: "does-not-exist", URL: "file://./stub/profile.schema.json"},
 				{ID: "advanced-user", URL: "file://./stub/registration.schema.json"},
 			})
@@ -438,7 +434,7 @@ func TestRegistration(t *testing.T) {
 		})
 
 		t.Run("case=not able to create the same account twice", func(t *testing.T) {
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
+			conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
 			testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/registration.schema.json")
 
 			for _, f := range flows {
@@ -456,7 +452,7 @@ func TestRegistration(t *testing.T) {
 		})
 
 		t.Run("case=reset previous form errors", func(t *testing.T) {
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
+			conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
 			testhelpers.SetDefaultIdentitySchema(conf, "file://./stub/registration.schema.json")
 
 			for _, f := range flows {
@@ -486,9 +482,9 @@ func TestRegistration(t *testing.T) {
 		})
 
 		t.Run("case=multi-schema should create the identity and a session and use the correct schema", func(t *testing.T) {
-			conf.MustSet(ctx, config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
-			conf.MustSet(ctx, config.ViperKeyDefaultIdentitySchemaID, "does-not-exist")
-			conf.MustSet(ctx, config.ViperKeyIdentitySchemas, config.Schemas{
+			conf.MustSet(t.Context(), config.HookStrategyKey(config.ViperKeySelfServiceRegistrationAfter, identity.CredentialsTypeWebAuthn.String()), []config.SelfServiceHook{{Name: "session"}})
+			conf.MustSet(t.Context(), config.ViperKeyDefaultIdentitySchemaID, "does-not-exist")
+			conf.MustSet(t.Context(), config.ViperKeyIdentitySchemas, config.Schemas{
 				{ID: "does-not-exist", URL: "file://./stub/profile.schema.json"},
 				{ID: "advanced-user", URL: "file://./stub/registration.schema.json", SelfserviceSelectable: true},
 			})
@@ -548,7 +544,7 @@ func TestRegistration(t *testing.T) {
 
 func TestPopulateRegistrationMethod(t *testing.T) {
 	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
+	conf, reg := pkg.NewFastRegistryWithMocks(t)
 
 	ctx = testhelpers.WithDefaultIdentitySchema(ctx, "file://stub/registration.schema.json")
 	ctx = contextx.WithConfigValue(ctx, config.ViperKeyWebAuthnRPID, "localhost")

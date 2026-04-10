@@ -28,21 +28,18 @@ type Migration struct {
 	DBType string
 	// Runner function to run/execute the migration. Will be wrapped in a
 	// database transaction. Mutually exclusive with RunnerNoTx
-	Runner func(Migration, *pop.Connection, *pop.Tx) error
-	// RunnerNoTx function to run/execute the migration. NOT wrapped in a
-	// database transaction. Mutually exclusive with Runner.
-	RunnerNoTx func(Migration, *pop.Connection) error
+	Runner func(Migration, *pop.Connection) error
 	// Content is the raw content of the migration file
 	Content string
+	// Autocommit indicates whether the migration should be run in autocommit mode
+	Autocommit bool
 }
 
 func (m Migration) Valid() error {
-	if m.Runner == nil && m.RunnerNoTx == nil {
+	if m.Runner == nil {
 		return errors.Errorf("no runner defined for %s", m.Path)
 	}
-	if m.Runner != nil && m.RunnerNoTx != nil {
-		return errors.Errorf("incompatible transaction and non-transaction runners defined for %s", m.Path)
-	}
+
 	return nil
 }
 
@@ -66,23 +63,40 @@ func compareMigration(a, b Migration) int {
 	return strings.Compare(a.DBType, b.DBType)
 }
 
-func (mfs Migrations) sortAndFilter(dialect string) Migrations {
-	usable := make(map[string]Migration, len(mfs))
-	for _, v := range mfs {
-		if v.DBType == dialect {
-			usable[v.Version] = v
-		} else if v.DBType == "all" {
-			// Add "all" only if we do not have a more specific migration for the dialect.
-			// If a more specific migration is found later, it will override this one.
-			if _, ok := usable[v.Version]; !ok {
-				usable[v.Version] = v
-			}
-		}
+// specificity returns an integer representing how specific the migration is.
+// Higher numbers indicate a more specific migration.
+func specificity(m *Migration) int {
+	specificity := 0
+	if m.DBType != "all" {
+		specificity += 1
 	}
 
-	filtered := make(Migrations, 0, len(usable))
-	for k := range usable {
-		filtered = append(filtered, usable[k])
+	return specificity
+}
+
+// isApplicable checks whether the migration is applicable for the given dialect.
+func isApplicable(m Migration, dialect string) bool {
+	return m.DBType == dialect || m.DBType == "all"
+}
+
+func (mfs Migrations) sortAndFilter(dialect string) Migrations {
+	byVersion := make(map[string]Migration, len(mfs))
+	for _, migration := range mfs {
+		if !isApplicable(migration, dialect) {
+			continue
+		}
+		if previousMigration, ok := byVersion[migration.Version]; ok {
+			if specificity(&migration) < specificity(&previousMigration) {
+				// Previous migration is more specific, skip this one.
+				continue
+			}
+		}
+		byVersion[migration.Version] = migration
+	}
+
+	filtered := make(Migrations, 0, len(byVersion))
+	for k := range byVersion {
+		filtered = append(filtered, byVersion[k])
 	}
 	sort.Sort(filtered)
 	return filtered

@@ -4,20 +4,19 @@
 package courier
 
 import (
-	"fmt"
 	"net/http"
 
-	"github.com/ory/kratos/x/nosurfx"
-	"github.com/ory/kratos/x/redir"
-
 	"github.com/gofrs/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/ory/herodot"
-	"github.com/ory/x/pagination/keysetpagination"
-	"github.com/ory/x/pagination/migrationpagination"
-
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/x"
+	"github.com/ory/kratos/x/nosurfx"
+	"github.com/ory/kratos/x/redir"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	keysetpagination "github.com/ory/x/pagination/keysetpagination_v2"
 )
 
 const (
@@ -28,8 +27,8 @@ const (
 
 type (
 	handlerDependencies interface {
-		x.WriterProvider
-		x.LoggingProvider
+		httpx.WriterProvider
+		logrusx.Provider
 		nosurfx.CSRFProvider
 		PersistenceProvider
 		config.Provider
@@ -46,13 +45,13 @@ func NewHandler(r handlerDependencies) *Handler {
 	return &Handler{r: r}
 }
 
-func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
-	h.r.CSRFHandler().IgnoreGlobs(x.AdminPrefix+AdminRouteListMessages, AdminRouteListMessages)
-	public.GET(x.AdminPrefix+AdminRouteListMessages, redir.RedirectToAdminRoute(h.r))
-	public.GET(x.AdminPrefix+AdminRouteGetMessage, redir.RedirectToAdminRoute(h.r))
+func (h *Handler) RegisterPublicRoutes(public *httprouterx.RouterPublic) {
+	h.r.CSRFHandler().IgnoreGlobs(httprouterx.AdminPrefix+AdminRouteListMessages, AdminRouteListMessages)
+	public.GET(httprouterx.AdminPrefix+AdminRouteListMessages, redir.RedirectToAdminRoute(h.r))
+	public.GET(httprouterx.AdminPrefix+AdminRouteGetMessage, redir.RedirectToAdminRoute(h.r))
 }
 
-func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(admin *httprouterx.RouterAdmin) {
 	admin.GET(AdminRouteListMessages, h.listCourierMessages)
 	admin.GET(AdminRouteGetMessage, h.getCourierMessage)
 }
@@ -64,7 +63,7 @@ func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
 //nolint:deadcode,unused
 //lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type listCourierMessagesResponse struct {
-	migrationpagination.ResponseHeaderAnnotation
+	keysetpagination.ResponseHeaders
 
 	// List of identities
 	//
@@ -111,46 +110,50 @@ type ListCourierMessagesParameters struct {
 //	  200: listCourierMessages
 //	  400: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) listCourierMessages(w http.ResponseWriter, r *http.Request) {
-	filter, paginator, err := parseMessagesFilter(r)
+	keys := h.r.Config().SecretsPagination(r.Context())
+	filter, paginator, err := parseMessagesFilter(r, keys)
 	if err != nil {
 		h.r.Writer().WriteErrorCode(w, r, http.StatusBadRequest, err)
 		return
 	}
 
-	l, tc, nextPage, err := h.r.CourierPersister().ListMessages(r.Context(), filter, paginator)
+	messages, nextPage, err := h.r.CourierPersister().ListMessages(r.Context(), filter, paginator)
 	if err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
 	}
 
 	if !h.r.Config().IsInsecureDevMode(r.Context()) {
-		for i := range l {
-			l[i].Body = "<redacted-unless-dev-mode>"
+		for i := range messages {
+			messages[i].Body = "<redacted-unless-dev-mode>"
+			messages[i].Subject = "<redacted-unless-dev-mode>"
 		}
 	}
 
-	w.Header().Set("X-Total-Count", fmt.Sprint(tc))
 	u := *r.URL
-	keysetpagination.Header(w, &u, nextPage)
-	h.r.Writer().Write(w, r, l)
+	keysetpagination.SetLinkHeader(w, keys, &u, nextPage)
+	h.r.Writer().Write(w, r, messages)
 }
 
-func parseMessagesFilter(r *http.Request) (ListCourierMessagesParameters, []keysetpagination.Option, error) {
+func parseMessagesFilter(r *http.Request, keys [][32]byte) (ListCourierMessagesParameters, []keysetpagination.Option, error) {
 	var status *MessageStatus
 
 	if r.URL.Query().Has("status") {
 		ms, err := ToMessageStatus(r.URL.Query().Get("status"))
 		if err != nil {
-			return ListCourierMessagesParameters{}, nil, err
+			return ListCourierMessagesParameters{}, nil, errors.WithStack(err)
 		}
 
 		status = &ms
 	}
 
-	opts, err := keysetpagination.Parse(r.URL.Query(), keysetpagination.NewMapPageToken)
+	opts, err := keysetpagination.ParseQueryParams(keys, r.URL.Query())
 	if err != nil {
-		return ListCourierMessagesParameters{}, nil, err
+		return ListCourierMessagesParameters{}, nil, errors.WithStack(err)
 	}
 
 	return ListCourierMessagesParameters{
@@ -191,6 +194,9 @@ type getCourierMessage struct {
 //		200: message
 //		400: errorGeneric
 //		default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-medium
 func (h *Handler) getCourierMessage(w http.ResponseWriter, r *http.Request) {
 	msgID, err := uuid.FromString(r.PathValue("msgID"))
 	if err != nil {
@@ -206,6 +212,7 @@ func (h *Handler) getCourierMessage(w http.ResponseWriter, r *http.Request) {
 
 	if !h.r.Config().IsInsecureDevMode(r.Context()) {
 		message.Body = "<redacted-unless-dev-mode>"
+		message.Subject = "<redacted-unless-dev-mode>"
 	}
 
 	h.r.Writer().Write(w, r, message)

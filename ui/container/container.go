@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/ory/kratos/ui/node"
@@ -20,19 +22,17 @@ import (
 	"github.com/ory/x/decoderx"
 	"github.com/ory/x/jsonschemax"
 	"github.com/ory/x/jsonx"
-	"github.com/ory/x/stringslice"
 
 	"github.com/ory/kratos/schema"
 	"github.com/ory/kratos/text"
 )
 
 var (
-	decoder             = decoderx.NewHTTP()
-	_       ErrorParser = new(Container)
-	_       ValueSetter = new(Container)
-	_       Resetter    = new(Container)
-	_       CSRFSetter  = new(Container)
-	_       NodeGetter  = new(Container)
+	_ ErrorParser = (*Container)(nil)
+	_ ValueSetter = (*Container)(nil)
+	_ Resetter    = (*Container)(nil)
+	_ CSRFSetter  = (*Container)(nil)
+	_ NodeGetter  = (*Container)(nil)
 )
 
 // Container represents a HTML Form. The container can work with both HTTP Form and JSON requests
@@ -74,7 +74,7 @@ func New(action string) *Container {
 func NewFromHTTPRequest(r *http.Request, group node.UiNodeGroup, action string, compiler decoderx.HTTPDecoderOption) (*Container, error) {
 	c := New(action)
 	raw := json.RawMessage(`{}`)
-	if err := decoder.Decode(r, &raw, compiler); err != nil {
+	if err := decoderx.Decode(r, &raw, compiler); err != nil {
 		if err := c.ParseError(group, err); err != nil {
 			return nil, err
 		}
@@ -146,7 +146,7 @@ func (c *Container) SortNodes(ctx context.Context, opts ...node.SortOption) erro
 func (c *Container) ResetMessages(exclude ...string) {
 	c.Messages = nil
 	for k, n := range c.Nodes {
-		if !stringslice.Has(exclude, n.ID()) {
+		if !slices.Contains(exclude, n.ID()) {
 			n.Messages = nil
 		}
 		c.Nodes[k] = n
@@ -215,6 +215,8 @@ func (c *Container) ParseError(group node.UiNodeGroup, err error) error {
 	return err
 }
 
+var formatErrorMatcher = regexp.MustCompile(`"([^"]+)"\s+is not valid\s+"([^"]+)"`)
+
 func translateValidationError(err *jsonschema.ValidationError) *text.Message {
 	segments := strings.Split(err.SchemaPtr, "/")
 	switch segments[len(segments)-1] {
@@ -271,6 +273,23 @@ func translateValidationError(err *jsonschema.ValidationError) *text.Message {
 			return text.NewErrorValidationConst(expectedValue)
 		}
 		return text.NewErrorValidationConstGeneric()
+	case "format":
+		m := formatErrorMatcher.FindStringSubmatch(err.Message)
+		if len(m) != 3 {
+			return text.NewValidationErrorGeneric(err.Message)
+		}
+
+		value := m[1]
+		format := m[2]
+
+		switch format {
+		case "email":
+			return text.NewErrorValidationEmail(value)
+		case "tel":
+			return text.NewErrorValidationPhone(value)
+		default:
+			return text.NewValidationErrorGeneric(err.Message)
+		}
 	default:
 		return text.NewValidationErrorGeneric(err.Message)
 	}
@@ -319,7 +338,7 @@ func (c *Container) SetValue(id string, n *node.Node) {
 // AddMessage adds the provided error, and if a non-empty names list is set,
 // adds the error on the corresponding field.
 func (c *Container) AddMessage(group node.UiNodeGroup, err *text.Message, setForFields ...string) {
-	if len(stringslice.TrimSpaceEmptyFilter(setForFields)) == 0 {
+	if !slices.ContainsFunc(setForFields, func(s string) bool { return strings.TrimSpace(s) != "" }) {
 		c.Messages = append(c.Messages, *err)
 		return
 	}
@@ -341,7 +360,10 @@ func (c *Container) Scan(value interface{}) error {
 }
 
 func (c *Container) Value() (driver.Value, error) {
-	return sqlxx.JSONValue(c)
+	if c == nil {
+		return nil, nil
+	}
+	return json.Marshal(c)
 }
 
 func addPrefix(name, prefix, separator string) string {

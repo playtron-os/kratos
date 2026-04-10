@@ -198,17 +198,9 @@ func toHeaderMap(headers []string) map[string]struct{} {
 	return m
 }
 
-func (c *nullConfigurator) Bool(_ string) bool {
-	return false
-}
-
-func (c *nullConfigurator) String(_ string) string {
-	return ""
-}
-
-func (c *nullConfigurator) Strings(_ string) []string {
-	return []string{}
-}
+func (c *nullConfigurator) Bool(_ string) bool        { return false }
+func (c *nullConfigurator) String(_ string) string    { return "" }
+func (c *nullConfigurator) Strings(_ string) []string { return []string{} }
 
 func newOptions(opts []Option) *options {
 	o := new(options)
@@ -224,8 +216,6 @@ func New(name string, version string, opts ...Option) *Logger {
 	o := newOptions(opts)
 	return &Logger{
 		opts:          opts,
-		name:          name,
-		version:       version,
 		leakSensitive: o.leakSensitive || o.c.Bool("log.leak_sensitive_values"),
 		redactionText: cmp.Or(o.redactionText, `Value is sensitive and has been redacted. To see the value set config key "log.leak_sensitive_values = true" or environment variable "LOG_LEAK_SENSITIVE_VALUES=true".`),
 		additionalRedactedHeaders: toHeaderMap(func() []string {
@@ -245,24 +235,8 @@ func NewT(t testing.TB, opts ...Option) *Logger {
 		t.Fatalf("Logger exited with code %d", code)
 	}))
 	l := New(t.Name(), "test", opts...)
-	l.Logger.Out = &testOutput{t}
+	l.Logger.Out = t.Output()
 	return l
-}
-
-type testOutput struct {
-	t testing.TB
-}
-
-func (t *testOutput) Write(p []byte) (n int, err error) {
-	if t.t == nil {
-		return os.Stdout.Write(p)
-	}
-	t.t.Log(t.t.Name() + " " + string(p))
-	return len(p), nil
-}
-
-func NewAudit(name string, version string, opts ...Option) *Logger {
-	return New(name, version, opts...).WithField("audience", "audit")
 }
 
 func (l *Logger) UseConfig(c configurator) {

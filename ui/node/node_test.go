@@ -122,7 +122,7 @@ func TestNodesSort(t *testing.T) {
 
 			fi, err := sortFixtures.Open(filepath.Join("fixtures/sort/input", in.Name()))
 			require.NoError(t, err)
-			defer fi.Close()
+			defer func() { _ = fi.Close() }()
 
 			var nodes node.Nodes
 			require.NoError(t, json.NewDecoder(fi).Decode(&nodes))
@@ -405,4 +405,75 @@ func TestNodeMarshalJSON(t *testing.T) {
 			assert.JSONEq(t, string(data), string(remarshalled))
 		})
 	}
+}
+
+func TestNodes_FindAll(t *testing.T) {
+	nodes := node.Nodes{
+		&node.Node{Type: node.Input, Group: node.DefaultGroup, Attributes: &node.InputAttributes{Name: "a"}},
+		&node.Node{Type: node.Input, Group: node.DefaultGroup, Attributes: &node.InputAttributes{Name: "b"}},
+		&node.Node{Type: node.Input, Group: node.DefaultGroup, Attributes: &node.InputAttributes{Name: "a"}},
+		&node.Node{Type: node.Input, Group: node.DefaultGroup, Attributes: &node.InputAttributes{Name: "c"}},
+	}
+
+	t.Run("find matches multiple nodes", func(t *testing.T) {
+		got := nodes.FindAll("a")
+		assert.Equal(t, []node.Node{*nodes[0], *nodes[2]}, got)
+	})
+
+	t.Run("find matches one node", func(t *testing.T) {
+		got := nodes.FindAll("b")
+		assert.Equal(t, []node.Node{*nodes[1]}, got)
+	})
+
+	t.Run("no match returns empty slice", func(t *testing.T) {
+		got := nodes.FindAll("x")
+		assert.Empty(t, got)
+	})
+}
+
+func TestNodes_RemoveGroup(t *testing.T) {
+	nodes := node.Nodes{
+		&node.Node{Type: node.Input, Group: node.DefaultGroup, Attributes: &node.InputAttributes{Name: "default"}},
+		&node.Node{Type: node.Input, Group: node.CaptchaGroup, Attributes: &node.InputAttributes{Name: "captcha1"}},
+		&node.Node{Type: node.Input, Group: node.IdentifierFirstGroup, Attributes: &node.InputAttributes{Name: "idfirst"}},
+		&node.Node{Type: node.Input, Group: node.CaptchaGroup, Attributes: &node.InputAttributes{Name: "captcha2"}},
+		&node.Node{Type: node.Input, Group: node.PasswordGroup, Attributes: &node.InputAttributes{Name: "password"}},
+		nil,
+	}
+
+	t.Run("removes single node", func(t *testing.T) {
+		n := append(node.Nodes(nil), nodes...)
+		n.RemoveGroup(node.IdentifierFirstGroup)
+		assert.Equal(t, node.Nodes{nodes[0], nodes[1], nodes[3], nodes[4]}, n)
+	})
+
+	t.Run("removes multiple nodes", func(t *testing.T) {
+		n := append(node.Nodes(nil), nodes...)
+		n.RemoveGroup(node.CaptchaGroup)
+		assert.Equal(t, node.Nodes{nodes[0], nodes[2], nodes[4]}, n)
+	})
+
+	t.Run("removes no nodes", func(t *testing.T) {
+		n := append(node.Nodes(nil), nodes...)
+		n.RemoveGroup(node.PasskeyGroup)
+		assert.Equal(t, nodes[:5], n)
+	})
+
+	t.Run("removes multiple groups", func(t *testing.T) {
+		n := append(node.Nodes(nil), nodes...)
+		n.RemoveGroups(node.CaptchaGroup, node.PasswordGroup)
+		assert.Equal(t, node.Nodes{nodes[0], nodes[2]}, n)
+	})
+
+	t.Run("removes multiple groups empty", func(t *testing.T) {
+		n := append(node.Nodes(nil), nodes...)
+		n.RemoveGroups()
+		assert.Equal(t, nodes, n)
+	})
+
+	t.Run("removes multiple groups no matching", func(t *testing.T) {
+		n := append(node.Nodes(nil), nodes...)
+		n.RemoveGroups(node.PasskeyGroup)
+		assert.Equal(t, nodes[:5], n)
+	})
 }

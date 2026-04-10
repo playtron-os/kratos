@@ -17,19 +17,15 @@ import (
 	"github.com/ory/kratos/ui/node"
 	"github.com/ory/kratos/x"
 	"github.com/ory/kratos/x/nosurfx"
-	"github.com/ory/x/decoderx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
 )
 
 var (
-	_ recovery.Strategy      = new(Strategy)
-	_ recovery.AdminHandler  = new(Strategy)
-	_ recovery.PublicHandler = new(Strategy)
-)
-
-var (
-	_ verification.Strategy      = new(Strategy)
-	_ verification.AdminHandler  = new(Strategy)
-	_ verification.PublicHandler = new(Strategy)
+	_ recovery.Strategy     = (*Strategy)(nil)
+	_ verification.Strategy = (*Strategy)(nil)
+	_ x.Handler             = (*Strategy)(nil)
 )
 
 type (
@@ -38,12 +34,12 @@ type (
 		*container.Container
 	}
 
-	strategyDependencies interface {
+	dependencies interface {
 		nosurfx.CSRFProvider
 		nosurfx.CSRFTokenGeneratorProvider
-		x.WriterProvider
-		x.LoggingProvider
-		x.TracingProvider
+		httpx.WriterProvider
+		logrusx.Provider
+		otelx.Provider
 		x.TransactionPersistenceProvider
 
 		config.Provider
@@ -80,16 +76,8 @@ type (
 		schema.IdentitySchemaProvider
 	}
 
-	Strategy struct {
-		d  strategyDependencies
-		dx *decoderx.HTTP
-	}
+	Strategy struct{ d dependencies }
 )
 
-func NewStrategy(d strategyDependencies) *Strategy {
-	return &Strategy{d: d, dx: decoderx.NewHTTP()}
-}
-
-func (s *Strategy) NodeGroup() node.UiNodeGroup {
-	return node.LinkGroup
-}
+func NewStrategy(d dependencies) *Strategy      { return &Strategy{d: d} }
+func (s *Strategy) NodeGroup() node.UiNodeGroup { return node.LinkGroup }

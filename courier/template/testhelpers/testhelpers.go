@@ -20,11 +20,11 @@ import (
 	"github.com/ory/kratos/courier/template"
 	"github.com/ory/kratos/driver"
 	"github.com/ory/kratos/driver/config"
-	"github.com/ory/kratos/internal"
+	"github.com/ory/kratos/pkg"
 )
 
 func SetupRemoteConfig(t *testing.T, ctx context.Context, plaintext string, html string, subject string) *driver.RegistryDefault {
-	_, reg := internal.NewVeryFastRegistryWithoutDB(t)
+	_, reg := pkg.NewVeryFastRegistryWithoutDB(t)
 	require.NoError(t, reg.Config().Set(ctx, config.ViperKeyCourierTemplatesRecoveryInvalidEmail, &config.CourierEmailTemplate{
 		Body: &config.CourierEmailBodyTemplate{
 			PlainText: plaintext,
@@ -54,7 +54,7 @@ func TestRemoteTemplates(t *testing.T, basePath string, tmplType template.Templa
 	t.Cleanup(cancel)
 
 	toBase64 := func(filePath string) string {
-		f, err := os.ReadFile(filePath)
+		f, err := os.ReadFile(filePath) // #nosec G304 -- test code
 		require.NoError(t, err)
 		return base64.StdEncoding.EncodeToString(f)
 	}
@@ -73,7 +73,7 @@ func TestRemoteTemplates(t *testing.T, basePath string, tmplType template.Templa
 		case template.TypeRecoveryCodeInvalid:
 			return email.NewRecoveryCodeInvalid(d, &email.RecoveryCodeInvalidModel{})
 		case template.TypeTestStub:
-			return email.NewTestStub(d, &email.TestStubModel{})
+			return email.NewTestStub(&email.TestStubModel{})
 		case template.TypeVerificationInvalid:
 			return email.NewVerificationInvalid(d, &email.VerificationInvalidModel{})
 		case template.TypeVerificationValid:

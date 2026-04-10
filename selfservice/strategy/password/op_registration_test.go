@@ -13,35 +13,34 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/oauth2"
-
-	"github.com/urfave/negroni"
-
-	hydraclientgo "github.com/ory/hydra-client-go/v2"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/negroni"
+	"golang.org/x/oauth2"
 
+	hydraclientgo "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
-	"github.com/ory/kratos/internal"
-	"github.com/ory/kratos/internal/testhelpers"
+	"github.com/ory/kratos/pkg"
+	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow/registration"
 	"github.com/ory/kratos/x"
+	"github.com/ory/x/configx"
 )
 
 func TestOAuth2ProviderRegistration(t *testing.T) {
-	ctx := context.Background()
-	conf, reg := internal.NewFastRegistryWithMocks(t)
-	conf.MustSet(ctx, "selfservice.flows.registration.enable_legacy_one_step", true)
+	t.Parallel()
 
-	kratosPublicTS, _ := testhelpers.NewKratosServerWithRouters(t, reg, x.NewRouterPublic(reg), x.NewRouterAdmin(reg))
+	ctx := context.Background()
+	conf, reg := pkg.NewFastRegistryWithMocks(t, configx.WithValue(config.ViperKeySelfServiceRegistrationEnableLegacyOneStep, true))
+
+	kratosPublicTS, _ := testhelpers.NewKratosServer(t, reg)
 	errTS := testhelpers.NewErrorTestServer(t, reg)
 	redirTS := testhelpers.NewRedirSessionEchoTS(t, reg)
 
 	var hydraAdminClient hydraclientgo.OAuth2API
 
-	router := x.NewRouterPublic(reg)
+	router := http.NewServeMux()
 
 	type contextKey string
 	const (
@@ -866,16 +865,40 @@ func TestOAuth2ProviderRegistration(t *testing.T) {
 			oauthClient,
 			browserClient)
 
+		// In Hydra v2.2.0-rc.3 this would have failed outright: Hydra returned an error
+		// when AcceptLoginRequest arrived with a subject (new user B) that did not match
+		// the subject in the existing login session (user A, skip=true flow).
+		//
+		// In Hydra v2.2.0 final the mismatch is handled with a prompt=login redirect
+		// instead of an error. The restart produces a fresh flow with f.Subject="" so
+		// the mismatch guard (f.Subject != "" && payload.Subject != f.Subject) in
+		// consent/handler.go does not fire on the second attempt, and the new user's
+		// subject is accepted. The flow completes successfully for user B.
+		//
+		// Security note: this is not exploitable in production. AcceptLoginRequest is a
+		// trusted admin API reachable only by the login provider (Kratos), which always
+		// sends the correctly authenticated identity ID. The change removes a hard
+		// early-failure signal for accidental subject substitution but does not
+		// introduce a new attack surface.
 		assert.EqualValues(t, clientAppState{
-			visits: 0,
-			tokens: 0,
+			visits: 1,
+			tokens: 1,
 		}, clientAS)
 
 		expected = []callTrace{
 			RegistrationUI,
-			RegistrationWithOAuth2LoginChallenge,
+			RegistrationWithOAuth2LoginChallenge, // skip=true, subject mismatch → prompt=login redirect
 			RegistrationUI,
 			RegistrationWithFlowID,
+			RegistrationUI,
+			RegistrationWithOAuth2LoginChallenge, // skip=false, f.Subject="" → guard bypassed, new subject accepted
+			LoginUI,
+			LoginWithFlowID,
+			Consent,
+			ConsentWithChallenge,
+			ConsentAccept,
+			CodeExchange,
+			CodeExchangeWithToken,
 		}
 		require.ElementsMatch(t, expected, ct, "expected the call trace to match")
 	})

@@ -9,6 +9,8 @@ import (
 
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/httpx"
 
 	"go.opentelemetry.io/otel/trace"
 
@@ -35,8 +37,8 @@ const (
 )
 
 type (
-	handlerDependencies interface {
-		x.WriterProvider
+	dependencies interface {
+		httpx.WriterProvider
 		nosurfx.CSRFProvider
 		session.ManagementProvider
 		session.PersistenceProvider
@@ -46,20 +48,12 @@ type (
 	HandlerProvider interface {
 		LogoutHandler() *Handler
 	}
-	Handler struct {
-		d  handlerDependencies
-		dx *decoderx.HTTP
-	}
+	Handler struct{ d dependencies }
 )
 
-func NewHandler(d handlerDependencies) *Handler {
-	return &Handler{
-		d:  d,
-		dx: decoderx.NewHTTP(),
-	}
-}
+func NewHandler(d dependencies) *Handler { return &Handler{d: d} }
 
-func (h *Handler) RegisterPublicRoutes(router *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(router *httprouterx.RouterPublic) {
 	h.d.CSRFHandler().IgnorePath(RouteAPIFlow)
 
 	router.GET(RouteInitBrowserFlow, h.createBrowserLogoutFlow)
@@ -67,7 +61,7 @@ func (h *Handler) RegisterPublicRoutes(router *x.RouterPublic) {
 	router.GET(RouteSubmitFlow, h.updateLogoutFlow)
 }
 
-func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(admin *httprouterx.RouterAdmin) {
 	admin.GET(RouteInitBrowserFlow, redir.RedirectToPublicRoute(h.d))
 	admin.DELETE(RouteAPIFlow, redir.RedirectToPublicRoute(h.d))
 	admin.GET(RouteSubmitFlow, redir.RedirectToPublicRoute(h.d))
@@ -139,6 +133,9 @@ type createBrowserLogoutFlow struct {
 //	  400: errorGeneric
 //	  401: errorGeneric
 //	  500: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) createBrowserLogoutFlow(w http.ResponseWriter, r *http.Request) {
 	sess, err := h.d.SessionManager().FetchFromRequest(r.Context(), r)
 	if err != nil {
@@ -230,9 +227,12 @@ type performNativeLogoutBody struct {
 //	  204: emptyResponse
 //	  400: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) performNativeLogout(w http.ResponseWriter, r *http.Request) {
 	var p performNativeLogoutBody
-	if err := h.dx.Decode(r, &p,
+	if err := decoderx.Decode(r, &p,
 		decoderx.HTTPJSONDecoder(),
 		decoderx.HTTPDecoderAllowedMethods("DELETE")); err != nil {
 		h.d.Writer().WriteError(w, r, err)
@@ -321,6 +321,9 @@ type updateLogoutFlow struct {
 //	  303: emptyResponse
 //	  204: emptyResponse
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-low
 func (h *Handler) updateLogoutFlow(w http.ResponseWriter, r *http.Request) {
 	expected := r.URL.Query().Get("token")
 	if len(expected) == 0 {

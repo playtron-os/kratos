@@ -10,20 +10,24 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
+
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
+	"github.com/ory/x/httprouterx"
 
 	"github.com/ory/kratos/selfservice/sessiontokenexchange"
+	"github.com/ory/x/otelx/semconv"
 	"github.com/ory/x/pagination/migrationpagination"
 
 	"github.com/ory/x/pagination/keysetpagination"
 
-	"github.com/ory/x/pointerx"
-
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
-
-	"github.com/ory/x/decoderx"
 
 	"github.com/ory/herodot"
 
@@ -35,9 +39,9 @@ type (
 	handlerDependencies interface {
 		ManagementProvider
 		PersistenceProvider
-		x.WriterProvider
-		x.TracingProvider
-		x.LoggingProvider
+		httpx.WriterProvider
+		otelx.Provider
+		logrusx.Provider
 		nosurfx.CSRFProvider
 		config.Provider
 		sessiontokenexchange.PersistenceProvider
@@ -46,20 +50,10 @@ type (
 	HandlerProvider interface {
 		SessionHandler() *Handler
 	}
-	Handler struct {
-		r  handlerDependencies
-		dx *decoderx.HTTP
-	}
+	Handler struct{ r handlerDependencies }
 )
 
-func NewHandler(
-	r handlerDependencies,
-) *Handler {
-	return &Handler{
-		r:  r,
-		dx: decoderx.NewHTTP(),
-	}
-}
+func NewHandler(r handlerDependencies) *Handler { return &Handler{r: r} }
 
 const (
 	RouteCollection                  = "/sessions"
@@ -74,7 +68,7 @@ const (
 	AdminRouteSessionExtendId    = RouteSession + "/extend"
 )
 
-func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(admin *httprouterx.RouterAdmin) {
 	admin.GET(RouteCollection, h.adminListSessions)
 	admin.GET(RouteSession, h.getSession)
 	admin.DELETE(RouteSession, h.disableSession)
@@ -86,7 +80,7 @@ func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
 	admin.DELETE(RouteCollection, redir.RedirectToPublicRoute(h.r))
 }
 
-func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(public *httprouterx.RouterPublic) {
 	// We need to completely ignore the whoami/logout path so that we do not accidentally set
 	// some cookie.
 	h.r.CSRFHandler().IgnorePath(RouteWhoami)
@@ -211,6 +205,9 @@ type toSession struct {
 //	  401: errorGeneric
 //	  403: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-low
 func (h *Handler) whoami(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.r.Tracer(r.Context()).Tracer().Start(r.Context(), "sessions.Handler.whoami")
 	defer span.End()
@@ -223,7 +220,7 @@ func (h *Handler) whoami(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Ory-Session-Cache-For", fmt.Sprintf("%d", int64(time.Minute.Seconds())))
 		}
 
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session found.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("No valid session found.")
 		h.r.Writer().WriteError(w, r, ErrNoSessionFound.WithWrap(err))
 		return
 	}
@@ -233,11 +230,11 @@ func (h *Handler) whoami(w http.ResponseWriter, r *http.Request) {
 		// For the time being we want to update the AAL in the database if it is unset.
 		UpsertAAL,
 	); errors.As(err, &aalErr) {
-		h.r.Audit().WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for calling this endpoint.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for calling this endpoint.")
 		h.r.Writer().WriteError(w, r, err)
 		return
 	} else if err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session cookie found.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("No valid session cookie found.")
 		h.r.Writer().WriteError(w, r, herodot.ErrUnauthorized.WithWrap(err).WithReasonf("Unable to determine AAL."))
 		return
 	}
@@ -267,7 +264,7 @@ func (h *Handler) whoami(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.r.SessionManager().RefreshCookie(ctx, w, r, s); err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("Could not re-issue cookie.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("Could not re-issue cookie.")
 		h.r.Writer().WriteError(w, r, err)
 		return
 	}
@@ -306,6 +303,9 @@ type deleteIdentitySessions struct {
 //	  401: errorGeneric
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) deleteIdentitySessions(w http.ResponseWriter, r *http.Request) {
 	iID, err := uuid.FromString(r.PathValue("id"))
 	if err != nil {
@@ -385,6 +385,9 @@ type listSessionsResponse struct {
 //	  200: listSessions
 //	  400: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-medium
 func (h *Handler) adminListSessions(w http.ResponseWriter, r *http.Request) {
 	activeRaw := r.URL.Query().Get("active")
 	activeBool, err := strconv.ParseBool(activeRaw)
@@ -469,6 +472,9 @@ type getSession struct {
 //	  200: session
 //	  400: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-low
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 	if r.PathValue("id") == "whoami" {
 		// for /admin/sessions/whoami redirect to the public route
@@ -538,6 +544,9 @@ type disableSession struct {
 //		400: errorGeneric
 //		401: errorGeneric
 //		default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) disableSession(w http.ResponseWriter, r *http.Request) {
 	sID, err := uuid.FromString(r.PathValue("id"))
 	if err != nil {
@@ -604,6 +613,9 @@ type listIdentitySessionsResponse struct {
 //	  400: errorGeneric
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-medium
 func (h *Handler) listIdentitySessions(w http.ResponseWriter, r *http.Request) {
 	iID, err := uuid.FromString(r.PathValue("id"))
 	if err != nil {
@@ -678,10 +690,13 @@ type disableMyOtherSessions struct {
 //	  400: errorGeneric
 //	  401: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-high
 func (h *Handler) deleteMySessions(w http.ResponseWriter, r *http.Request) {
 	s, err := h.r.SessionManager().FetchFromRequest(r.Context(), r)
 	if err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session cookie found.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("No valid session cookie found.")
 		h.r.Writer().WriteError(w, r, herodot.ErrUnauthorized.WithWrap(err).WithReasonf("No valid session cookie found."))
 		return
 	}
@@ -737,6 +752,9 @@ type disableMySession struct {
 //	  400: errorGeneric
 //	  401: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-high
 func (h *Handler) deleteMySession(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("id")
 	if sid == "whoami" {
@@ -747,7 +765,7 @@ func (h *Handler) deleteMySession(w http.ResponseWriter, r *http.Request) {
 
 	s, err := h.r.SessionManager().FetchFromRequest(r.Context(), r)
 	if err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session cookie found.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("No valid session cookie found.")
 		h.r.Writer().WriteError(w, r, herodot.ErrUnauthorized.WithWrap(err).WithReasonf("No valid session cookie found."))
 		return
 	}
@@ -821,10 +839,13 @@ type listMySessionsResponse struct {
 //	  400: errorGeneric
 //	  401: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) listMySessions(w http.ResponseWriter, r *http.Request) {
 	s, err := h.r.SessionManager().FetchFromRequest(r.Context(), r)
 	if err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session cookie found.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("No valid session cookie found.")
 		h.r.Writer().WriteError(w, r, errors.WithStack(herodot.ErrUnauthorized.WithWrap(err).WithReasonf("No valid session cookie found.")))
 		return
 	}
@@ -833,17 +854,17 @@ func (h *Handler) listMySessions(w http.ResponseWriter, r *http.Request) {
 
 	var aalErr *ErrAALNotSatisfied
 	if err := h.r.SessionManager().DoesSessionSatisfy(r.Context(), s, c.SessionWhoAmIAAL(r.Context())); errors.As(err, &aalErr) {
-		h.r.Audit().WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for calling this endpoint.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("Session was found but AAL is not satisfied for calling this endpoint.")
 		h.r.Writer().WriteError(w, r, err)
 		return
 	} else if err != nil {
-		h.r.Audit().WithRequest(r).WithError(err).Info("No valid session cookie found.")
+		h.r.Logger().WithRequest(r).WithError(err).Info("No valid session cookie found.")
 		h.r.Writer().WriteError(w, r, herodot.ErrUnauthorized.WithWrap(err).WithReasonf("Unable to determine AAL."))
 		return
 	}
 
 	page, perPage := x.ParsePagination(r)
-	sess, total, err := h.r.SessionPersister().ListSessionsByIdentity(r.Context(), s.IdentityID, pointerx.Ptr(true), page, perPage, s.ID, ExpandEverything)
+	sess, total, err := h.r.SessionPersister().ListSessionsByIdentity(r.Context(), s.IdentityID, new(true), page, perPage, s.ID, ExpandEverything)
 	if err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
@@ -916,6 +937,9 @@ type extendSession struct {
 //	  400: errorGeneric
 //	  404: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-admin-high
 func (h *Handler) adminSessionExtend(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.FromString(r.PathValue("id"))
 	if err != nil {
@@ -934,6 +958,8 @@ func (h *Handler) adminSessionExtend(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+
+	trace.SpanFromContext(r.Context()).AddEvent(semconv.NewDeprecatedFeatureUsedEvent(r.Context(), "legacy_slower_session_extend"))
 
 	// WARNING - this will be deprecated at some point!
 	s, err := h.r.SessionPersister().GetSession(r.Context(), id, ExpandDefault)
@@ -1047,6 +1073,9 @@ type CodeExchangeResponse struct {
 //	  404: errorGeneric
 //	  410: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) exchangeCode(w http.ResponseWriter, r *http.Request) {
 	var (
 		ctx          = r.Context()

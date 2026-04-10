@@ -26,6 +26,9 @@ import (
 	"github.com/ory/kratos/x/nosurfx"
 	"github.com/ory/kratos/x/redir"
 	"github.com/ory/nosurf"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/httpx"
+	"github.com/ory/x/logrusx"
 	"github.com/ory/x/otelx"
 	"github.com/ory/x/sqlcon"
 	"github.com/ory/x/urlx"
@@ -48,9 +51,9 @@ func ContinuityKey(id string) string {
 type (
 	handlerDependencies interface {
 		nosurfx.CSRFProvider
-		x.WriterProvider
-		x.LoggingProvider
-		x.TracingProvider
+		httpx.WriterProvider
+		logrusx.Provider
+		otelx.Provider
 
 		config.Provider
 
@@ -84,11 +87,9 @@ type (
 	}
 )
 
-func NewHandler(d handlerDependencies) *Handler {
-	return &Handler{d: d, csrf: nosurf.Token}
-}
+func NewHandler(d handlerDependencies) *Handler { return &Handler{d: d, csrf: nosurf.Token} }
 
-func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
+func (h *Handler) RegisterPublicRoutes(public *httprouterx.RouterPublic) {
 	h.d.CSRFHandler().IgnorePath(RouteInitAPIFlow)
 	h.d.CSRFHandler().IgnorePath(RouteSubmitFlow)
 
@@ -113,7 +114,7 @@ func (h *Handler) RegisterPublicRoutes(public *x.RouterPublic) {
 	public.GET(RouteSubmitFlow, h.d.SessionHandler().IsAuthenticated(h.updateSettingsFlow, OnUnauthenticated(h.d)))
 }
 
-func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
+func (h *Handler) RegisterAdminRoutes(admin *httprouterx.RouterAdmin) {
 	admin.GET(RouteInitBrowserFlow, redir.RedirectToPublicRoute(h.d))
 
 	admin.GET(RouteInitAPIFlow, redir.RedirectToPublicRoute(h.d))
@@ -123,7 +124,7 @@ func (h *Handler) RegisterAdminRoutes(admin *x.RouterAdmin) {
 	admin.GET(RouteSubmitFlow, redir.RedirectToPublicRoute(h.d))
 }
 
-func (h *Handler) NewFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, i *identity.Identity, ft flow.Type) (_ *Flow, err error) {
+func (h *Handler) NewFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, i *identity.Identity, s *session.Session, ft flow.Type) (_ *Flow, err error) {
 	ctx, span := h.d.Tracer(ctx).Tracer().Start(ctx, "selfservice.flow.settings.Handler.NewFlow")
 	defer otelx.End(span, &err)
 
@@ -132,7 +133,7 @@ func (h *Handler) NewFlow(ctx context.Context, w http.ResponseWriter, r *http.Re
 		return nil, err
 	}
 
-	if err := h.d.SettingsHookExecutor().PreSettingsHook(ctx, w, r, f); err != nil {
+	if err := h.d.SettingsHookExecutor().PreSettingsHook(ctx, w, r, f, s); err != nil {
 		return nil, err
 	}
 
@@ -162,8 +163,8 @@ func (h *Handler) NewFlow(ctx context.Context, w http.ResponseWriter, r *http.Re
 	return f, nil
 }
 
-func (h *Handler) FromOldFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, i *identity.Identity, of Flow) (*Flow, error) {
-	nf, err := h.NewFlow(ctx, w, r, i, of.Type)
+func (h *Handler) FromOldFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, i *identity.Identity, s *session.Session, of Flow) (*Flow, error) {
+	nf, err := h.NewFlow(ctx, w, r, i, s, of.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +219,9 @@ type createNativeSettingsFlow struct {
 //		  200: settingsFlow
 //		  400: errorGeneric
 //		  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) createNativeSettingsFlow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	s, err := h.d.SessionManager().FetchFromRequestContext(ctx, r)
@@ -231,7 +235,7 @@ func (h *Handler) createNativeSettingsFlow(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	f, err := h.NewFlow(ctx, w, r, s.Identity, flow.TypeAPI)
+	f, err := h.NewFlow(ctx, w, r, s.Identity, s, flow.TypeAPI)
 	if err != nil {
 		h.d.Writer().WriteError(w, r, err)
 		return
@@ -302,6 +306,9 @@ type createBrowserSettingsFlow struct {
 //	  401: errorGeneric
 //	  403: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-medium
 func (h *Handler) createBrowserSettingsFlow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	s, err := h.d.SessionManager().FetchFromRequestContext(ctx, r)
@@ -317,11 +324,11 @@ func (h *Handler) createBrowserSettingsFlow(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := h.d.SessionManager().DoesSessionSatisfy(ctx, s, h.d.Config().SelfServiceSettingsRequiredAAL(ctx), managerOptions...); err != nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, nil, err)
 		return
 	}
 
-	f, err := h.NewFlow(ctx, w, r, s.Identity, flow.TypeBrowser)
+	f, err := h.NewFlow(ctx, w, r, s.Identity, s, flow.TypeBrowser)
 	if err != nil {
 		h.d.SelfServiceErrorManager().Forward(ctx, w, r, err)
 		return
@@ -401,6 +408,9 @@ type getSettingsFlow struct {
 //	  404: errorGeneric
 //	  410: errorGeneric
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-low
 func (h *Handler) getSettingsFlow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rid := x.ParseUUID(r.URL.Query().Get("id"))
@@ -563,6 +573,9 @@ type updateSettingsFlowBody struct{}
 //	  410: errorGeneric
 //	  422: errorBrowserLocationChangeRequired
 //	  default: errorGeneric
+//
+//	Extensions:
+//	  x-ory-ratelimit-bucket: kratos-public-high
 func (h *Handler) updateSettingsFlow(w http.ResponseWriter, r *http.Request) {
 	var (
 		err error
@@ -574,33 +587,33 @@ func (h *Handler) updateSettingsFlow(w http.ResponseWriter, r *http.Request) {
 
 	rid, err := GetFlowID(r)
 	if err != nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, nil, err)
 		return
 	}
 
 	f, err := h.d.SettingsFlowPersister().GetSettingsFlow(ctx, rid)
 	if errors.Is(err, sqlcon.ErrNoRows) {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, errors.WithStack(herodot.ErrNotFound.WithReasonf("The settings request could not be found. Please restart the flow.")))
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, nil, errors.WithStack(herodot.ErrNotFound.WithReasonf("The settings request could not be found. Please restart the flow.")))
 		return
 	} else if err != nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, nil, nil, nil, err)
 		return
 	}
 
 	ss, err := h.d.SessionManager().FetchFromRequestContext(ctx, r)
 	if err != nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, nil, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, nil, nil, err)
 		return
 	}
 
 	requestURL := x.RequestURL(r).String()
 	if err := h.d.SessionManager().DoesSessionSatisfy(ctx, ss, h.d.Config().SelfServiceSettingsRequiredAAL(ctx), session.WithRequestURL(requestURL)); err != nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, nil, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, nil, nil, err)
 		return
 	}
 
 	if err := f.Valid(ss); err != nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, ss, err)
 		return
 	}
 
@@ -613,7 +626,7 @@ func (h *Handler) updateSettingsFlow(w http.ResponseWriter, r *http.Request) {
 		} else if errors.Is(err, flow.ErrCompletedByStrategy) {
 			return
 		} else if err != nil {
-			h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, strat.NodeGroup(), f, ss.Identity, err)
+			h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, strat.NodeGroup(), f, ss.Identity, ss, err)
 			return
 		}
 
@@ -623,19 +636,19 @@ func (h *Handler) updateSettingsFlow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if updateContext == nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, errors.WithStack(schema.NewNoSettingsStrategyResponsible()))
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, ss, errors.WithStack(schema.NewNoSettingsStrategyResponsible()))
 		return
 	}
 
 	i, err := updateContext.GetIdentityToUpdate()
 	if err != nil {
 		// An identity to update must always be present.
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, ss, err)
 		return
 	}
 
 	if err := h.d.SettingsHookExecutor().PostSettingsHook(ctx, w, r, s, updateContext, i); err != nil {
-		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, err)
+		h.d.SettingsFlowErrorHandler().WriteFlowError(ctx, w, r, node.DefaultGroup, f, ss.Identity, ss, err)
 		return
 	}
 }

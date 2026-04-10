@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/ory/kratos/x/redir"
 
 	"github.com/ory/pop/v6"
@@ -20,6 +22,7 @@ import (
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/ui/container"
 	"github.com/ory/kratos/x"
+	"github.com/ory/x/otelx/semconv"
 	"github.com/ory/x/sqlxx"
 	"github.com/ory/x/urlx"
 )
@@ -113,7 +116,7 @@ type Flow struct {
 
 var _ flow.Flow = (*Flow)(nil)
 
-func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategy Strategy, ft flow.Type) (*Flow, error) {
+func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategies Strategies, ft flow.Type) (*Flow, error) {
 	now := time.Now().UTC()
 	id := x.NewUUID()
 
@@ -132,6 +135,8 @@ func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Reques
 	state := flow.StateChooseMethod
 	if conf.ChooseRecoveryAddress(r.Context()) {
 		state = flow.StateRecoveryAwaitingAddress
+	} else {
+		trace.SpanFromContext(r.Context()).AddEvent(semconv.NewDeprecatedFeatureUsedEvent(r.Context(), "legacy_recovery_flow"))
 	}
 
 	f := &Flow{
@@ -148,8 +153,10 @@ func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Reques
 		Type:      ft,
 	}
 
-	if strategy != nil {
-		f.Active = sqlxx.NullString(strategy.NodeGroup())
+	for _, strategy := range strategies {
+		if strategy.IsPrimary() {
+			f.Active = sqlxx.NullString(strategy.NodeGroup())
+		}
 		if err := strategy.PopulateRecoveryMethod(r, f); err != nil {
 			return nil, err
 		}
@@ -158,13 +165,13 @@ func NewFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Reques
 	return f, nil
 }
 
-func FromOldFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategy Strategy, of Flow) (*Flow, error) {
+func FromOldFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Request, strategies Strategies, of Flow) (*Flow, error) {
 	f := of.Type
 	// Using the same flow in the recovery/verification context can lead to using API flow in a verification/recovery email
 	if of.Type == flow.TypeAPI && of.Active.String() == string(RecoveryStrategyLink) {
 		f = flow.TypeBrowser
 	}
-	nf, err := NewFlow(conf, exp, csrf, r, strategy, f)
+	nf, err := NewFlow(conf, exp, csrf, r, strategies, f)
 	if err != nil {
 		return nil, err
 	}
@@ -175,11 +182,11 @@ func FromOldFlow(conf *config.Config, exp time.Duration, csrf string, r *http.Re
 
 func (f *Flow) GetType() flow.Type                   { return f.Type }
 func (f *Flow) GetRequestURL() string                { return f.RequestURL }
-func (_ Flow) TableName() string                     { return "selfservice_recovery_flows" }
+func (Flow) TableName() string                       { return "selfservice_recovery_flows" }
 func (f Flow) GetID() uuid.UUID                      { return f.ID }
 func (f *Flow) GetUI() *container.Container          { return f.UI }
 func (f *Flow) GetState() State                      { return f.State }
-func (_ *Flow) GetFlowName() flow.FlowName           { return flow.RecoveryFlow }
+func (Flow) GetFlowName() flow.FlowName              { return flow.RecoveryFlow }
 func (f *Flow) SetState(state State)                 { f.State = state }
 func (f *Flow) GetTransientPayload() json.RawMessage { return f.TransientPayload }
 
