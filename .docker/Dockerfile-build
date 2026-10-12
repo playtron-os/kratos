@@ -31,8 +31,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build go build -tags sqlite \
 #########################
 FROM golang:1.22 AS runner
 
-COPY --from=builder --chown=nonroot:nonroot /var/lib/sqlite /var/lib/sqlite
-COPY --from=builder --chown=nonroot:nonroot /usr/bin/kratos /usr/bin/kratos
+COPY --from=builder /var/lib/sqlite /var/lib/sqlite
+COPY --from=builder /usr/bin/kratos /usr/bin/kratos
 
 VOLUME /var/lib/sqlite
 
