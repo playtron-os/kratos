@@ -337,6 +337,6 @@ context("OpenID Provider - change between flows", () => {
     // Playtron: back in the initial OAuth2 login flow, Kratos doesn't ask the
     // user to sign in again (selfservice/flow/login/handler.go), so the
     // recovered session goes straight to the consent screen.
-    doConsent(["code_recovery"])
+    doConsent(["code_recovery", "oidc"])
   })
 })
