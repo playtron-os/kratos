@@ -828,8 +828,10 @@ func TestFlowLifecycle(t *testing.T) {
 			})
 
 			t.Run("case=oauth2 flow init succeeds", func(t *testing.T) {
+				// Playtron never asks a signed-in user for their password again, even when Hydra cannot skip the
+				// login: the session completes the OAuth2 login straight away.
 				res, _ := initAuthenticatedFlow(t, url.Values{"login_challenge": {hydra.FakeValidLoginChallenge}}, false)
-				require.Contains(t, res.Request.URL.String(), loginTS.URL)
+				require.Equal(t, hydra.FakePostLoginURL, res.Request.URL.String())
 			})
 
 			t.Run("case=oauth2 flow init adds oauth2_login_request field", func(t *testing.T) {
