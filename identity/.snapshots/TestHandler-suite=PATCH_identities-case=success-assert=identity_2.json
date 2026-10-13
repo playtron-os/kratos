@@ -12,6 +12,7 @@
   "metadata_public": {
     "public-2": "public"
   },
+  "mfa_required": false,
   "organization_id": null,
   "schema_id": "multiple_emails",
   "state": "active",

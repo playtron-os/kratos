@@ -40,6 +40,7 @@
       "updated_at": "0001-01-01T00:00:00Z"
     }
   ],
+  "mfa_required": false,
   "metadata_public": {
     "public": "data"
   },
