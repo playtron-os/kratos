@@ -848,3 +848,7 @@ func (h *AcceptWrongSubject) AcceptLoginRequest(ctx context.Context, params hydr
 func (h *AcceptWrongSubject) GetLoginRequest(ctx context.Context, loginChallenge string) (*hydraclientgo.OAuth2LoginRequest, error) {
 	return h.h.GetLoginRequest(ctx, loginChallenge)
 }
+
+func (h *AcceptWrongSubject) ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64, nonce string) (string, error) {
+	return h.h.ExchangeTokenForHydraJWT(ctx, subject, clientID, expiresInSeconds, nonce)
+}
