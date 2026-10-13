@@ -6,6 +6,7 @@
   "traits": {
     "email": "foobar@ory.sh"
   },
+  "mfa_required": false,
   "metadata_public": null,
   "metadata_admin": null,
   "created_at": "2013-10-07T08:23:19Z",

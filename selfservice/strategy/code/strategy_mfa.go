@@ -50,15 +50,16 @@ func FindCodeAddressCandidates(i *identity.Identity, fallbackEnabled bool) (resu
 			return FindAllIdentifiers(i), true, nil
 		}
 
-		addressMap := make(map[Address]struct{})
+		seen := make(map[Address]struct{})
 		for _, addr := range conf.Addresses {
+			a := Address{Via: addr.Channel, To: addr.Address}
 			if len(addr.Address) == 0 || len(addr.Channel) == 0 {
 				continue
+			} else if _, ok := seen[a]; ok {
+				continue
 			}
-			addressMap[Address{Via: addr.Channel, To: addr.Address}] = struct{}{}
-		}
-		for addr := range addressMap {
-			result = append(result, addr)
+			seen[a] = struct{}{}
+			result = append(result, a)
 		}
 		return result, true, nil
 	}

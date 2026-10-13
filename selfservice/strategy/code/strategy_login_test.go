@@ -235,6 +235,16 @@ func TestLoginCodeStrategy(t *testing.T) {
 		return s
 	}
 
+	// Native clients ask for the code themselves: login.Handler skips the fast path for API flows, as shipped Grids
+	// expect. This asks the way they do.
+	sendNativeAAL2Code := func(ctx context.Context, t *testing.T, s *state, address string) *oryClient.LoginFlow {
+		t.Helper()
+		submitLogin(ctx, t, s, ApiTypeNative, func(v *url.Values) { v.Set("address", address) }, false, nil)
+		f, _, err := testhelpers.NewSDKCustomClient(s.testServer, s.client).FrontendAPI.GetLoginFlow(ctx).Id(s.flowID).Execute()
+		require.NoError(t, err)
+		return f
+	}
+
 	for _, tc := range []struct {
 		d       string
 		apiType ApiType
@@ -808,17 +818,11 @@ func TestLoginCodeStrategy(t *testing.T) {
 						var f *oryClient.LoginFlow
 						if tc.apiType == ApiTypeNative {
 							cl = testhelpers.NewHTTPClientWithIdentitySessionToken(ctx, t, reg, user)
-							f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email"), testhelpers.ExpectActive("code"))
+							f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email"))
 						} else {
 							cl = testhelpers.NewHTTPClientWithIdentitySessionCookieLocalhost(ctx, t, reg, user)
 							f = testhelpers.InitializeLoginFlowViaBrowserCtx(t.Context(), t, cl, public, false, tc.apiType == ApiTypeSPA, false, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email"), testhelpers.ExpectActive("code"))
 						}
-
-						body, err := json.Marshal(f)
-						require.NoError(t, err)
-						require.Len(t, gjson.GetBytes(body, "ui.nodes.#(group==code)").Array(), 1, "%s", body)
-						require.Len(t, gjson.GetBytes(body, "ui.messages").Array(), 1, "%s", body)
-						require.EqualValues(t, text.InfoSelfServiceLoginCodeSent, gjson.GetBytes(body, "ui.messages.0.id").Int(), "%s", body)
 
 						s := &state{
 							flowID:        f.GetId(),
@@ -827,6 +831,15 @@ func TestLoginCodeStrategy(t *testing.T) {
 							testServer:    public,
 							identityEmail: gjson.Get(user.Traits.String(), "email").String(),
 						}
+						if tc.apiType == ApiTypeNative {
+							f = sendNativeAAL2Code(ctx, t, s, s.identityEmail)
+						}
+
+						body, err := json.Marshal(f)
+						require.NoError(t, err)
+						require.Len(t, gjson.GetBytes(body, "ui.nodes.#(group==code)").Array(), 1, "%s", body)
+						require.Len(t, gjson.GetBytes(body, "ui.messages").Array(), 1, "%s", body)
+						require.EqualValues(t, text.InfoSelfServiceLoginCodeSent, gjson.GetBytes(body, "ui.messages.0.id").Int(), "%s", body)
 
 						message := testhelpers.CourierExpectMessage(ctx, t, reg, s.identityEmail, "Use code")
 						assert.Contains(t, message.Body, "Login to your account with the following code")
@@ -1095,7 +1108,8 @@ func TestLoginCodeStrategy(t *testing.T) {
 					var f *oryClient.LoginFlow
 					if tc.apiType == ApiTypeNative {
 						cl = testhelpers.NewHTTPClientWithIdentitySessionToken(ctx, t, reg, identity)
-						f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"), testhelpers.ExpectActive("code"))
+						f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"))
+						f = sendNativeAAL2Code(ctx, t, &state{flowID: f.GetId(), client: cl, testServer: public}, fixedEmail)
 					} else {
 						cl = testhelpers.NewHTTPClientWithIdentitySessionCookieLocalhost(ctx, t, reg, identity)
 						f = testhelpers.InitializeLoginFlowViaBrowserCtx(t.Context(), t, cl, public, false, tc.apiType == ApiTypeSPA, false, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"), testhelpers.ExpectActive("code"))
@@ -1145,7 +1159,8 @@ func TestLoginCodeStrategy(t *testing.T) {
 						var f *oryClient.LoginFlow
 						if tc.apiType == ApiTypeNative {
 							cl = testhelpers.NewHTTPClientWithIdentitySessionToken(ctx, t, reg, identity)
-							f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"), testhelpers.ExpectActive("code"))
+							f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"))
+							f = sendNativeAAL2Code(ctx, t, &state{flowID: f.GetId(), client: cl, testServer: public}, fixedEmail)
 						} else {
 							cl = testhelpers.NewHTTPClientWithIdentitySessionCookieLocalhost(ctx, t, reg, identity)
 							f = testhelpers.InitializeLoginFlowViaBrowserCtx(t.Context(), t, cl, public, false, tc.apiType == ApiTypeSPA, false, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"), testhelpers.ExpectActive("code"))
@@ -1169,7 +1184,8 @@ func TestLoginCodeStrategy(t *testing.T) {
 						var f *oryClient.LoginFlow
 						if tc.apiType == ApiTypeNative {
 							cl = testhelpers.NewHTTPClientWithIdentitySessionToken(ctx, t, reg, identity)
-							f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"), testhelpers.ExpectActive("code"))
+							f = testhelpers.InitializeLoginFlowViaAPICtx(t.Context(), t, cl, public, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"))
+							f = sendNativeAAL2Code(ctx, t, &state{flowID: f.GetId(), client: cl, testServer: public}, fixedEmail)
 						} else {
 							cl = testhelpers.NewHTTPClientWithIdentitySessionCookieLocalhost(ctx, t, reg, identity)
 							f = testhelpers.InitializeLoginFlowViaBrowserCtx(t.Context(), t, cl, public, false, tc.apiType == ApiTypeSPA, false, false, testhelpers.InitFlowWithAAL("aal2"), testhelpers.InitFlowWithVia("email_1"), testhelpers.ExpectActive("code"))

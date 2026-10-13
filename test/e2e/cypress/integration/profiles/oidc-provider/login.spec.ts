@@ -268,12 +268,10 @@ context("OpenID Provider - change between flows", () => {
     cy.get('input[name="password"]').clear().type(newPassword)
     cy.get('button[value="password"]').click()
 
-    // since we aren't skipping the consent, Kratos will ask us to login again
-    cy.get('input[name="password"]').clear().type(newPassword)
-    cy.get('button[value="password"]').click()
-
-    // we should now end up on the consent screen
-    doConsent(["code_recovery", "password"])
+    // Playtron: Kratos doesn't ask for the password again in an OAuth2 login
+    // (selfservice/flow/login/handler.go), so the recovered session goes
+    // straight to the consent screen.
+    doConsent(["code_recovery"])
   })
 
   it("switch to recovery flow with oidc link", () => {
@@ -336,14 +334,9 @@ context("OpenID Provider - change between flows", () => {
     cy.location("pathname").should("eq", "/login")
     fakeOidcFlow(identity)
 
-    // it should return us back to the initial OAauth2 login flow
-    // sign in through the 'fake' oidc provider
-    cy.get("button[type='submit'][value='google']").click()
-
-    // login again at the 'fake' oidc provider
-    fakeOidcFlow(identity)
-
-    // complete the consent screen
-    doConsent(["oidc"])
+    // Playtron: back in the initial OAuth2 login flow, Kratos doesn't ask the
+    // user to sign in again (selfservice/flow/login/handler.go), so the
+    // recovered session goes straight to the consent screen.
+    doConsent(["code_recovery", "oidc"])
   })
 })

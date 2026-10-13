@@ -376,11 +376,10 @@ func TestOAuth2Provider(t *testing.T) {
 			tokens: 2,
 		}, clientAS)
 
+		// Playtron: the Kratos session from the first flow completes the login without asking for the password again.
 		expected = []callTrace{
 			LoginUI,
 			LoginWithOAuth2LoginChallenge,
-			LoginUI,
-			LoginWithFlowID,
 			Consent,
 			ConsentWithChallenge,
 			ConsentAccept,
@@ -486,7 +485,8 @@ func TestOAuth2Provider(t *testing.T) {
 		require.ElementsMatch(t, expected, ct)
 	})
 
-	t.Run("should prompt login even with session with OAuth flow", func(t *testing.T) {
+	// Playtron: upstream prompts for the password again here; the fork lets the existing session complete the login.
+	t.Run("should not prompt login again with a session in an OAuth flow", func(t *testing.T) {
 		browserClient := testhelpers.NewClientWithCookieJar(t, nil, nil)
 
 		identifier, pwd := x.NewUUID().String(), "password"
@@ -547,8 +547,6 @@ func TestOAuth2Provider(t *testing.T) {
 			LoginWithFlowID,
 			LoginUI,
 			LoginWithOAuth2LoginChallenge,
-			LoginUI,
-			LoginWithFlowID,
 			Consent,
 			ConsentWithChallenge,
 			ConsentAccept,
@@ -817,13 +815,12 @@ func TestOAuth2Provider(t *testing.T) {
 			tokens: 1,
 		}, clientAS)
 
+		// Playtron: on the second attempt the fork accepts with the existing session instead of asking for the password.
 		expected := []callTrace{
 			LoginUI,
 			LoginWithOAuth2LoginChallenge, // skip=true, wrong subject → prompt=login redirect
 			LoginUI,
 			LoginWithOAuth2LoginChallenge, // skip=false, f.Subject="" → guard bypassed, wrong subject accepted
-			LoginUI,
-			LoginWithFlowID,
 			Consent,
 			ConsentWithChallenge,
 			ConsentAccept,
@@ -847,4 +844,8 @@ func (h *AcceptWrongSubject) AcceptLoginRequest(ctx context.Context, params hydr
 
 func (h *AcceptWrongSubject) GetLoginRequest(ctx context.Context, loginChallenge string) (*hydraclientgo.OAuth2LoginRequest, error) {
 	return h.h.GetLoginRequest(ctx, loginChallenge)
+}
+
+func (h *AcceptWrongSubject) ExchangeTokenForHydraJWT(ctx context.Context, subject, clientID string, expiresInSeconds int64, nonce string) (string, error) {
+	return h.h.ExchangeTokenForHydraJWT(ctx, subject, clientID, expiresInSeconds, nonce)
 }

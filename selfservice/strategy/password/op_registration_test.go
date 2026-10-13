@@ -361,7 +361,7 @@ func TestOAuth2ProviderRegistration(t *testing.T) {
 		require.ElementsMatch(t, expected, ct, "expected the call trace to match")
 	})
 
-	t.Run("case=registration with session should redirect to login to re-authenticate and to consent", func(t *testing.T) {
+	t.Run("case=registration with session should go straight to consent", func(t *testing.T) {
 		// this test registers a new account which sets a session
 		// we then initiate a new OAuth2 flow which should redirect us to the registration page
 		// the registration page does a session validation and retrieves the loginRequest from Hydra
@@ -434,11 +434,10 @@ func TestOAuth2ProviderRegistration(t *testing.T) {
 			tokens: 1,
 		}, clientAS)
 
+		// Playtron: the session goes straight to consent; the fork never asks for the password again.
 		expected := []callTrace{
 			RegistrationUI,
 			RegistrationWithOAuth2LoginChallenge,
-			LoginUI,
-			LoginWithFlowID,
 			Consent,
 			ConsentWithChallenge,
 			ConsentAccept,
@@ -448,7 +447,7 @@ func TestOAuth2ProviderRegistration(t *testing.T) {
 		require.ElementsMatch(t, expected, ct, "expected the call trace to match")
 	})
 
-	t.Run("case=registration should redirect to login if session exists and skip=false", func(t *testing.T) {
+	t.Run("case=registration with a session and skip=false should go straight to consent", func(t *testing.T) {
 		// we dont want to skip the consent page here
 		// we want the registration page to redirect to the login page
 		// since we have a session but do not skip the consent page
@@ -546,11 +545,10 @@ func TestOAuth2ProviderRegistration(t *testing.T) {
 			tokens: 1,
 		}, clientAS)
 
+		// Playtron: the session goes straight to consent; the fork never asks for the password again.
 		expected = append(expected,
 			RegistrationUI,
 			RegistrationWithOAuth2LoginChallenge,
-			LoginUI,
-			LoginWithFlowID,
 			Consent,
 			ConsentWithChallenge,
 			ConsentAccept,
@@ -891,9 +889,7 @@ func TestOAuth2ProviderRegistration(t *testing.T) {
 			RegistrationUI,
 			RegistrationWithFlowID,
 			RegistrationUI,
-			RegistrationWithOAuth2LoginChallenge, // skip=false, f.Subject="" → guard bypassed, new subject accepted
-			LoginUI,
-			LoginWithFlowID,
+			RegistrationWithOAuth2LoginChallenge, // skip=false, f.Subject="" → guard bypassed, new subject accepted; Playtron skips re-entering the password
 			Consent,
 			ConsentWithChallenge,
 			ConsentAccept,

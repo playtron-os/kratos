@@ -6,6 +6,7 @@
   "traits": {
     "email": "bazbarbarfoo@ory.sh"
   },
+  "mfa_required": false,
   "metadata_public": {
     "foo": "bar"
   },

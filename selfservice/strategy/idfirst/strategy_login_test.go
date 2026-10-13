@@ -408,7 +408,8 @@ func TestCompleteLogin(t *testing.T) {
 	})
 
 	t.Run("should pass with real request", func(t *testing.T) {
-		identifier, pwd := x.NewUUID().String(), "password"
+		// A real address: Playtron adds email-code MFA for it, which saves the identity through the schema.
+		identifier, pwd := x.NewUUID().String()+"@ory.sh", "password"
 		createIdentity(t.Context(), reg, t, identifier, true, false)
 
 		firstValues := func(v url.Values) {

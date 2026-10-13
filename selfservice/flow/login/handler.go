@@ -304,7 +304,11 @@ preLoginHook:
 
 	// If the strategy supports fast login, we can attempt a fast path.
 	// We execute the fast login here because it requires the flow to be created first.
+	// Not for API flows: shipped Grids ask for the code themselves, and the code they get then replaces this one.
 	for _, s := range loginStrategies {
+		if f.Type == flow.TypeAPI {
+			break
+		}
 		if strategy, ok := s.(FastLoginStrategy); ok {
 			if err := strategy.FastLogin2FA(w, r, f, sess); errors.Is(err, flow.ErrStrategyNotResponsible) {
 				continue
