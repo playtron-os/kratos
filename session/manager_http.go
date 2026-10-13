@@ -313,25 +313,31 @@ func (s *ManagerHTTP) DoesSessionSatisfy(ctx context.Context, sess *Session, req
 		return nil
 	}
 
-	// PLAYTRON: Auto add MFA code method if not existing
-	// The identity is not always expanded; the session's IdentityID always is.
+	// PLAYTRON: Auto add MFA code method if not existing, and honour mfa_required. Both need the identity, which is
+	// not always expanded; a session that was never stored has neither it nor an IdentityID.
 	identityID := sess.IdentityID
 	if sess.Identity != nil {
 		identityID = sess.Identity.ID
 	}
-	if updatedIdentity, err := AutoAddMFACodeMethod(ctx, s.r, identityID, requestedAAL); err != nil {
-		return err
-	} else if updatedIdentity != nil {
-		sess.Identity = updatedIdentity
+	if !identityID.IsNil() {
+		if updatedIdentity, err := AutoAddMFACodeMethod(ctx, s.r, identityID, requestedAAL); err != nil {
+			return err
+		} else if updatedIdentity != nil {
+			sess.Identity = updatedIdentity
+		}
+		if requestedAAL != config.HighestAvailableAAL && sess.Identity == nil {
+			if sess.Identity, err = s.r.IdentityPool().GetIdentity(ctx, identityID, identity.ExpandNothing); err != nil {
+				return err
+			}
+		}
+	}
+	if requestedAAL != config.HighestAvailableAAL && sess.Identity != nil && sess.Identity.MfaRequired {
+		requestedAAL = config.HighestAvailableAAL
 	}
 
 	managerOpts := &options{}
 	for _, o := range opts {
 		o(managerOpts)
-	}
-
-	if requestedAAL != config.HighestAvailableAAL && sess.Identity.MfaRequired {
-		requestedAAL = config.HighestAvailableAAL
 	}
 
 	loginURL := urlx.AppendPaths(s.r.Config().SelfPublicURL(ctx), "/self-service/login/browser")
