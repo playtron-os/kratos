@@ -16,6 +16,7 @@ import (
 	"github.com/ory/herodot"
 	"github.com/ory/kratos/driver/config"
 	"github.com/ory/kratos/identity"
+	"github.com/ory/kratos/x"
 	"github.com/ory/x/logrusx"
 )
 
@@ -55,7 +56,7 @@ func AutoAddMFACodeMethod(ctx context.Context, deps MFAAutoAdditionDependencies,
 	}
 
 	// Extract email from traits. Without one there is nowhere to send a code, so the identity keeps its own methods.
-	email := gjson.GetBytes(i.Traits, "email").String()
+	email := x.NormalizeEmailIdentifier(gjson.GetBytes(i.Traits, "email").String())
 	if email == "" {
 		return nil, nil
 	}
@@ -73,8 +74,9 @@ func AutoAddMFACodeMethod(ctx context.Context, deps MFAAutoAdditionDependencies,
 		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to encode code credentials to JSON: %s", err))
 	}
 
-	// Add the credentials to the identity
-	i.UpsertCredentialsConfig(identity.CredentialsTypeCodeAuth, co, 0)
+	// Add the credentials to the identity. Saving sets the identifier only if the schema makes the email a code
+	// identifier; without one, the code step could not find this credential.
+	i.UpsertCredentialsConfig(identity.CredentialsTypeCodeAuth, co, 0, identity.WithAdditionalIdentifier(email))
 
 	// Update the identity in the database
 	err = deps.IdentityManager().Update(ctx, i, identity.ManagerAllowWriteProtectedTraits)
