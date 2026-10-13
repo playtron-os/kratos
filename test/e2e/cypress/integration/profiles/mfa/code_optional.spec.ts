@@ -42,7 +42,11 @@ context("2FA code with optional field", () => {
           cy.deleteMail()
         })
 
-        it("should not show 2FA page during login when optionalMfaEmail field is empty", () => {
+        // Playtron: Kratos adds email-code MFA for the account's email once
+        // highest_available is requested (session/helper.go
+        // AutoAddMFACodeMethod), so the user gets a code even without
+        // optionalMfaEmail.
+        it("should show 2FA page with a code to the account email when optionalMfaEmail field is empty", () => {
           // Log out first
           cy.clearAllCookies()
 
@@ -52,13 +56,22 @@ context("2FA code with optional field", () => {
           cy.get('input[name="password"]').type(password)
           cy.get('button[name="method"][value="password"]').click()
 
-          // Should be logged in directly without 2FA page
-          cy.getSession({
-            expectAal: "aal1",
-            expectMethods: ["password"],
+          // Should see the code input field
+          cy.location("pathname").should("contain", "/login")
+          cy.get("input[name='code']").should("be.visible")
+
+          // Get the code from the account email and enter it
+          cy.getLoginCodeFromEmail(email).then((code) => {
+            cy.get("input[name='code']").type(code)
+            cy.contains("Continue").click()
           })
 
-          // Verify we're not asked for 2FA when visiting settings
+          cy.getSession({
+            expectAal: "aal2",
+            expectMethods: ["password", "code"],
+          })
+
+          // Settings needs nothing more
           cy.visit(settings)
           cy.location("pathname").should("contain", "/settings")
           cy.get('input[name="traits.email"]').should("contain.value", email)

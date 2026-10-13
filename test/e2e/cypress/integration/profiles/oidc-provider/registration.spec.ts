@@ -66,6 +66,10 @@ context("OpenID Provider", () => {
     })
   })
 
+  // Playtron: Kratos never asks for the password again in an OAuth2 login
+  // (selfservice/flow/login/handler.go), so with a session the registration
+  // page accepts the login challenge straight away, whether or not Hydra can
+  // skip the login.
   it("registration with session, skip=false and skip=true", () => {
     const email = gen.email()
     const password = gen.password()
@@ -80,27 +84,22 @@ context("OpenID Provider", () => {
       },
     })
 
-    const url = oauth2.getDefaultAuthorizeURL(client)
-
-    cy.request(url).then((res) => {
-      const lastResp = res.allRequestResponses[1]["Request URL"]
-      const login_challenge = new URL(lastResp).searchParams.get(
+    // Only Hydra's redirect: following it into the login UI would already
+    // accept the challenge with the session.
+    cy.request({
+      url: oauth2.getDefaultAuthorizeURL(client),
+      followRedirect: false,
+    }).then((res) => {
+      expect(res.redirectedToUrl).to.include("login_challenge")
+      const login_challenge = new URL(res.redirectedToUrl).searchParams.get(
         "login_challenge",
       )
-      expect(login_challenge).to.not.be.null
       cy.visit(
         APP_URL +
           "/self-service/registration/browser?login_challenge=" +
           login_challenge,
       )
     })
-
-    cy.url().should("contain", "/login")
-    cy.get("[data-testid='login-flow']").should("exist")
-    cy.get("[data-testid='login-flow'] [name='password']").type(password)
-    cy.get(
-      "[data-testid='login-flow'] button[name='method'][value='password']",
-    ).click()
 
     // we want to skip the consent flow here
     // so we ask to remember the user
@@ -121,7 +120,7 @@ context("OpenID Provider", () => {
         decodeURIComponent(escape(window.atob(token.id_token.split(".")[1]))),
       )
       expect(idToken).to.have.property("amr")
-      expect(idToken.amr).to.deep.equal(["password", "password"])
+      expect(idToken.amr).to.deep.equal(["password"])
     })
 
     // use the hydra origin to make a new OAuth request from it
@@ -177,7 +176,7 @@ context("OpenID Provider", () => {
         decodeURIComponent(escape(window.atob(token.id_token.split(".")[1]))),
       )
       expect(idToken).to.have.property("amr")
-      expect(idToken.amr).to.deep.equal(["password", "password"])
+      expect(idToken.amr).to.deep.equal(["password"])
     })
   })
 })
