@@ -54,13 +54,13 @@ func AutoAddMFACodeMethod(ctx context.Context, deps MFAAutoAdditionDependencies,
 		return i, nil // Already has MFA code method
 	}
 
-	deps.Logger().Infof("Auto-adding MFA code method to identity %s because it does not have any", identityID)
-
-	// Extract email from traits
+	// Extract email from traits. Without one there is nowhere to send a code, so the identity keeps its own methods.
 	email := gjson.GetBytes(i.Traits, "email").String()
 	if email == "" {
-		return nil, errors.WithStack(herodot.ErrInternalServerError.WithReasonf("Unable to extract email from identity traits"))
+		return nil, nil
 	}
+
+	deps.Logger().Infof("Auto-adding MFA code method to identity %s because it does not have any", identityID)
 
 	// Create code credentials
 	cred := identity.CredentialsCode{
