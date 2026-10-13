@@ -315,6 +315,8 @@ jobs:
   docs-cli:
     runs-on: ubuntu-latest
     name: Build CLI docs
+    # Publishes to Ory's docs repository with Ory's token.
+    if: ${{ github.repository == 'ory/kratos' }}
     needs:
       - test
     steps:
