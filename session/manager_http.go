@@ -314,7 +314,12 @@ func (s *ManagerHTTP) DoesSessionSatisfy(ctx context.Context, sess *Session, req
 	}
 
 	// PLAYTRON: Auto add MFA code method if not existing
-	if updatedIdentity, err := AutoAddMFACodeMethod(ctx, s.r, sess.Identity.ID, requestedAAL); err != nil {
+	// The identity is not always expanded; the session's IdentityID always is.
+	identityID := sess.IdentityID
+	if sess.Identity != nil {
+		identityID = sess.Identity.ID
+	}
+	if updatedIdentity, err := AutoAddMFACodeMethod(ctx, s.r, identityID, requestedAAL); err != nil {
 		return err
 	} else if updatedIdentity != nil {
 		sess.Identity = updatedIdentity
