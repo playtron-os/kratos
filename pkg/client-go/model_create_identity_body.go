@@ -421,8 +421,6 @@ func (o CreateIdentityBody) ToMap() (map[string]interface{}, error) {
 		toSerialize["verifiable_addresses"] = o.VerifiableAddresses
 	}
 
-	toSerialize["mfa_required"] = true
-
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
 	}
