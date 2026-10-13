@@ -56,7 +56,9 @@ func send(code int) http.HandlerFunc {
 func TestSessionWhoAmI(t *testing.T) {
 	t.Parallel()
 
-	conf, reg := pkg.NewFastRegistryWithMocks(t)
+	// Playtron adds email-code MFA on the first highest_available check and saves the identity through its schema,
+	// which keeps the addresses only if the schema declares them, as Playtron's does.
+	conf, reg := pkg.NewFastRegistryWithMocks(t, configx.WithValues(testhelpers.DefaultIdentitySchemaConfig("file://./stub/identity.schema.json")))
 	ts, _, r, _ := testhelpers.NewKratosServerWithCSRFAndRouters(t, reg)
 	ctx := context.Background()
 
@@ -156,6 +158,7 @@ func TestSessionWhoAmI(t *testing.T) {
 
 	t.Run("case=http methods", func(t *testing.T) {
 		run := func(t *testing.T, cacheEnabled bool, maxAge time.Duration) {
+			conf.MustSet(ctx, config.ViperKeySessionWhoAmIAAL, config.HighestAvailableAAL)
 			conf.MustSet(ctx, config.ViperKeySessionWhoAmICaching, cacheEnabled)
 			conf.MustSet(ctx, config.ViperKeySessionWhoAmICachingMaxAge, maxAge)
 			client := testhelpers.NewClientWithCookies(t)
@@ -216,6 +219,12 @@ func TestSessionWhoAmI(t *testing.T) {
 					assert.NotEmpty(t, gjson.GetBytes(body, "identity.verifiable_addresses").String(), "%s", body)
 
 					assert.Equal(t, externalID, gjson.GetBytes(body, "identity.external_id").String(), "%s", body)
+
+					stored, err := reg.PrivilegedIdentityPool().GetIdentityConfidential(ctx, i.ID)
+					require.NoError(t, err)
+					code, ok := stored.GetCredentials(identity.CredentialsTypeCodeAuth)
+					require.True(t, ok, "Playtron adds email-code MFA")
+					assert.Contains(t, string(code.Config), email)
 				})
 			}
 		}
